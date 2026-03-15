@@ -181,6 +181,7 @@ def load_constants(data_path: str) -> dict:
             conn.execute(text("DELETE FROM ml_constants_heroes"))
             conn.commit()
 
+        df = df.drop_duplicates(subset=["hero_id"], keep="first")
         df.to_sql("ml_constants_heroes", engine, if_exists="append", index=False)
         result["heroes"] = len(df)
 
@@ -192,6 +193,7 @@ def load_constants(data_path: str) -> dict:
         available = [c for c in cols_to_keep.keys() if c in df.columns]
         df = df[available].copy()
         df.rename(columns=cols_to_keep, inplace=True)
+        df = df.drop_duplicates(subset=["item_id"], keep="first")
 
         with engine.connect() as conn:
             conn.execute(text("DELETE FROM ml_constants_items"))
@@ -221,6 +223,8 @@ def load_constants(data_path: str) -> dict:
             conn.execute(text("DELETE FROM ml_constants_abilities"))
             conn.commit()
 
+        if "ability_id" in df.columns:
+            df = df.drop_duplicates(subset=["ability_id"], keep="first")
         df.to_sql("ml_constants_abilities", engine, if_exists="append", index=False)
         result["abilities"] = len(df)
 
