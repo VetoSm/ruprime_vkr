@@ -2,4 +2,13 @@ archive-2/
 node_modules/
 .env
 __pycache__/
-
+*.pyc
+*.pyo
+.DS_Store
+.pytest_cache/
+*.sql
+notebooks/.ipynb_checkpoints/
+notebooks/features_comparison.png
+services/frontend/node_modules/
+/pgdata/
+*.jpg

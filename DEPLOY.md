@@ -1,201 +1,204 @@
 # Развёртывание Dota 2 Coach Platform на сервере
 
 Пошаговая инструкция: от чистой Ubuntu до работающего сайта с доменом и SSL.
+Код пушится напрямую с ПК на сервер через Git по SSH — без GitHub.
 
 ---
 
 ## Что нужно перед началом
 
 - Сервер с Ubuntu (22.04 или 24.04), минимум 4 GB RAM, 30 GB диска
-- Доменное имя (например `dota-coach.ru`), привязанное к IP сервера
-- SSL-сертификат (или используем бесплатный Let's Encrypt)
-- Проект в Git-репозитории (GitHub/GitLab)
+- Доменное имя (привязанное к IP сервера)
+- SSL-сертификат (или бесплатный Let's Encrypt)
 - SSH-доступ к серверу
 
 ---
 
-## Шаг 1. Подключиться к серверу
+## Часть 1. Подготовка сервера
 
-Открываем терминал на своём компьютере:
+### Шаг 1. Подключиться к серверу
 
 ```bash
 ssh root@IP_ВАШЕГО_СЕРВЕРА
 ```
 
-Если спрашивает `Are you sure you want to continue connecting?` — пишем `yes`.
+Если спрашивает `Are you sure?` — пишем `yes`.
 
-Если используете ключ:
-```bash
-ssh -i путь/к/ключу.pem root@IP_ВАШЕГО_СЕРВЕРА
-```
-
-После подключения вы увидите что-то вроде:
-```
-root@server:~#
-```
-
-Это значит вы на сервере. Все дальнейшие команды выполняются здесь.
-
----
-
-## Шаг 2. Обновить систему
+### Шаг 2. Обновить систему
 
 ```bash
 apt update && apt upgrade -y
 ```
 
-Ждём 1-3 минуты. Если спрашивает что-то — нажимаем Enter (оставляем по умолчанию).
-
----
-
-## Шаг 3. Установить Docker
+### Шаг 3. Установить Docker
 
 ```bash
-# Скачиваем и устанавливаем Docker одной командой
 curl -fsSL https://get.docker.com | sh
 
-# Проверяем что установилось
+# Проверяем
 docker --version
-# Должно показать: Docker version 28.x.x
-
 docker compose version
-# Должно показать: Docker Compose version v2.x.x
 ```
 
-Если `docker compose version` не работает — установите отдельно:
-```bash
-apt install docker-compose-plugin -y
-```
-
----
-
-## Шаг 4. Установить Git
+### Шаг 4. Установить Git
 
 ```bash
 apt install git -y
-
-# Проверяем
-git --version
-# Должно показать: git version 2.x.x
 ```
 
----
-
-## Шаг 5. Создать пользователя (не работать от root)
+### Шаг 5. Создать пользователя deploy
 
 ```bash
-# Создаём пользователя
 adduser deploy
-# Вводим пароль (запомните его!), остальные поля — Enter
+# Вводим пароль (запомните!), остальные поля — Enter
 
-# Даём права на Docker
 usermod -aG docker deploy
-
-# Даём права sudo
 usermod -aG sudo deploy
-
-# Переключаемся на нового пользователя
-su - deploy
 ```
 
-Теперь вы видите:
-```
-deploy@server:~$
-```
+### Шаг 6. Настроить SSH-ключ для deploy
 
----
+Чтобы с вашего ПК можно было подключаться к серверу как `deploy` и пушить код.
 
-## Шаг 6. Настроить SSH-ключ для Git
-
-Чтобы сервер мог скачивать код из вашего репозитория:
-
+**На вашем ПК** (НЕ на сервере):
 ```bash
-# Генерируем SSH-ключ
-ssh-keygen -t ed25519 -C "deploy@server"
-# Нажимаем Enter 3 раза (пустой пароль для ключа)
-
-# Показываем публичный ключ
+# Проверяем есть ли уже ключ
 cat ~/.ssh/id_ed25519.pub
 ```
 
-Скопируйте то, что показало (начинается с `ssh-ed25519 ...`).
+Если показывает `ssh-ed25519 ...` — ключ уже есть, копируем его.
+Если ошибка — создаём:
+```bash
+ssh-keygen -t ed25519
+# Нажимаем Enter 3 раза
+cat ~/.ssh/id_ed25519.pub
+# Копируем результат
+```
 
-**Идём в GitHub/GitLab:**
-- GitHub: Settings → SSH and GPG keys → New SSH key → вставляем ключ
-- GitLab: Preferences → SSH Keys → Add new key → вставляем ключ
+**На сервере** (от root):
+```bash
+# Переключаемся на deploy
+su - deploy
+
+# Создаём папку для ключей
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+
+# Вставляем публичный ключ с ПК
+nano ~/.ssh/authorized_keys
+# Вставляем скопированный ключ (ssh-ed25519 ...)
+# Ctrl+O, Enter, Ctrl+X
+
+chmod 600 ~/.ssh/authorized_keys
+```
+
+**Проверяем с ПК:**
+```bash
+ssh deploy@IP_СЕРВЕРА
+# Должно подключиться БЕЗ пароля
+```
 
 ---
 
-## Шаг 7. Клонировать проект
+## Часть 2. Настройка Git (ПК → Сервер напрямую)
+
+Код отправляется с вашего ПК прямо на сервер по SSH. Никакой GitHub.
+
+### Шаг 7. На сервере — создать Git-хранилище
 
 ```bash
-# Переходим в папку для проекта
-cd /opt
-sudo mkdir dota-coach
-sudo chown deploy:deploy dota-coach
-cd dota-coach
+ssh deploy@IP_СЕРВЕРА
 
-# Клонируем репозиторий (замените URL на свой!)
-git clone git@github.com:ВАШ_ЛОГИН/ВАШ_РЕПОЗИТОРИЙ.git .
+# Создаём "голый" репозиторий (хранилище для кода)
+mkdir -p /opt/dota-coach-repo.git
+cd /opt/dota-coach-repo.git
+git init --bare
+
+# Создаём рабочую папку
+mkdir -p /opt/dota-coach
 ```
 
-Обратите внимание на точку `.` в конце — это значит "клонировать в текущую папку".
+### Шаг 8. На ПК — настроить Git и сделать первый push
 
-Если репозиторий публичный, можно по HTTPS:
 ```bash
-git clone https://github.com/ВАШ_ЛОГИН/ВАШ_РЕПОЗИТОРИЙ.git .
+cd /Users/aleksandr/project_2
+
+# Git уже инициализирован, добавляем файлы
+git add .
+git commit -m "Initial commit: Dota 2 Coach Platform"
+
+# Связываем с сервером
+git remote add server deploy@IP_СЕРВЕРА:/opt/dota-coach-repo.git
+
+# Пушим код на сервер
+git push server main
 ```
 
-Проверяем что файлы на месте:
+Если ошибка `error: src refspec main does not match` — возможно ветка называется `master`:
 ```bash
+git branch -M main
+git push server main
+```
+
+### Шаг 9. На сервере — развернуть код из хранилища
+
+```bash
+ssh deploy@IP_СЕРВЕРА
+
+cd /opt/dota-coach
+git clone /opt/dota-coach-repo.git .
+# Точка в конце обязательна — "клонировать в текущую папку"
+
+# Проверяем
 ls -la
-# Должны увидеть: docker-compose.yml, .env, services/, archive-2/ и т.д.
+# Должны видеть: docker-compose.yml, services/, notebooks/, DEPLOY.md и т.д.
 ```
 
 ---
 
-## Шаг 8. Загрузить данные archive-2
+## Часть 3. Загрузка данных archive-2
 
-Если данные НЕ в git-репозитории (они большие ~8 GB), загрузите с локальной машины:
+Данные archive-2 (~8 GB) в Git НЕ хранятся (они в `.gitignore`). Загружаем отдельно.
 
+### Шаг 10. Скопировать archive-2 на сервер
+
+**На вашем ПК:**
 ```bash
-# НА ЛОКАЛЬНОЙ МАШИНЕ (не на сервере):
 rsync -avz --progress /Users/aleksandr/project_2/archive-2/ deploy@IP_СЕРВЕРА:/opt/dota-coach/archive-2/
 ```
 
-Или скачайте Kaggle dataset прямо на сервер:
-```bash
-# На сервере:
-pip install kaggle
-# Положить kaggle.json в ~/.kaggle/
-kaggle datasets download -d YOUR_DATASET -p /opt/dota-coach/archive-2/
-```
+Это займёт 10-30 минут в зависимости от скорости интернета. Показывает прогресс.
 
 ---
 
-## Шаг 9. Настроить .env для продакшена
+## Часть 4. Настройка и запуск
+
+### Шаг 11. Создать .env на сервере
+
+Файл `.env` тоже в `.gitignore` (там пароли), создаём его вручную:
 
 ```bash
+ssh deploy@IP_СЕРВЕРА
 cd /opt/dota-coach
 nano .env
 ```
 
-Вставляем (замените все значения в ВЕРХНЕМ_РЕГИСТРЕ):
+Вставляем:
 
 ```env
 # ===== PostgreSQL =====
 POSTGRES_USER=dota_coach
-POSTGRES_PASSWORD=ВСТАВИТЬ_СЛОЖНЫЙ_ПАРОЛЬ
+POSTGRES_PASSWORD=ВСТАВИТЬ_ПАРОЛЬ
 POSTGRES_DB=dota_coach_db
 POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
 DATABASE_URL=postgresql://dota_coach:ВСТАВИТЬ_ТОТ_ЖЕ_ПАРОЛЬ@postgres:5432/dota_coach_db
 
-# ===== Тестовые данные (true только при первом запуске, потом false) =====
+# ===== Тестовые данные (true при первом запуске, потом false) =====
 SEED_TEST_DATA=true
 
 # ===== JWT =====
-JWT_SECRET=ВСТАВИТЬ_ДЛИННУЮ_СЛУЧАЙНУЮ_СТРОКУ
+JWT_SECRET=ВСТАВИТЬ_СЕКРЕТ
 JWT_ALGORITHM=HS256
 JWT_ACCESS_EXPIRES_MIN=30
 JWT_REFRESH_EXPIRES_DAYS=7
@@ -210,36 +213,27 @@ LLM_SERVICE_URL=http://llm:8004
 KAGGLE_DATA_PATH=/data/archive-2
 ```
 
-**Как сгенерировать пароли:**
+**Сгенерировать пароль и секрет:**
 ```bash
-# Пароль для PostgreSQL (32 символа)
-openssl rand -base64 32
-# Пример: aB3dEf7hJkLmNpQrStUvWxYz1234567890==
-
-# JWT Secret (48 символов)
-openssl rand -base64 48
-# Пример: xYz123AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ABCDEF==
+# В другом терминале на сервере:
+openssl rand -base64 32    # для POSTGRES_PASSWORD
+openssl rand -base64 48    # для JWT_SECRET
 ```
 
-Скопируйте сгенерированные значения в `.env`. **Пароль PostgreSQL** должен быть одинаковым в `POSTGRES_PASSWORD` и в `DATABASE_URL`.
+Скопируйте результаты в `.env`. Пароль PostgreSQL должен быть одинаковым в `POSTGRES_PASSWORD` и в `DATABASE_URL`.
 
 Сохраняем: `Ctrl+O`, Enter, `Ctrl+X`.
 
----
-
-## Шаг 10. Настроить URL фронтенда
+### Шаг 12. Настроить URL фронтенда
 
 ```bash
 nano docker-compose.yml
 ```
 
-Найдите секцию `frontend` (в конце файла) и замените `localhost` на ваш домен:
+Найдите секцию `frontend` (в конце файла) и замените `localhost`:
 
 ```yaml
   frontend:
-    build: ./services/frontend
-    ports:
-      - "3000:3000"
     environment:
       VITE_AUTH_API_URL: https://ваш-домен.ru
       VITE_CORE_API_URL: https://ваш-домен.ru
@@ -248,106 +242,63 @@ nano docker-compose.yml
 
 Сохраняем: `Ctrl+O`, Enter, `Ctrl+X`.
 
----
+**Важно:** этот файл изменён только на сервере. Не коммитьте его обратно — при следующем `git pull` ваши изменения сохранятся (Git предупредит о конфликте, решите вручную или сделайте `git stash && git pull && git stash pop`).
 
-## Шаг 11. Запустить проект
+### Шаг 13. Запустить проект
 
 ```bash
 cd /opt/dota-coach
-
-# Собрать и запустить все контейнеры
 docker compose up --build -d
 ```
 
-Первый раз сборка займёт 3-7 минут (скачивание образов Python, Node.js, PostgreSQL).
+Первая сборка — 3-7 минут.
 
 Проверяем:
 ```bash
-# Статус контейнеров (все должны быть Up)
 docker compose ps
+# Все 6 контейнеров должны быть Up
 
-# Должно показать 6 контейнеров:
-# postgres   - Up (healthy)
-# auth       - Up
-# core       - Up
-# ml         - Up
-# llm        - Up
-# frontend   - Up
+# Проверяем API
+curl http://localhost:8001/health   # auth
+curl http://localhost:8002/health   # core
+curl http://localhost:8003/health   # ml
+curl http://localhost:8004/health   # llm
 ```
-
-Если какой-то контейнер не Up — смотрим логи:
-```bash
-docker compose logs auth    # логи auth-сервиса
-docker compose logs ml      # логи ml-сервиса
-docker compose logs -f      # все логи в реальном времени (Ctrl+C чтобы выйти)
-```
-
-Проверяем что сервисы отвечают:
-```bash
-curl http://localhost:8001/health
-# {"status":"ok","service":"auth"}
-
-curl http://localhost:8002/health
-# {"status":"ok","service":"core"}
-
-curl http://localhost:8003/health
-# {"status":"ok","service":"ml"}
-
-curl http://localhost:8004/health
-# {"status":"ok","service":"llm","mode":"stub"}
-
-curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
-# 200
-```
-
-Если все 200/ok — идём дальше.
 
 ---
 
-## Шаг 12. Привязать домен
+## Часть 5. Домен и SSL
 
-### 12.1. Настроить DNS
+### Шаг 14. Привязать домен (DNS)
 
-Зайдите в панель управления доменом (у вашего регистратора) и создайте A-запись:
+В панели управления доменом (у регистратора) создайте A-запись:
 
-| Тип | Имя | Значение | TTL |
-|-----|-----|----------|-----|
-| A | @ | IP_ВАШЕГО_СЕРВЕРА | 300 |
-| A | www | IP_ВАШЕГО_СЕРВЕРА | 300 |
+| Тип | Имя | Значение |
+|-----|-----|----------|
+| A | @ | IP_ВАШЕГО_СЕРВЕРА |
+| A | www | IP_ВАШЕГО_СЕРВЕРА |
 
-Подождите 5-30 минут пока DNS обновится.
-
-Проверяем:
+Подождите 5-30 минут. Проверяем:
 ```bash
-# На сервере или локально:
 ping ваш-домен.ru
 # Должен показать IP вашего сервера
 ```
 
-### 12.2. Установить Nginx
+### Шаг 15. Установить и настроить Nginx
 
 ```bash
 sudo apt install nginx -y
 
-# Проверяем
-sudo systemctl status nginx
-# Должно быть: active (running)
-```
-
-### 12.3. Настроить Nginx
-
-```bash
 sudo nano /etc/nginx/sites-available/dota-coach
 ```
 
-Вставляем:
+Вставляем (замените `ваш-домен.ru` на реальный домен):
 
 ```nginx
 server {
     listen 80;
     server_name ваш-домен.ru www.ваш-домен.ru;
 
-    # Frontend (React SPA)
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -359,14 +310,12 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Auth API
     location /auth/ {
         proxy_pass http://127.0.0.1:8001/auth/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    # Core API — все маршруты
     location ~ ^/(me|player|coach|coaches|matchmaking|training-sessions|ai|admin)(/|$) {
         proxy_pass http://127.0.0.1:8002;
         proxy_set_header Host $host;
@@ -374,101 +323,61 @@ server {
         proxy_read_timeout 120s;
     }
 
-    # ML API
     location /ml/ {
         proxy_pass http://127.0.0.1:8003/ml/;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 300s;
     }
 
-    # LLM API
     location /llm/ {
         proxy_pass http://127.0.0.1:8004/llm/;
         proxy_set_header Host $host;
     }
 
-    # Health check
     location /health {
         proxy_pass http://127.0.0.1:8002/health;
     }
 }
 ```
 
-**Важно:** замените `ваш-домен.ru` на реальный домен (в 2 местах в строке `server_name`).
-
 Сохраняем: `Ctrl+O`, Enter, `Ctrl+X`.
 
-Активируем конфигурацию:
 ```bash
-# Создаём символическую ссылку
 sudo ln -s /etc/nginx/sites-available/dota-coach /etc/nginx/sites-enabled/
-
-# Удаляем дефолтный сайт
-sudo rm /etc/nginx/sites-enabled/default
-
-# Проверяем конфигурацию (не должно быть ошибок)
-sudo nginx -t
-# nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
-# nginx: configuration file /etc/nginx/nginx.conf test is successful
-
-# Перезапускаем Nginx
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t            # проверка (должно быть ok)
 sudo systemctl reload nginx
 ```
 
-Проверяем в браузере: `http://ваш-домен.ru` — должен открыться сайт.
+Проверяем: откройте `http://ваш-домен.ru` — должен работать сайт.
 
----
+### Шаг 16. Установить SSL
 
-## Шаг 13. Установить SSL-сертификат
-
-### Вариант А: бесплатный Let's Encrypt (рекомендуется)
+#### Вариант А: Let's Encrypt (бесплатный)
 
 ```bash
-# Устанавливаем Certbot
 sudo apt install certbot python3-certbot-nginx -y
 
-# Получаем сертификат (замените домен!)
 sudo certbot --nginx -d ваш-домен.ru -d www.ваш-домен.ru
+# Email: ваш email
+# Terms: Y
+# Share: N
+# Redirect: 2 (да)
 ```
 
-Certbot спросит:
-1. Email — введите ваш email (для уведомлений об истечении)
-2. Terms — `Y` (согласие)
-3. Share email — `N` (не обязательно)
-4. Redirect HTTP to HTTPS — выберите `2` (да, редиректить)
+Готово. `https://ваш-домен.ru` работает с зелёным замком.
 
-Готово! Certbot автоматически:
-- Скачал сертификат
-- Настроил Nginx для HTTPS
-- Добавил автообновление
-
-Проверяем: `https://ваш-домен.ru` — должен быть зелёный замок.
-
-Автообновление проверяем:
-```bash
-sudo certbot renew --dry-run
-# Должно пройти без ошибок
-```
-
-### Вариант Б: свой купленный сертификат
-
-Если купили сертификат, у вас есть файлы:
-- `certificate.crt` (или `.pem`) — сам сертификат
-- `private.key` — приватный ключ
-- `ca_bundle.crt` (опционально) — цепочка
+#### Вариант Б: Купленный сертификат
 
 ```bash
-# Копируем на сервер
 sudo mkdir -p /etc/ssl/dota-coach
-sudo nano /etc/ssl/dota-coach/certificate.crt
-# Вставляем содержимое сертификата
 
-sudo nano /etc/ssl/dota-coach/private.key
-# Вставляем приватный ключ
+# Загрузите файлы сертификата на сервер (через SCP или nano)
+# Нужны: сертификат (.crt/.pem) и приватный ключ (.key)
 
 # Если есть ca_bundle — объединяем:
 cat certificate.crt ca_bundle.crt > /etc/ssl/dota-coach/fullchain.crt
+cp private.key /etc/ssl/dota-coach/private.key
 ```
 
 Редактируем Nginx:
@@ -476,10 +385,8 @@ cat certificate.crt ca_bundle.crt > /etc/ssl/dota-coach/fullchain.crt
 sudo nano /etc/nginx/sites-available/dota-coach
 ```
 
-Добавляем в начало файла (ДО существующего блока `server`):
-
+Добавляем в начало (ПЕРЕД текущим блоком server):
 ```nginx
-# Редирект HTTP → HTTPS
 server {
     listen 80;
     server_name ваш-домен.ru www.ваш-домен.ru;
@@ -487,7 +394,7 @@ server {
 }
 ```
 
-В существующем блоке `server` меняем первую строку:
+В существующем блоке меняем первые строки:
 ```nginx
 server {
     listen 443 ssl;
@@ -496,7 +403,8 @@ server {
     ssl_certificate     /etc/ssl/dota-coach/fullchain.crt;
     ssl_certificate_key /etc/ssl/dota-coach/private.key;
 
-    # ... остальные location блоки без изменений ...
+    # ... все location блоки без изменений ...
+}
 ```
 
 ```bash
@@ -504,131 +412,84 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
----
-
-## Шаг 14. Настроить Firewall
+### Шаг 17. Firewall
 
 ```bash
-# Разрешаем только нужные порты
-sudo ufw allow 22/tcp      # SSH
-sudo ufw allow 80/tcp      # HTTP (для редиректа на HTTPS)
-sudo ufw allow 443/tcp     # HTTPS
-
-# Включаем firewall
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
 sudo ufw enable
 # Confirm: y
-
-# Проверяем
-sudo ufw status
 ```
-
-**Важно:** порты 5432 (PostgreSQL), 8001-8004 (сервисы) НЕ открываем — они доступны только через Nginx.
 
 ---
 
-## Шаг 15. Загрузить данные (первый запуск)
+## Часть 6. Загрузка данных (первый запуск)
 
-БД пустая. Загружаем данные пошагово:
+БД пустая — нужно загрузить данные.
 
 ```bash
+ssh deploy@IP_СЕРВЕРА
 cd /opt/dota-coach
 
-# 1. Загрузить справочники (герои, предметы)
+# 1. Справочники (герои, предметы) — 5 секунд
 curl -X POST http://localhost:8003/ml/admin/load-constants
-# Ответ: {"status":"success","heroes_loaded":126,...}
 
-# 2. Загрузить матчи (самое долгое — 15-30 минут)
+# 2. Матчи из archive-2 — 15-30 минут
 curl -X POST http://localhost:8003/ml/admin/start-import \
   -H "Content-Type: application/json" \
   -d '{"directory_path": "all"}'
 
-# 3. Следить за прогрессом:
-watch -n 5 'curl -s http://localhost:8003/ml/admin/import-status | python3 -m json.tool'
-# Ctrl+C когда finished=true
+# Следить за прогрессом (обновляется каждые 5 сек, Ctrl+C чтобы выйти):
+watch -n 5 'curl -s http://localhost:8003/ml/admin/import-status | python3 -m json.tool 2>/dev/null | head -10'
 
-# 4. Вычислить эталоны
+# 3. Вычислить эталоны — 1-2 минуты
 curl -X POST http://localhost:8003/ml/admin/compute-baselines
-# Ответ: {"status":"success","baselines_computed":1389}
 
-# 5. Обучить модель MMR
+# 4. Обучить модель — 2-5 минут
 curl -X POST http://localhost:8003/ml/admin/start-training
-# Следить: curl http://localhost:8003/ml/admin/training-status
+# Проверить: curl http://localhost:8003/ml/admin/training-status
 
-# 6. Выключить тестовые данные (больше не нужны)
-nano .env
-# Поменять SEED_TEST_DATA=true на SEED_TEST_DATA=false
-# Ctrl+O, Enter, Ctrl+X
-
-# 7. Создать реального админа
+# 5. Создать админа
 curl -X POST http://localhost:8001/auth/register \
   -H "Content-Type: application/json" \
   -d '{"login":"admin","email":"ваш@email.com","password":"надёжный_пароль","confirm_password":"надёжный_пароль","role":"PLAYER"}'
 
-# Назначить ADMIN
 docker compose exec postgres psql -U dota_coach dota_coach_db \
   -c "UPDATE auth_users SET role = 'ADMIN' WHERE email = 'ваш@email.com';"
+
+# 6. Отключить тестовые данные
+nano .env
+# Меняем SEED_TEST_DATA=true → SEED_TEST_DATA=false
+# Ctrl+O, Enter, Ctrl+X
+docker compose restart auth core
 ```
 
 ---
 
-## Шаг 16. Проверить что всё работает
+## Часть 7. Деплой обновлений
 
-```bash
-# Все контейнеры работают?
-docker compose ps
+Когда вы изменили код на ПК и хотите обновить сервер:
 
-# Сайт открывается?
-curl -s -o /dev/null -w "%{http_code}" https://ваш-домен.ru
-# 200
-
-# API работает?
-curl https://ваш-домен.ru/health
-# {"status":"ok"}
-
-# Данные загружены?
-curl http://localhost:8003/ml/data/stats | python3 -c "
-import sys,json
-d=json.load(sys.stdin)
-for t,i in d.items():
-    print(f'{t}: {i.get(\"count\",0):,}')
-"
-```
-
-Откройте `https://ваш-домен.ru` в браузере — должен работать сайт с зелёным замком.
-
----
-
-## Деплой изменений (обновление кода)
-
-Когда вы внесли изменения в код на своём компьютере:
-
-### На локальном компьютере:
+### На ПК:
 ```bash
 cd /Users/aleksandr/project_2
 git add .
 git commit -m "описание изменений"
-git push
+git push server main
 ```
 
 ### На сервере:
 ```bash
 ssh deploy@IP_СЕРВЕРА
 cd /opt/dota-coach
-
-# Забираем новый код
 git pull
-
-# Пересобираем и перезапускаем
 docker compose up --build -d
-
-# Проверяем
-docker compose ps
-docker compose logs --tail=20
 ```
 
-### Быстрый деплой одной командой (с локальной машины):
+### Быстрый деплой одной командой с ПК:
 ```bash
-ssh deploy@IP_СЕРВЕРА "cd /opt/dota-coach && git pull && docker compose up --build -d && docker compose ps"
+git push server main && ssh deploy@IP_СЕРВЕРА "cd /opt/dota-coach && git pull && docker compose up --build -d && docker compose ps"
 ```
 
 ### Если изменился только один сервис:
@@ -640,91 +501,67 @@ ssh deploy@IP_СЕРВЕРА "cd /opt/dota-coach && git pull && docker compose u
 ssh deploy@IP_СЕРВЕРА "cd /opt/dota-coach && git pull && docker compose up --build frontend -d"
 ```
 
----
+### Если `git pull` ругается на конфликт в docker-compose.yml:
 
-## Бэкапы
-
-### Ручной бэкап:
-```bash
-cd /opt/dota-coach
-docker compose exec postgres pg_dump -U dota_coach dota_coach_db > backup_$(date +%F).sql
-```
-
-### Автоматический бэкап (каждую ночь в 3:00):
-```bash
-# Создаём папку для бэкапов
-sudo mkdir -p /opt/backups
-
-# Добавляем в cron
-crontab -e
-# Вставляем строку:
-0 3 * * * cd /opt/dota-coach && docker compose exec -T postgres pg_dump -U dota_coach dota_coach_db | gzip > /opt/backups/dota_$(date +\%F).sql.gz && find /opt/backups -mtime +14 -delete
-```
-
-Это: каждый день в 3:00 делает бэкап и удаляет старые (старше 14 дней).
-
-### Восстановление из бэкапа:
-```bash
-# Распаковать
-gunzip /opt/backups/dota_2026-02-16.sql.gz
-
-# Загрузить
-docker compose exec -T postgres psql -U dota_coach dota_coach_db < /opt/backups/dota_2026-02-16.sql
-```
-
----
-
-## Мониторинг и отладка
+Это потому что на сервере вы вручную меняли URL фронтенда.
 
 ```bash
-# Статус всех контейнеров
-docker compose ps
-
-# Логи в реальном времени
-docker compose logs -f
-
-# Логи одного сервиса
-docker compose logs -f ml
-docker compose logs -f core
-
-# Сколько ресурсов потребляют контейнеры
-docker stats
-
-# Размер таблиц в БД
-docker compose exec postgres psql -U dota_coach dota_coach_db -c "
-SELECT tablename, pg_size_pretty(pg_total_relation_size(tablename::text)) as size
-FROM pg_tables WHERE schemaname = 'public'
-ORDER BY pg_total_relation_size(tablename::text) DESC;
-"
-
-# Зайти в БД вручную
-docker compose exec postgres psql -U dota_coach dota_coach_db
-
-# Перезапустить всё
-docker compose restart
-
-# Перезапустить один сервис
-docker compose restart ml
-
-# Полная пересборка с нуля (ОСТОРОЖНО: удалит данные из БД!)
-docker compose down -v
+git stash          # спрятать локальные изменения
+git pull           # забрать новый код
+git stash pop      # вернуть локальные изменения
+# Если конфликт — nano docker-compose.yml, починить вручную
 docker compose up --build -d
 ```
 
 ---
 
-## Шпаргалка команд
+## Часть 8. Обслуживание
 
-| Что сделать | Команда |
-|-------------|---------|
-| Подключиться к серверу | `ssh deploy@IP_СЕРВЕРА` |
-| Запустить проект | `cd /opt/dota-coach && docker compose up -d` |
-| Остановить проект | `docker compose down` |
-| Пересобрать всё | `docker compose up --build -d` |
-| Деплой обновлений | `git pull && docker compose up --build -d` |
-| Посмотреть логи | `docker compose logs -f` |
-| Посмотреть статус | `docker compose ps` |
-| Бэкап БД | `docker compose exec postgres pg_dump -U dota_coach dota_coach_db > backup.sql` |
+### Бэкапы
+
+```bash
+# Ручной бэкап
+cd /opt/dota-coach
+docker compose exec postgres pg_dump -U dota_coach dota_coach_db > ~/backup_$(date +%F).sql
+
+# Автобэкап каждую ночь в 3:00
+crontab -e
+# Вставить строку:
+0 3 * * * cd /opt/dota-coach && docker compose exec -T postgres pg_dump -U dota_coach dota_coach_db | gzip > /opt/backups/dota_$(date +\%F).sql.gz && find /opt/backups -mtime +14 -delete
+
+# Восстановление
+docker compose exec -T postgres psql -U dota_coach dota_coach_db < backup.sql
+```
+
+### Команды на каждый день
+
+| Что | Команда |
+|-----|---------|
+| Подключиться | `ssh deploy@IP_СЕРВЕРА` |
+| Запустить | `cd /opt/dota-coach && docker compose up -d` |
+| Остановить | `docker compose down` |
+| Пересобрать | `docker compose up --build -d` |
+| Деплой | `git pull && docker compose up --build -d` |
+| Логи | `docker compose logs -f` |
+| Логи 1 сервиса | `docker compose logs -f ml` |
+| Статус | `docker compose ps` |
+| Ресурсы | `docker stats` |
+| Бэкап | `docker compose exec postgres pg_dump -U dota_coach dota_coach_db > backup.sql` |
 | Зайти в БД | `docker compose exec postgres psql -U dota_coach dota_coach_db` |
 | Обновить SSL | `sudo certbot renew` |
-| Перезапустить Nginx | `sudo systemctl reload nginx` |
+| Рестарт Nginx | `sudo systemctl reload nginx` |
+
+---
+
+## Что в .gitignore и почему
+
+| Файл/папка | Почему исключён | Что делать на сервере |
+|------------|-----------------|----------------------|
+| `archive-2/` | 8 GB данных Kaggle | Загрузить через `rsync` (шаг 10) |
+| `.env` | Пароли и секреты | Создать вручную (шаг 11) |
+| `node_modules/` | Зависимости фронта, ставятся при сборке Docker | Ничего — Docker сам установит |
+| `__pycache__/`, `*.pyc` | Кэш Python | Ничего — создаётся автоматически |
+| `.DS_Store` | Системный файл macOS | Ничего |
+| `*.sql` | Бэкапы БД | Хранить отдельно |
+| `*.jpg` | Скриншоты для документации | Не нужны на сервере |
+| `notebooks/.ipynb_checkpoints/` | Кэш Jupyter | Не нужен на сервере |
