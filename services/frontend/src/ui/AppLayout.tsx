@@ -1,25 +1,31 @@
 import { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
+import {
+  IconHome, IconSword, IconChart, IconGraduate, IconSearch,
+  IconClipboard, IconCalendar, IconBot, IconTarget, IconUser,
+  IconStar, IconShield, IconUsers, IconScroll, IconDatabase,
+  IconTrendUp, IconLogout, IconZap,
+} from './Icons';
 
-const NAV_ICONS: Record<string, string> = {
-  '/dashboard': '🏠',
-  '/profile/player': '⚔',
-  '/stats': '📊',
-  '/coaches': '🎓',
-  '/matchmaking': '🔍',
-  '/requests': '📋',
-  '/schedule': '📅',
-  '/ai-chat': '🤖',
-  '/coach/dashboard': '🎯',
-  '/coach/profile': '👤',
-  '/coach/schedule': '📅',
-  '/coach/reviews': '⭐',
-  '/admin/dashboard': '🛡',
-  '/admin/users': '👥',
-  '/admin/logs': '📜',
-  '/admin/ml-import': '💾',
-  '/admin/ml-data': '📈',
+const NAV_CONFIG: Record<string, { icon: (p: any) => JSX.Element }> = {
+  '/dashboard':       { icon: IconHome },
+  '/profile/player':  { icon: IconSword },
+  '/stats':           { icon: IconChart },
+  '/coaches':         { icon: IconGraduate },
+  '/matchmaking':     { icon: IconSearch },
+  '/requests':        { icon: IconClipboard },
+  '/schedule':        { icon: IconCalendar },
+  '/ai-chat':         { icon: IconBot },
+  '/coach/dashboard': { icon: IconTarget },
+  '/coach/profile':   { icon: IconUser },
+  '/coach/schedule':  { icon: IconCalendar },
+  '/coach/reviews':   { icon: IconStar },
+  '/admin/dashboard': { icon: IconShield },
+  '/admin/users':     { icon: IconUsers },
+  '/admin/logs':      { icon: IconScroll },
+  '/admin/ml-import': { icon: IconDatabase },
+  '/admin/ml-data':   { icon: IconTrendUp },
 };
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -59,24 +65,33 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <h2>RUPRIME</h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <IconZap size={22} color="var(--accent)" />
+            <h2>RUPRIME</h2>
+          </div>
           <span>{user?.login} • {user?.role}</span>
         </div>
         <ul className="sidebar-nav">
-          {links.map((link) => (
-            <li key={link.to}>
-              <NavLink to={link.to} className={({ isActive }) => isActive ? 'active' : ''}>
-                <span style={{ fontSize: '1.1rem', width: 24, textAlign: 'center' }}>
-                  {NAV_ICONS[link.to] || '•'}
-                </span>
-                {link.label}
-              </NavLink>
-            </li>
-          ))}
+          {links.map((link) => {
+            const cfg = NAV_CONFIG[link.to];
+            const Icon = cfg?.icon || IconHome;
+            return (
+              <li key={link.to}>
+                <NavLink to={link.to} className={({ isActive }) => isActive ? 'active' : ''}>
+                  <span style={{ width: 20, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon size={16} />
+                  </span>
+                  {link.label}
+                </NavLink>
+              </li>
+            );
+          })}
           <li>
             <a href="#" onClick={(e) => { e.preventDefault(); logout(); }}
               style={{ color: 'var(--danger)' }}>
-              <span style={{ fontSize: '1.1rem', width: 24, textAlign: 'center' }}>🚪</span>
+              <span style={{ width: 20, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+                <IconLogout size={16} />
+              </span>
               Выйти
             </a>
           </li>

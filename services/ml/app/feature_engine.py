@@ -108,29 +108,30 @@ def compute_baselines(db: Session) -> int:
     grouped = grouped[grouped["match_count"] >= 5]
 
     # Compute percentiles per group
-    pct_data = df.groupby(["mmr_band", "hero_id", "lane_role"]).agg(
-        **{f"p25_{m}": (m, lambda x: x.quantile(0.25)) for m in metrics},
-        **{f"p50_{m}": (m, lambda x: x.quantile(0.50)) for m in metrics},
-        **{f"p75_{m}": (m, lambda x: x.quantile(0.75)) for m in metrics},
-        **{f"p90_{m}": (m, lambda x: x.quantile(0.90)) for m in metrics},
-        **{f"p95_{m}": (m, lambda x: x.quantile(0.95)) for m in metrics},
-    ).reset_index()
-
-    # Merge percentiles into grouped as JSON column
-    merged = grouped.merge(pct_data, on=["mmr_band", "hero_id", "lane_role"], how="left")
-
-    def row_percentiles(row):
+    def calc_percentiles(group):
         pct = {}
         for m in metrics:
-            pct[m] = {}
-            for p in ["p25", "p50", "p75", "p90", "p95"]:
-                key = f"{p}_{m}"
-                val = row.get(key)
-                if pd.notna(val):
-                    pct[m][p] = round(float(val), 2)
+            col = group[m].dropna()
+            if len(col) < 3:
+                continue
+            pct[m] = {
+                "p25": round(float(col.quantile(0.25)), 2),
+                "p50": round(float(col.quantile(0.50)), 2),
+                "p75": round(float(col.quantile(0.75)), 2),
+                "p90": round(float(col.quantile(0.90)), 2),
+                "p95": round(float(col.quantile(0.95)), 2),
+            }
         return pct
 
-    grouped["percentiles"] = merged.apply(row_percentiles, axis=1)
+    pct_map = {}
+    for key, group in df.groupby(["mmr_band", "hero_id", "lane_role"]):
+        pct_map[key] = calc_percentiles(group)
+
+    def get_pct(row):
+        key = (row["mmr_band"], row["hero_id"], row["lane_role"])
+        return pct_map.get(key, {})
+
+    grouped["percentiles"] = grouped.apply(get_pct, axis=1)
 
     # Clear existing baselines
     with engine.connect() as conn:
@@ -139,6 +140,11 @@ def compute_baselines(db: Session) -> int:
 
     # Insert new
     grouped.rename(columns={"lane_role": "role"}, inplace=True)
+    # Convert percentiles dict to JSON string for PostgreSQL JSONB
+    import json as json_mod
+    grouped["percentiles"] = grouped["percentiles"].apply(
+        lambda x: json_mod.dumps(x) if isinstance(x, dict) else None
+    )
     grouped.to_sql("ml_kaggle_baselines", engine, if_exists="append", index=False)
 
     logger.info(f"Computed {len(grouped)} baselines with percentiles (8 bands)")
