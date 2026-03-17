@@ -513,18 +513,224 @@ table tr:hover {
 
 .progress-bar {
   width: 100%;
-  height: 6px;
-  background: var(--border-color);
-  border-radius: 3px;
+  height: 8px;
+  background: rgba(30, 42, 69, 0.6);
+  border-radius: 4px;
   overflow: hidden;
+  position: relative;
 }
 
 .progress-bar-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--accent), var(--accent-bright));
-  border-radius: 3px;
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 0 8px var(--accent-glow);
+  border-radius: 4px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 12px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.15);
+  position: relative;
+}
+
+.progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
+  animation: progress-shine 2s infinite;
+}
+
+@keyframes progress-shine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.progress-bar.progress-bar--lg {
+  height: 12px;
+  border-radius: 6px;
+}
+
+.progress-bar.progress-bar--lg .progress-bar-fill {
+  border-radius: 6px;
+}
+
+/* ===== Hero Card ===== */
+
+.hero-card {
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(0, 212, 170, 0.04) 100%);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-xl);
+  padding: 28px;
+  box-shadow: 0 0 40px rgba(0, 212, 170, 0.06);
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.hero-card-avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 16px;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 24px rgba(0, 212, 170, 0.3);
+  object-fit: cover;
+}
+
+/* ===== Stat Pill Row ===== */
+
+.stat-pills {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stat-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  min-width: 120px;
+  transition: var(--transition);
+}
+
+.stat-pill:hover {
+  border-color: rgba(0, 212, 170, 0.2);
+  background: var(--bg-card-hover);
+}
+
+.stat-pill-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.stat-pill-value {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.stat-pill-value.accent { color: var(--accent); }
+.stat-pill-value.gold { color: var(--rank-legend); }
+.stat-pill-value.green { color: var(--success); }
+
+/* ===== Ranking Card ===== */
+
+.ranking-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  transition: var(--transition);
+}
+
+.ranking-card:hover {
+  border-color: rgba(0, 212, 170, 0.2);
+}
+
+.ranking-pct {
+  font-size: 1.1rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* ===== Coach Stat Bar ===== */
+
+.coach-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.coach-stat {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  text-align: center;
+}
+
+.coach-stat-value {
+  font-size: 2rem;
+  font-weight: 900;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.coach-stat-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+/* ===== Section Header ===== */
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.section-header h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.section-header .section-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+/* ===== Skill Grid (Dashboard) ===== */
+
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 1024px) {
+  .skill-grid { grid-template-columns: repeat(2, 1fr); }
+  .coach-stats-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .skill-grid { grid-template-columns: 1fr; }
+  .coach-stats-row { grid-template-columns: 1fr; }
+}
+
+/* ===== Dashboard Layout ===== */
+
+.dash-layout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .dash-layout { grid-template-columns: 1fr; }
 }
 
 /* ===== Alert ===== */

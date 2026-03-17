@@ -7,58 +7,58 @@ interface SkillRingProps {
   expanded?: boolean;
 }
 
-export default function SkillRing({ value, target, label, size = 100, onClick, expanded }: SkillRingProps) {
-  const radius = (size - 12) / 2;
+export default function SkillRing({ value, target, label, size = 110, onClick, expanded }: SkillRingProps) {
+  const radius = (size - 14) / 2;
   const circumference = 2 * Math.PI * radius;
   const progress = Math.min(value / 10, 1);
-  const targetProgress = target ? Math.min(target / 10, 1) : 0;
   const strokeDashoffset = circumference * (1 - progress);
-  const targetDashoffset = circumference * (1 - targetProgress);
 
   const color = value >= 7 ? 'var(--accent)' : value >= 4 ? 'var(--warning)' : 'var(--danger)';
+  const bgGlow = value >= 7 ? 'rgba(0,212,170,0.06)' : value >= 4 ? 'rgba(255,165,2,0.06)' : 'rgba(255,71,87,0.06)';
   const gap = target ? Math.max(target - value, 0) : 0;
 
   return (
     <div
-      className="stat-card"
       style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '16px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 12px',
+        background: expanded ? bgGlow : 'var(--bg-card)',
+        border: `1px solid ${expanded ? color : 'var(--border-color)'}`,
+        borderRadius: 'var(--radius-lg)',
         cursor: onClick ? 'pointer' : 'default',
-        borderColor: expanded ? 'var(--accent)' : undefined,
+        transition: 'all 0.25s ease',
       }}
       onClick={onClick}
+      onMouseEnter={(e) => { if (!expanded) (e.currentTarget.style.borderColor = `${color}50`); }}
+      onMouseLeave={(e) => { if (!expanded) (e.currentTarget.style.borderColor = 'var(--border-color)'); }}
     >
-      <div className="skill-ring">
-        <svg width={size} height={size}>
-          {/* Background */}
-          <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="var(--border-color)" strokeWidth="5" />
-          {/* Target ring (dashed) */}
-          {target && target > value && (
-            <circle cx={size/2} cy={size/2} r={radius} fill="none"
-              stroke="var(--text-muted)" strokeWidth="3" strokeDasharray={`${circumference * 0.03} ${circumference * 0.02}`}
-              strokeDashoffset={targetDashoffset}
-              style={{ transform: 'rotate(-90deg)', transformOrigin: 'center' }} />
-          )}
-          {/* Current progress */}
-          <circle cx={size/2} cy={size/2} r={radius} fill="none"
-            stroke={color} strokeWidth="6" strokeLinecap="round"
-            strokeDasharray={circumference} strokeDashoffset={strokeDashoffset}
-            style={{ transition: 'stroke-dashoffset 0.8s ease', transform: 'rotate(-90deg)', transformOrigin: 'center' }} />
-          {/* Score text */}
-          <text x={size/2} y={size/2 - 2} textAnchor="middle" fill={color} fontSize="1.2rem" fontWeight="700">
-            {value.toFixed(1)}
-          </text>
-          <text x={size/2} y={size/2 + 14} textAnchor="middle" fill="var(--text-secondary)" fontSize="0.65rem">
-            / 10
-          </text>
-        </svg>
-        <span className="skill-ring-label">{label}</span>
-        {gap > 0 && (
-          <span style={{ fontSize: '0.7rem', color: 'var(--warning)', marginTop: 2 }}>
-            +{gap.toFixed(1)} до цели
-          </span>
-        )}
-      </div>
+      <svg width={size} height={size} style={{ filter: `drop-shadow(0 0 8px ${color}30)` }}>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none"
+          stroke="rgba(30,42,69,0.8)" strokeWidth="6" />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none"
+          stroke={color} strokeWidth="6" strokeLinecap="round"
+          strokeDasharray={circumference} strokeDashoffset={strokeDashoffset}
+          style={{ transition: 'stroke-dashoffset 1s ease', transform: 'rotate(-90deg)', transformOrigin: 'center' }} />
+        <text x={size / 2} y={size / 2 - 4} textAnchor="middle" fill={color}
+          fontSize="1.4rem" fontWeight="800" fontFamily="Inter, sans-serif">
+          {value.toFixed(1)}
+        </text>
+        <text x={size / 2} y={size / 2 + 14} textAnchor="middle" fill="var(--text-muted)"
+          fontSize="0.7rem" fontWeight="600" fontFamily="Inter, sans-serif">
+          /10
+        </text>
+      </svg>
+      <span style={{
+        fontSize: '0.82rem', color: 'var(--text-primary)', textAlign: 'center',
+        fontWeight: 600, marginTop: 8, lineHeight: 1.3,
+      }}>{label}</span>
+      {gap > 0 && (
+        <span style={{
+          fontSize: '0.68rem', color: 'var(--warning)', marginTop: 4,
+          background: 'rgba(255,165,2,0.08)', padding: '2px 8px', borderRadius: 10,
+        }}>
+          +{gap.toFixed(1)} до цели
+        </span>
+      )}
     </div>
   );
 }
@@ -74,37 +74,63 @@ interface ComponentBarProps {
 }
 
 export function ComponentBar({ name, playerValue, targetValue, baselineValue, score, targetScore }: ComponentBarProps) {
-  const pct = Math.min((playerValue / Math.max(targetValue, 0.01)) * 100, 150);
+  const maxVal = Math.max(targetValue, playerValue, baselineValue, 1);
+  const playerPct = Math.min((playerValue / maxVal) * 100, 100);
+  const targetPct = Math.min((targetValue / maxVal) * 100, 100);
   const gap = targetScore - score;
 
+  const barColor = playerPct >= targetPct
+    ? 'linear-gradient(90deg, #00d4aa, #00ffc8)'
+    : playerPct >= targetPct * 0.7
+      ? 'linear-gradient(90deg, #ffa502, #ffca28)'
+      : 'linear-gradient(90deg, #ff4757, #ff6b81)';
+
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: 4 }}>
-        <span>{name}</span>
-        <span>
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{name}</span>
+        <span style={{ fontSize: '0.82rem' }}>
           <strong style={{ color: score >= 5 ? 'var(--accent)' : 'var(--warning)' }}>
             {typeof playerValue === 'number' ? playerValue.toFixed(1) : playerValue}
           </strong>
-          <span className="text-muted"> / {typeof targetValue === 'number' ? targetValue.toFixed(1) : targetValue}</span>
-          {gap > 0.5 && <span className="text-danger" style={{ marginLeft: 6, fontSize: '0.75rem' }}>(-{gap.toFixed(1)})</span>}
+          <span style={{ color: 'var(--text-muted)' }}> / {typeof targetValue === 'number' ? targetValue.toFixed(1) : targetValue}</span>
+          {gap > 0.5 && (
+            <span style={{
+              marginLeft: 6, fontSize: '0.72rem', color: 'var(--danger)',
+              background: 'rgba(255,71,87,0.08)', padding: '1px 6px', borderRadius: 8,
+            }}>-{gap.toFixed(1)}</span>
+          )}
         </span>
       </div>
-      <div style={{ position: 'relative', height: 8, background: 'var(--border-color)', borderRadius: 4 }}>
+      <div style={{
+        position: 'relative', height: 10, background: 'rgba(30,42,69,0.6)',
+        borderRadius: 5, overflow: 'visible',
+      }}>
         <div style={{
-          position: 'absolute', height: '100%', borderRadius: 4,
-          width: `${Math.min(pct, 100)}%`,
-          background: pct >= 100 ? 'var(--accent)' : pct >= 70 ? 'var(--warning)' : 'var(--danger)',
-          transition: 'width 0.5s ease',
-        }} />
-        {/* Target marker */}
-        <div style={{
-          position: 'absolute', left: '100%', top: -3, width: 2, height: 14,
-          background: 'var(--text-muted)', borderRadius: 1,
-        }} />
+          position: 'absolute', height: '100%', borderRadius: 5,
+          width: `${Math.min(playerPct, 100)}%`,
+          background: barColor,
+          transition: 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1)',
+          boxShadow: playerPct >= targetPct ? '0 0 10px rgba(0,212,170,0.3)' : 'none',
+        }}>
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 5,
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.15) 0%, transparent 100%)',
+          }} />
+        </div>
+        {targetPct > 0 && targetPct <= 100 && (
+          <div style={{
+            position: 'absolute', left: `${targetPct}%`, top: -2, width: 2, height: 14,
+            background: 'var(--text-secondary)', borderRadius: 1, opacity: 0.7,
+          }} />
+        )}
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>
-        <span>Эталон ({baselineValue.toFixed(1)})</span>
-        <span>Цель ({targetValue.toFixed(1)})</span>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3,
+      }}>
+        <span>Эталон: {baselineValue.toFixed(1)}</span>
+        <span>Цель: {targetValue.toFixed(1)}</span>
       </div>
     </div>
   );

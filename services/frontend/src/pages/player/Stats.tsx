@@ -8,10 +8,20 @@ import { RoleBadge, InfoTooltip } from '../../ui/GameComponents';
 const CHART_STYLE = { background: '#151c2e', border: '1px solid #1e2a45', color: '#e8edf5' };
 const COLORS = ['#00d4aa', '#7c5cfc', '#ffa502', '#ff4757', '#1e90ff', '#ff6b81'];
 
+const FEATURE_TIPS: Record<string, string> = {
+  farming: 'Эффективность фарма: золото в минуту, крипов в минуту.',
+  combat: 'Эффективность в боях: урон, убийства, ассисты.',
+  survival: 'Выживание: смерти и вклад в команду.',
+  vision: 'Контроль карты: варды, dewarding.',
+  objectives: 'Давление на объекты: башни и Рошан.',
+  mechanics: 'Механический скилл: APM, набор опыта.',
+  consistency: 'Стабильность показателей от матча к матчу.',
+  control: 'Контроль противников: станы и инициация.',
+};
+
 export default function PlayerStats() {
   const [stats, setStats] = useState<any>(null);
   const [features, setFeatures] = useState<any>(null);
-  const [profileId, setProfileId] = useState<number | null>(null);
   const [tab, setTab] = useState('trends');
 
   useEffect(() => {
@@ -19,7 +29,6 @@ export default function PlayerStats() {
     coreApi.get('/me/overview').then((r) => {
       const pid = r.data?.profile?.id;
       if (pid) {
-        setProfileId(pid);
         coreApi.get(`/player/${pid}/stats/overview`).then((r2) => setStats(r2.data)).catch(() => {});
         coreApi.get(`/player/${pid}/detailed-features`).then((r2) => setFeatures(r2.data)).catch(() => {});
       }
@@ -41,7 +50,7 @@ export default function PlayerStats() {
   return (
     <div>
       <div className="page-header">
-        <h1>📊 Статистика</h1>
+        <h1>Статистика</h1>
         <p>Обзор вашей игры и динамика показателей</p>
       </div>
 
@@ -65,33 +74,39 @@ export default function PlayerStats() {
       </div>
 
       <div className="tabs">
-        <div className={`tab ${tab === 'trends' ? 'active' : ''}`} onClick={() => setTab('trends')}>📈 Тренды</div>
-        <div className={`tab ${tab === 'heroes' ? 'active' : ''}`} onClick={() => setTab('heroes')}>⚔ Герои</div>
-        <div className={`tab ${tab === 'roles' ? 'active' : ''}`} onClick={() => setTab('roles')}>🛡 Позиции</div>
-        <div className={`tab ${tab === 'features' ? 'active' : ''}`} onClick={() => setTab('features')}>⚡ Фичи</div>
-        <div className={`tab ${tab === 'compare' ? 'active' : ''}`} onClick={() => setTab('compare')}>📊 Сравнение</div>
+        <div className={`tab ${tab === 'trends' ? 'active' : ''}`} onClick={() => setTab('trends')}>Тренды</div>
+        <div className={`tab ${tab === 'heroes' ? 'active' : ''}`} onClick={() => setTab('heroes')}>Герои</div>
+        <div className={`tab ${tab === 'roles' ? 'active' : ''}`} onClick={() => setTab('roles')}>Позиции</div>
+        <div className={`tab ${tab === 'features' ? 'active' : ''}`} onClick={() => setTab('features')}>Навыки</div>
+        <div className={`tab ${tab === 'compare' ? 'active' : ''}`} onClick={() => setTab('compare')}>Сравнение</div>
       </div>
 
-      {/* Тренды */}
       {tab === 'trends' && (
         <div>
           {trends.gpm_over_time && trends.gpm_over_time.length > 0 ? (
             <>
               <div className="card mb-20">
-                <h3 className="card-title">GPM по периодам <InfoTooltip text="Как менялось ваше золото в минуту от матча к матчу." /></h3>
+                <div className="section-header">
+                  <h3>GPM по периодам <InfoTooltip text="Как менялось ваше золото в минуту от матча к матчу." /></h3>
+                  <div className="section-line" />
+                </div>
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={trends.gpm_over_time}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
                     <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={11} />
                     <YAxis stroke="#7b8ba5" fontSize={11} />
                     <Tooltip contentStyle={CHART_STYLE} />
-                    <Line type="monotone" dataKey="gpm" stroke="#00d4aa" strokeWidth={2.5} dot={{ fill: '#00d4aa', r: 4 }} />
+                    <Line type="monotone" dataKey="gpm" stroke="#00d4aa" strokeWidth={2.5}
+                      dot={{ fill: '#00d4aa', r: 3 }} activeDot={{ r: 5, fill: '#00ffc8' }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
               <div className="grid-2">
                 <div className="card mb-20">
-                  <h3 className="card-title">Винрейт <InfoTooltip text="Процент побед за период." /></h3>
+                  <div className="section-header">
+                    <h3>Винрейт</h3>
+                    <div className="section-line" />
+                  </div>
                   <ResponsiveContainer width="100%" height={220}>
                     <LineChart data={trends.winrate_over_time?.map((d: any) => ({ ...d, wr: +(d.winrate * 100).toFixed(1) }))}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
@@ -103,7 +118,10 @@ export default function PlayerStats() {
                   </ResponsiveContainer>
                 </div>
                 <div className="card mb-20">
-                  <h3 className="card-title">KDA <InfoTooltip text="Эффективность в боях за период." /></h3>
+                  <div className="section-header">
+                    <h3>KDA</h3>
+                    <div className="section-line" />
+                  </div>
                   <ResponsiveContainer width="100%" height={220}>
                     <LineChart data={trends.kda_over_time}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
@@ -122,10 +140,12 @@ export default function PlayerStats() {
         </div>
       )}
 
-      {/* Герои */}
       {tab === 'heroes' && (
         <div className="card">
-          <h3 className="card-title">Топ героев</h3>
+          <div className="section-header">
+            <h3>Топ героев</h3>
+            <div className="section-line" />
+          </div>
           {heroes.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={250}>
@@ -165,10 +185,12 @@ export default function PlayerStats() {
         </div>
       )}
 
-      {/* Позиции */}
       {tab === 'roles' && (
         <div className="card">
-          <h3 className="card-title">Распределение по позициям</h3>
+          <div className="section-header">
+            <h3>Распределение по позициям</h3>
+            <div className="section-line" />
+          </div>
           {rolesData.length > 0 ? (
             <div className="grid-2">
               <ResponsiveContainer width="100%" height={300}>
@@ -206,14 +228,13 @@ export default function PlayerStats() {
         </div>
       )}
 
-      {/* Фичи */}
       {tab === 'features' && (
         <div>
           {categories.length > 0 ? (
             categories.map((cat: any) => (
               <div key={cat.key} className="card mb-20">
                 <div className="flex-between mb-10">
-                  <h3 className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
                     {cat.name}
                     <InfoTooltip text={FEATURE_TIPS[cat.key] || 'Категория навыков.'} />
                   </h3>
@@ -230,15 +251,20 @@ export default function PlayerStats() {
               </div>
             ))
           ) : (
-            <div className="card"><p className="text-muted text-center" style={{ padding: 30 }}>Фичи рассчитываются после загрузки матчей.</p></div>
+            <div className="card"><p className="text-muted text-center" style={{ padding: 30 }}>Навыки рассчитываются после загрузки матчей.</p></div>
           )}
         </div>
       )}
 
-      {/* Сравнение */}
       {tab === 'compare' && (
         <div className="card">
-          <h3 className="card-title">Сравнение с игроками того же ранга <InfoTooltip text="Насколько ваши метрики отличаются от среднего для вашего ранга. 100% = на уровне." /></h3>
+          <div className="section-header">
+            <h3>
+              Сравнение с игроками того же ранга
+              <InfoTooltip text="Насколько ваши метрики отличаются от среднего для вашего ранга. 100% = на уровне." />
+            </h3>
+            <div className="section-line" />
+          </div>
           {Object.keys(comparisons).length > 0 ? (
             <div className="grid-3">
               {Object.entries(comparisons).map(([key, val]: [string, any]) => {
@@ -249,7 +275,10 @@ export default function PlayerStats() {
                     <div className="stat-card-label">{key.replace(/_/g, ' ')}</div>
                     <div className="stat-card-value" style={{ color }}>{pct}%</div>
                     <div className="progress-bar" style={{ marginTop: 8 }}>
-                      <div className="progress-bar-fill" style={{ width: `${Math.min(pct, 100)}%` }} />
+                      <div className="progress-bar-fill" style={{
+                        width: `${Math.min(pct, 100)}%`,
+                        background: color,
+                      }} />
                     </div>
                   </div>
                 );

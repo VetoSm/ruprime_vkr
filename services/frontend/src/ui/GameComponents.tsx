@@ -94,16 +94,50 @@ export function HeroIcon({ heroId, heroName, size = 28, showName = true }: HeroI
 
 /* ===== Role Badge ===== */
 
-const ROLE_INFO: Record<string, { name: string; short: string; icon: string; color: string }> = {
-  POS1: { name: 'Carry', short: 'Carry', icon: '⚔', color: '#ff8c00' },
-  POS2: { name: 'Mid', short: 'Mid', icon: '⚡', color: '#ffd700' },
-  POS3: { name: 'Offlane', short: 'Off', icon: '🛡', color: '#ff4757' },
-  POS4: { name: 'Soft Support', short: 'Sup4', icon: '✦', color: '#7c5cfc' },
-  POS5: { name: 'Hard Support', short: 'Sup5', icon: '✚', color: '#00d4aa' },
-  '1': { name: 'Carry', short: 'Carry', icon: '⚔', color: '#ff8c00' },
-  '2': { name: 'Mid', short: 'Mid', icon: '⚡', color: '#ffd700' },
-  '3': { name: 'Offlane', short: 'Off', icon: '🛡', color: '#ff4757' },
-  '4': { name: 'Soft Support', short: 'Sup4', icon: '✦', color: '#7c5cfc' },
+function RoleIconSvg({ type, color, size = 12 }: { type: string; color: string; size?: number }) {
+  const s = { width: size, height: size, flexShrink: 0 } as const;
+  switch (type) {
+    case 'carry': return (
+      <svg style={s} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round">
+        <line x1="2" y1="14" x2="14" y2="2" /><polyline points="8,2 14,2 14,8" />
+      </svg>
+    );
+    case 'mid': return (
+      <svg style={s} viewBox="0 0 16 16" fill={color} stroke="none">
+        <polygon points="8,1 10,6 8,5 6,6" /><polygon points="8,15 6,10 8,11 10,10" />
+        <rect x="7" y="5" width="2" height="6" rx="1" />
+      </svg>
+    );
+    case 'off': return (
+      <svg style={s} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 2L2 6v5l6 4 6-4V6z" />
+      </svg>
+    );
+    case 'sup4': return (
+      <svg style={s} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round">
+        <circle cx="8" cy="8" r="3" /><line x1="8" y1="1" x2="8" y2="4" /><line x1="8" y1="12" x2="8" y2="15" />
+        <line x1="1" y1="8" x2="4" y2="8" /><line x1="12" y1="8" x2="15" y2="8" />
+      </svg>
+    );
+    case 'sup5': return (
+      <svg style={s} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round">
+        <line x1="8" y1="2" x2="8" y2="14" /><line x1="2" y1="8" x2="14" y2="8" />
+      </svg>
+    );
+    default: return null;
+  }
+}
+
+const ROLE_INFO: Record<string, { name: string; short: string; svgType: string; color: string }> = {
+  POS1: { name: 'Carry', short: 'Carry', svgType: 'carry', color: '#ff8c00' },
+  POS2: { name: 'Mid', short: 'Mid', svgType: 'mid', color: '#ffd700' },
+  POS3: { name: 'Offlane', short: 'Off', svgType: 'off', color: '#ff4757' },
+  POS4: { name: 'Soft Support', short: 'Sup4', svgType: 'sup4', color: '#7c5cfc' },
+  POS5: { name: 'Hard Support', short: 'Sup5', svgType: 'sup5', color: '#00d4aa' },
+  '1': { name: 'Carry', short: 'Carry', svgType: 'carry', color: '#ff8c00' },
+  '2': { name: 'Mid', short: 'Mid', svgType: 'mid', color: '#ffd700' },
+  '3': { name: 'Offlane', short: 'Off', svgType: 'off', color: '#ff4757' },
+  '4': { name: 'Soft Support', short: 'Sup4', svgType: 'sup4', color: '#7c5cfc' },
 };
 
 interface RoleBadgeProps {
@@ -124,7 +158,7 @@ export function RoleBadge({ role, compact = false }: RoleBadgeProps) {
       background: `${info.color}10`,
       fontSize: '0.75rem', fontWeight: 700, color: info.color,
     }}>
-      <span>{info.icon}</span>
+      <RoleIconSvg type={info.svgType} color={info.color} />
       {compact ? info.short : info.name}
     </span>
   );

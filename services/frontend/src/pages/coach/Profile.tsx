@@ -23,9 +23,7 @@ export default function CoachProfilePage() {
       setHeroes(Array.isArray(p.hero_pool) ? p.hero_pool.join(', ') : '');
       setRate(p.hourly_rate?.toString() || '');
       setExp(p.experience_years?.toString() || '');
-      // Parse about for name
-      const aboutText = p.about || '';
-      setAbout(aboutText);
+      setAbout(p.about || '');
     }).catch(() => {});
   }, []);
 
@@ -50,14 +48,39 @@ export default function CoachProfilePage() {
   return (
     <div>
       <div className="page-header">
-        <h1>🎓 Профиль тренера</h1>
+        <h1>Профиль тренера</h1>
         <p>Редактируйте профиль для привлечения учеников</p>
       </div>
 
       {msg && <div className="alert alert-success">{msg}</div>}
 
+      {/* Stats Row */}
+      <div className="coach-stats-row">
+        <div className="coach-stat">
+          <div className="coach-stat-value">0</div>
+          <div className="coach-stat-label">Ученики</div>
+        </div>
+        <div className="coach-stat">
+          <div className="coach-stat-value">0</div>
+          <div className="coach-stat-label">Сессии</div>
+        </div>
+        <div className="coach-stat">
+          <div className="coach-stat-value">—</div>
+          <div className="coach-stat-label">Рейтинг</div>
+        </div>
+        <div className="coach-stat">
+          <div className="coach-stat-value" style={{ fontSize: '1.4rem' }}>
+            {rate ? `${parseInt(rate).toLocaleString()} ₽` : '—'}
+          </div>
+          <div className="coach-stat-label">Ставка / час</div>
+        </div>
+      </div>
+
       <div className="card mb-20">
-        <h3 className="card-title">👤 Личные данные</h3>
+        <div className="section-header">
+          <h3>Личные данные</h3>
+          <div className="section-line" />
+        </div>
         <div className="grid-2">
           <div className="form-group">
             <label>Имя</label>
@@ -71,7 +94,10 @@ export default function CoachProfilePage() {
       </div>
 
       <div className="card mb-20">
-        <h3 className="card-title">⚔ Игровые данные</h3>
+        <div className="section-header">
+          <h3>Игровые данные</h3>
+          <div className="section-line" />
+        </div>
         <div className="grid-2">
           <div className="form-group">
             <label>Оценка MMR</label>
@@ -81,16 +107,19 @@ export default function CoachProfilePage() {
             <label>Ранг</label>
             <select className="form-select" value={rank} onChange={(e) => setRank(e.target.value)}>
               <option value="">Выберите...</option>
-              {['HERALD','GUARDIAN','CRUSADER','ARCHON','LEGEND','ANCIENT','DIVINE','IMMORTAL'].map(r => (
+              {['HERALD', 'GUARDIAN', 'CRUSADER', 'ARCHON', 'LEGEND', 'ANCIENT', 'DIVINE', 'IMMORTAL'].map(r => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
+            {rank && (
+              <div style={{ marginTop: 8 }}><RankBadge rankName={rank} size="md" /></div>
+            )}
           </div>
         </div>
         <div className="form-group">
           <label>Основные позиции</label>
           <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-            {['POS1','POS2','POS3','POS4','POS5'].map((r) => {
+            {['POS1', 'POS2', 'POS3', 'POS4', 'POS5'].map((r) => {
               const selected = roles.includes(r);
               return (
                 <button key={r} type="button"
@@ -110,14 +139,17 @@ export default function CoachProfilePage() {
       </div>
 
       <div className="card mb-20">
-        <h3 className="card-title">💰 Услуги</h3>
+        <div className="section-header">
+          <h3>Услуги</h3>
+          <div className="section-line" />
+        </div>
         <div className="grid-2">
           <div className="form-group">
-            <label>Почасовая ставка (₽)</label>
+            <label>Почасовая ставка</label>
             <div className="flex gap-10" style={{ alignItems: 'center' }}>
               <input className="form-input" type="number" value={rate} onChange={(e) => setRate(e.target.value)}
                 placeholder="1500" style={{ maxWidth: 200 }} />
-              <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>₽ / час</span>
+              <span style={{ color: 'var(--accent)', fontWeight: 800, fontSize: '1rem' }}>₽ / час</span>
             </div>
           </div>
           <div className="form-group">
@@ -133,7 +165,7 @@ export default function CoachProfilePage() {
         </div>
       </div>
 
-      <button className="btn btn-primary" onClick={save}>💾 Сохранить профиль</button>
+      <button className="btn btn-primary" onClick={save}>Сохранить профиль</button>
     </div>
   );
 }

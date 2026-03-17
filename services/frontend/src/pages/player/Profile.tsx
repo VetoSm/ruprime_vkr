@@ -102,199 +102,191 @@ export default function PlayerProfile() {
   return (
     <div>
       <div className="page-header">
-        <h1>⚔ Профиль игрока</h1>
+        <h1>Профиль игрока</h1>
         <p>Привязка аккаунта, цели и предпочтения</p>
       </div>
 
       {msg && <div className="alert alert-success" style={{ whiteSpace: 'pre-line' }}>{msg}</div>}
       {error && <div className="alert alert-error">{error}</div>}
 
-      {/* === Steam Account === */}
-      <div className="card card-accent mb-20">
-        <div className="flex-between mb-10">
-          <h3 className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            Аккаунт Steam / Dota 2
-            <InfoTooltip text="Привяжите Steam ID чтобы загрузить статистику матчей, ранг, героев и получить персональный анализ." />
-          </h3>
-          {isLinked && (
-            <button className="btn btn-outline btn-sm" onClick={refreshSteam} disabled={linking}>
-              {linking ? '⏳ Обновление...' : '🔄 Обновить данные'}
-            </button>
-          )}
-        </div>
-
-        {showSteamHelp && (
-          <div className="alert alert-success" style={{ fontSize: '0.85rem', marginBottom: 16 }}>
-            <strong>Как найти свой Steam ID:</strong>
-            <ol style={{ paddingLeft: 18, marginTop: 8, lineHeight: 1.8 }}>
-              <li>Откройте <strong>Steam</strong> → имя вверху справа → <strong>«Об аккаунте»</strong></li>
-              <li>SteamID64 — число вида <code>76561198xxxxxxxxx</code></li>
-              <li>Или <a href="https://steamid.io" target="_blank" rel="noreferrer">steamid.io</a> → вставьте ссылку на профиль</li>
-              <li>Убедитесь что <strong>история матчей публичная</strong> в настройках Dota 2</li>
-            </ol>
-          </div>
-        )}
-
-        {steamData?.warning && (
-          <div className="alert alert-error" style={{ fontSize: '0.85rem', whiteSpace: 'pre-line', marginBottom: 16 }}>
-            {steamData.warning}
-          </div>
-        )}
-
-        {steamData?.parse_message && (
-          <div className="alert alert-success" style={{ fontSize: '0.85rem', marginBottom: 16 }}>
-            ⏳ {steamData.parse_message}
-          </div>
-        )}
-
-        {isLinked ? (
-          <div>
-            {/* Player card */}
-            <div className="flex gap-20" style={{ alignItems: 'center', marginBottom: 20 }}>
+      {isLinked ? (
+        <>
+          {/* === Hero Card === */}
+          <div className="hero-card mb-20">
+            <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
               {steamData.avatar_url && (
-                <img src={steamData.avatar_url} alt="Avatar"
-                  style={{ width: 80, height: 80, borderRadius: 14, border: '2px solid var(--accent)',
-                    boxShadow: '0 0 20px rgba(0, 212, 170, 0.25)' }} />
+                <img src={steamData.avatar_url} alt="Avatar" className="hero-card-avatar" />
               )}
-              <div>
-                <h3 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--accent)' }}>
-                  {steamData.personaname}
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                  <h2 style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>
+                    {steamData.personaname}
+                  </h2>
+                  <RankBadge rankTier={steamData.rank_tier} size="lg" />
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="badge badge-accent" style={{ fontSize: '0.8rem' }}>
+                    {totalGames > 0 ? `${winrate}% WR` : '—'}
+                  </span>
+                  <span className="badge badge-purple" style={{ fontSize: '0.8rem' }}>
+                    ~{steamData.estimated_hours} часов
+                  </span>
+                  <span className="badge badge-accent" style={{ fontSize: '0.8rem' }}>
+                    {steamData.matches_loaded} матчей загружено
+                  </span>
+                </div>
+              </div>
+              <button className="btn btn-outline btn-sm" onClick={refreshSteam} disabled={linking}
+                style={{ whiteSpace: 'nowrap' }}>
+                {linking ? 'Обновление...' : 'Обновить данные'}
+              </button>
+            </div>
+          </div>
+
+          {steamData?.warning && (
+            <div className="alert alert-error" style={{ fontSize: '0.85rem', whiteSpace: 'pre-line' }}>
+              {steamData.warning}
+            </div>
+          )}
+
+          {steamData?.parse_message && (
+            <div className="alert alert-success" style={{ fontSize: '0.85rem' }}>
+              {steamData.parse_message}
+            </div>
+          )}
+
+          {/* === Stat Pills === */}
+          <div className="stat-pills mb-20">
+            <div className="stat-pill">
+              <span className="stat-pill-label">Ранг</span>
+              <RankBadge rankTier={steamData.rank_tier} size="sm" />
+            </div>
+            <div className="stat-pill">
+              <span className="stat-pill-label">W / L</span>
+              <span className="stat-pill-value">{steamData.win} / {steamData.lose}</span>
+            </div>
+            <div className="stat-pill">
+              <span className="stat-pill-label">Часы</span>
+              <span className="stat-pill-value accent">{steamData.estimated_hours?.toLocaleString()}</span>
+            </div>
+            <div className="stat-pill">
+              <span className="stat-pill-label">Последняя игра</span>
+              <span className="stat-pill-value" style={{ fontSize: '0.95rem' }}>
+                {steamData.last_match_time
+                  ? new Date(steamData.last_match_time).toLocaleDateString('ru-RU')
+                  : '—'}
+              </span>
+            </div>
+          </div>
+
+          {/* === Top Heroes === */}
+          {steamData.heroes_top && steamData.heroes_top.length > 0 && (
+            <div className="mb-20">
+              <div className="section-header">
+                <h3>Топ героев</h3>
+                <div className="section-line" />
+              </div>
+              <div className="grid-3">
+                {steamData.heroes_top.slice(0, 6).map((h: any) => (
+                  <div key={h.hero_id} className="ranking-card">
+                    <img src={heroIcon(h.hero_id)} alt="" style={{
+                      width: 40, height: 40, borderRadius: 8, border: '1px solid var(--border-color)'
+                    }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {heroName(h.hero_id)}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        {h.games} игр, <span style={{ color: h.winrate >= 0.5 ? 'var(--accent)' : 'var(--danger)' }}>{(h.winrate * 100).toFixed(0)}% WR</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* === Hero Rankings === */}
+          {steamData.rankings_top && steamData.rankings_top.length > 0 && (
+            <div className="mb-20">
+              <div className="section-header">
+                <h3>
+                  Рейтинг по героям
+                  <InfoTooltip text="Перцентиль OpenDota: в каком проценте игроков мира вы находитесь по этому герою." />
                 </h3>
-                <div className="flex gap-10 mt-10" style={{ flexWrap: 'wrap' }}>
-                  <RankBadge rankTier={steamData.rank_tier} size="md" />
-                  <span className="badge badge-accent">{steamData.win}W / {steamData.lose}L</span>
-                  <span className="badge badge-purple">~{steamData.estimated_hours} часов</span>
-                  <span className="badge badge-accent">Винрейт: {winrate}%</span>
-                  <span className="badge badge-accent">{steamData.matches_loaded} матчей</span>
-                </div>
+                <div className="section-line" />
               </div>
-            </div>
-
-            {/* Stats grid */}
-            <div className="grid-4 mb-20">
-              <div className="stat-card" style={{ padding: 14 }}>
-                <div className="stat-card-label">Ранг</div>
-                <RankBadge rankTier={steamData.rank_tier} size="sm" />
-              </div>
-              <div className="stat-card" style={{ padding: 14 }}>
-                <div className="stat-card-label">Побед / Поражений</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{steamData.win} / {steamData.lose}</div>
-              </div>
-              <div className="stat-card" style={{ padding: 14 }}>
-                <div className="stat-card-label">Часов в Dota 2</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>~{steamData.estimated_hours}</div>
-              </div>
-              <div className="stat-card" style={{ padding: 14 }}>
-                <div className="stat-card-label">Последняя игра</div>
-                <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>
-                  {steamData.last_match_time ? new Date(steamData.last_match_time).toLocaleDateString('ru-RU') : '—'}
-                </div>
-              </div>
-            </div>
-
-            {/* Top heroes */}
-            {steamData.heroes_top && steamData.heroes_top.length > 0 && (
-              <div className="mb-20">
-                <h4 style={{ marginBottom: 10 }}>Топ героев</h4>
-                <div className="table-wrap">
-                  <table>
-                    <thead><tr><th>Герой</th><th>Игр</th><th>Побед</th><th>Винрейт</th></tr></thead>
-                    <tbody>
-                      {steamData.heroes_top.slice(0, 5).map((h: any) => (
-                        <tr key={h.hero_id}>
-                          <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <img src={heroIcon(h.hero_id)} alt="" style={{ width: 28, height: 28, borderRadius: 4 }}
-                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                            {heroName(h.hero_id)}
-                          </td>
-                          <td>{h.games}</td>
-                          <td>{h.win}</td>
-                          <td>{(h.winrate * 100).toFixed(1)}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Rankings */}
-            {steamData.rankings_top && steamData.rankings_top.length > 0 && (
-              <div className="mb-20">
-                <h4 style={{ marginBottom: 10 }}>
-                  Рейтинг по героям <InfoTooltip text="Перцентиль OpenDota: в каком проценте игроков мира вы находитесь по этому герою." />
-                </h4>
-                <div className="grid-3">
-                  {steamData.rankings_top.slice(0, 6).map((r: any) => {
-                    const topPct = ((1 - r.percent_rank) * 100);
-                    const color = topPct <= 5 ? 'var(--accent)' : topPct <= 20 ? 'var(--warning)' : 'var(--text-primary)';
-                    return (
-                      <div key={r.hero_id} className="stat-card" style={{ padding: 12 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                          <img src={heroIcon(r.hero_id)} alt="" style={{ width: 24, height: 24, borderRadius: 3 }}
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                          <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{heroName(r.hero_id)}</span>
-                        </div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color }}>
-                          Топ {topPct.toFixed(1)}%
-                        </div>
-                        <div className="progress-bar" style={{ marginTop: 6 }}>
+              <div className="grid-3">
+                {steamData.rankings_top.slice(0, 6).map((r: any) => {
+                  const topPct = ((1 - r.percent_rank) * 100);
+                  const color = topPct <= 5 ? 'var(--accent)' : topPct <= 20 ? 'var(--warning)' : 'var(--text-primary)';
+                  return (
+                    <div key={r.hero_id} className="ranking-card">
+                      <img src={heroIcon(r.hero_id)} alt="" style={{
+                        width: 36, height: 36, borderRadius: 6, border: '1px solid var(--border-color)',
+                      }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: 2 }}>{heroName(r.hero_id)}</div>
+                        <div className="progress-bar" style={{ height: 5 }}>
                           <div className="progress-bar-fill" style={{ width: `${r.percent_rank * 100}%` }} />
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
+                      <span className="ranking-pct" style={{ color }}>
+                        Top {topPct.toFixed(1)}%
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-            )}
-
-            <div className="text-muted" style={{ fontSize: '0.8rem' }}>
-              Account: {steamData.account_id} | Steam: {steamData.steam_id}
-              {steamData.profile_url && <> | <a href={steamData.profile_url} target="_blank" rel="noreferrer">Профиль Steam ↗</a></>}
             </div>
-          </div>
-        ) : (
-          <div>
-            <button className="btn btn-outline btn-sm mb-10" onClick={() => setShowSteamHelp(!showSteamHelp)}>
-              ❓ Как найти Steam ID
-            </button>
-            <div className="form-group">
-              <label>Steam ID (SteamID64)</label>
-              <input className="form-input" value={steamId} onChange={(e) => setSteamId(e.target.value)}
-                placeholder="76561198xxxxxxxxx" />
-            </div>
-            <button className="btn btn-primary" onClick={linkSteam} disabled={linking}>
-              {linking ? '⏳ Подключение (~15 сек)...' : '🔗 Привязать Steam'}
-            </button>
-          </div>
-        )}
-      </div>
+          )}
 
-      {/* === Фактические данные === */}
-      <div className="card mb-20">
-        <h3 className="card-title">📋 Фактические данные</h3>
-        <div className="grid-3">
-          <div>
-            <span className="text-muted">Steam ID: </span>
-            <strong>{profile?.steam_id || 'Не привязан'}</strong>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 24 }}>
+            Account: {steamData.account_id} | Steam: {steamData.steam_id}
+            {steamData.profile_url && <> | <a href={steamData.profile_url} target="_blank" rel="noreferrer">Профиль Steam</a></>}
           </div>
-          <div>
-            <span className="text-muted">Account ID: </span>
-            <strong>{profile?.dota_account_id || '—'}</strong>
+        </>
+      ) : (
+        /* === Link Steam === */
+        <div className="hero-card mb-20">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontWeight: 700 }}>Подключение Steam / Dota 2</h3>
+            <InfoTooltip text="Привяжите Steam ID чтобы загрузить статистику матчей, ранг, героев и получить персональный анализ." />
           </div>
-          <div>
-            <span className="text-muted">Текущий ранг: </span>
-            {profile?.actual_rank_tier ? <RankBadge rankName={profile.actual_rank_tier} size="sm" /> : <strong>Неизвестен</strong>}
+          <button className="btn btn-outline btn-sm mb-10" onClick={() => setShowSteamHelp(!showSteamHelp)}>
+            Как найти Steam ID
+          </button>
+          {showSteamHelp && (
+            <div className="alert alert-success" style={{ fontSize: '0.85rem' }}>
+              <strong>Инструкция:</strong>
+              <ol style={{ paddingLeft: 18, marginTop: 8, lineHeight: 1.8 }}>
+                <li>Откройте <strong>Steam</strong> → имя вверху справа → <strong>«Об аккаунте»</strong></li>
+                <li>SteamID64 — число вида <code>76561198xxxxxxxxx</code></li>
+                <li>Или <a href="https://steamid.io" target="_blank" rel="noreferrer">steamid.io</a> → вставьте ссылку на профиль</li>
+                <li>Убедитесь что <strong>история матчей публичная</strong> в настройках Dota 2</li>
+              </ol>
+            </div>
+          )}
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label>Steam ID (SteamID64)</label>
+            <input className="form-input" value={steamId} onChange={(e) => setSteamId(e.target.value)}
+              placeholder="76561198xxxxxxxxx" />
           </div>
+          <button className="btn btn-primary" onClick={linkSteam} disabled={linking}>
+            {linking ? 'Подключение (~15 сек)...' : 'Привязать Steam'}
+          </button>
         </div>
-      </div>
+      )}
 
-      {/* === Цели === */}
-      <div className="card">
-        <h3 className="card-title">🎯 Ваши цели и предпочтения</h3>
+      {/* === Goals === */}
+      <div className="card mb-20">
+        <div className="section-header">
+          <h3>Цели и предпочтения</h3>
+          <div className="section-line" />
+        </div>
         <div className="grid-2">
           <div className="form-group">
-            <label>Желаемый ранг</label>
+            <label>Целевой ранг</label>
             <select className="form-select" value={desiredRank} onChange={(e) => setDesiredRank(e.target.value)}>
               <option value="">Выберите...</option>
               <option value="HERALD">Herald (Рекрут)</option>
@@ -308,7 +300,7 @@ export default function PlayerProfile() {
             </select>
           </div>
           <div className="form-group">
-            <label>Желаемые позиции</label>
+            <label>Целевые позиции</label>
             <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
               {['POS1', 'POS2', 'POS3', 'POS4', 'POS5'].map((r) => {
                 const selected = desiredRoles.includes(r);
@@ -337,7 +329,7 @@ export default function PlayerProfile() {
           <textarea className="form-input" value={about} onChange={(e) => setAbout(e.target.value)}
             placeholder="Расскажите о своём стиле игры..." />
         </div>
-        <button className="btn btn-primary" onClick={saveProfile}>💾 Сохранить профиль</button>
+        <button className="btn btn-primary" onClick={saveProfile}>Сохранить профиль</button>
       </div>
     </div>
   );
