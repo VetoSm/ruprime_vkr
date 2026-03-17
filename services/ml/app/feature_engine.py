@@ -15,30 +15,38 @@ from app.models import MlKaggleBaseline, MlPlayerAnalysis
 
 logger = logging.getLogger(__name__)
 
-# MMR bands based on rank_tier ranges
+# 8 MMR bands by medal (instead of 4 wide bands)
 MMR_BANDS = [
-    ("0-2000", 0, 39),
-    ("2000-4000", 40, 59),
-    ("4000-6000", 60, 79),
-    ("6000+", 80, 100),
+    ("herald", 10, 19),
+    ("guardian", 20, 29),
+    ("crusader", 30, 39),
+    ("archon", 40, 49),
+    ("legend", 50, 59),
+    ("ancient", 60, 69),
+    ("divine", 70, 79),
+    ("immortal", 80, 100),
 ]
+
+# Fallback: map old 4-band names to new 8-band
+OLD_TO_NEW_BAND = {
+    "0-2000": "crusader",
+    "2000-4000": "archon",
+    "4000-6000": "ancient",
+    "6000+": "immortal",
+}
 
 
 def rank_tier_to_mmr_band(rank_tier: float) -> str:
-    """Convert rank_tier to mmr_band string."""
+    """Convert rank_tier to mmr_band string (8 bands by medal)."""
     if pd.isna(rank_tier) or rank_tier <= 0:
-        return "0-2000"
+        return "crusader"  # default for unknown
     rt = int(rank_tier)
-    # rank_tier format: first digit = medal (1-8), second = stars (0-5)
     medal = rt // 10
-    if medal <= 3:
-        return "0-2000"
-    elif medal <= 5:
-        return "2000-4000"
-    elif medal <= 7:
-        return "4000-6000"
-    else:
-        return "6000+"
+    band_map = {
+        1: "herald", 2: "guardian", 3: "crusader", 4: "archon",
+        5: "legend", 6: "ancient", 7: "divine", 8: "immortal",
+    }
+    return band_map.get(medal, "crusader")
 
 
 def compute_baselines(db: Session) -> int:
@@ -77,6 +85,9 @@ def compute_baselines(db: Session) -> int:
     df["kda"] = (df["kills"] + df["assists"]) / df["deaths"].clip(lower=1)
 
     # Group by (mmr_band, hero_id, lane_role)
+    metrics = ["gold_per_min", "xp_per_min", "kills", "deaths", "assists",
+               "kda", "last_hits", "denies", "hero_damage", "tower_damage", "net_worth"]
+
     grouped = df.groupby(["mmr_band", "hero_id", "lane_role"]).agg(
         avg_gpm=("gold_per_min", "mean"),
         avg_xpm=("xp_per_min", "mean"),
@@ -96,6 +107,31 @@ def compute_baselines(db: Session) -> int:
     # Filter: at least 5 matches for a baseline
     grouped = grouped[grouped["match_count"] >= 5]
 
+    # Compute percentiles per group
+    pct_data = df.groupby(["mmr_band", "hero_id", "lane_role"]).agg(
+        **{f"p25_{m}": (m, lambda x: x.quantile(0.25)) for m in metrics},
+        **{f"p50_{m}": (m, lambda x: x.quantile(0.50)) for m in metrics},
+        **{f"p75_{m}": (m, lambda x: x.quantile(0.75)) for m in metrics},
+        **{f"p90_{m}": (m, lambda x: x.quantile(0.90)) for m in metrics},
+        **{f"p95_{m}": (m, lambda x: x.quantile(0.95)) for m in metrics},
+    ).reset_index()
+
+    # Merge percentiles into grouped as JSON column
+    merged = grouped.merge(pct_data, on=["mmr_band", "hero_id", "lane_role"], how="left")
+
+    def row_percentiles(row):
+        pct = {}
+        for m in metrics:
+            pct[m] = {}
+            for p in ["p25", "p50", "p75", "p90", "p95"]:
+                key = f"{p}_{m}"
+                val = row.get(key)
+                if pd.notna(val):
+                    pct[m][p] = round(float(val), 2)
+        return pct
+
+    grouped["percentiles"] = merged.apply(row_percentiles, axis=1)
+
     # Clear existing baselines
     with engine.connect() as conn:
         conn.execute(text("DELETE FROM ml_kaggle_baselines"))
@@ -105,7 +141,7 @@ def compute_baselines(db: Session) -> int:
     grouped.rename(columns={"lane_role": "role"}, inplace=True)
     grouped.to_sql("ml_kaggle_baselines", engine, if_exists="append", index=False)
 
-    logger.info(f"Computed {len(grouped)} baselines")
+    logger.info(f"Computed {len(grouped)} baselines with percentiles (8 bands)")
     return len(grouped)
 
 

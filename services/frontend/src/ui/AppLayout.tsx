@@ -2,6 +2,26 @@ import { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
 
+const NAV_ICONS: Record<string, string> = {
+  '/dashboard': '🏠',
+  '/profile/player': '⚔',
+  '/stats': '📊',
+  '/coaches': '🎓',
+  '/matchmaking': '🔍',
+  '/requests': '📋',
+  '/schedule': '📅',
+  '/ai-chat': '🤖',
+  '/coach/dashboard': '🎯',
+  '/coach/profile': '👤',
+  '/coach/schedule': '📅',
+  '/coach/reviews': '⭐',
+  '/admin/dashboard': '🛡',
+  '/admin/users': '👥',
+  '/admin/logs': '📜',
+  '/admin/ml-import': '💾',
+  '/admin/ml-data': '📈',
+};
+
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
 
@@ -39,19 +59,24 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <h2>DOTA 2 COACH</h2>
-          <span>{user?.login} ({user?.role})</span>
+          <h2>RUPRIME</h2>
+          <span>{user?.login} • {user?.role}</span>
         </div>
         <ul className="sidebar-nav">
           {links.map((link) => (
             <li key={link.to}>
               <NavLink to={link.to} className={({ isActive }) => isActive ? 'active' : ''}>
+                <span style={{ fontSize: '1.1rem', width: 24, textAlign: 'center' }}>
+                  {NAV_ICONS[link.to] || '•'}
+                </span>
                 {link.label}
               </NavLink>
             </li>
           ))}
           <li>
-            <a href="#" onClick={(e) => { e.preventDefault(); logout(); }} style={{ color: 'var(--danger)' }}>
+            <a href="#" onClick={(e) => { e.preventDefault(); logout(); }}
+              style={{ color: 'var(--danger)' }}>
+              <span style={{ fontSize: '1.1rem', width: 24, textAlign: 'center' }}>🚪</span>
               Выйти
             </a>
           </li>

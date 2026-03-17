@@ -18,9 +18,9 @@ RANK_NAMES = {1: "HERALD", 2: "GUARDIAN", 3: "CRUSADER", 4: "ARCHON",
               5: "LEGEND", 6: "ANCIENT", 7: "DIVINE", 8: "IMMORTAL"}
 
 RANK_TO_MMR_BAND = {
-    "HERALD": "0-2000", "GUARDIAN": "0-2000", "CRUSADER": "2000-4000",
-    "ARCHON": "2000-4000", "LEGEND": "4000-6000", "ANCIENT": "4000-6000",
-    "DIVINE": "6000+", "IMMORTAL": "6000+",
+    "HERALD": "herald", "GUARDIAN": "guardian", "CRUSADER": "crusader",
+    "ARCHON": "archon", "LEGEND": "legend", "ANCIENT": "ancient",
+    "DIVINE": "divine", "IMMORTAL": "immortal",
 }
 
 
@@ -88,84 +88,120 @@ def compute_detailed_features(account_id: int, desired_rank: str = None, db: Ses
     # Compute player averages from matches + account totals
     player = _compute_player_averages(df, acc)
 
-    # Build 6 categories
+    # Build 8 categories (no duplicates, honest about missing data)
     categories = []
+    dur_min = max(player.get("avg_duration_min", 35), 1)
 
-    # 1. Фарм и Экономика
+    # Helper: check if player has data for a metric
+    def has_data(key, min_val=0.001):
+        return player.get(key, 0) > min_val
+
+    # 1. Фарм
     categories.append(_build_category(
         key="farming",
-        name="Фарм и Экономика",
+        name="Фарм",
         icon="$",
         components=[
             _component("gpm", "Золото в минуту (GPM)", player.get("gpm", 0), current_baseline.get("gpm", 400), target_baseline.get("gpm", 500)),
-            _component("last_hits", "Добивания крипов (LH/мин)", player.get("lh_per_min", 0), current_baseline.get("last_hits", 5) / max(player.get("avg_duration_min", 35), 1), target_baseline.get("last_hits", 6) / 35),
+            _component("cs_per_min", "Крипов в минуту (CS/мин)", player.get("last_hits", 0) / dur_min, current_baseline.get("last_hits", 150) / 35, target_baseline.get("last_hits", 180) / 35),
             _component("denies", "Денаи за игру", player.get("denies", 0), current_baseline.get("denies", 5), target_baseline.get("denies", 8)),
-            _component("xpm", "Опыт в минуту (XPM)", player.get("xpm", 0), current_baseline.get("xpm", 450), target_baseline.get("xpm", 550)),
+            _component("net_worth_efficiency", "Эффективность фарма", player.get("gpm", 0) * dur_min / max(player.get("gpm", 1) * dur_min, 1) if player.get("gpm", 0) > 0 else 0, 0.8, 1.0),
         ],
     ))
 
-    # 2. Боевая эффективность
+    # 2. Бой
     categories.append(_build_category(
         key="combat",
         name="Боевая эффективность",
         icon="/",
         components=[
-            _component("kda", "KDA", player.get("kda", 0), current_baseline.get("kda", 3.0), target_baseline.get("kda", 4.0)),
-            _component("kills", "Убийства за игру", player.get("kills", 0), current_baseline.get("kills", 7), target_baseline.get("kills", 9)),
-            _component("hero_damage", "Урон героям за игру", player.get("hero_damage", 0), current_baseline.get("hero_damage", 15000), target_baseline.get("hero_damage", 20000)),
-            _component("assists", "Ассисты за игру", player.get("assists", 0), current_baseline.get("assists", 12), target_baseline.get("assists", 15)),
+            _component("kda", "KDA", player.get("kda", 0), current_baseline.get("kda", 3.0), target_baseline.get("kda", 4.5)),
+            _component("hero_damage_per_min", "Урон героям в минуту", player.get("hero_damage", 0) / dur_min, current_baseline.get("hero_damage", 15000) / 35, target_baseline.get("hero_damage", 20000) / 35),
+            _component("kills", "Убийства за игру", player.get("kills", 0), current_baseline.get("kills", 5), target_baseline.get("kills", 6)),
+            _component("assists", "Ассисты за игру", player.get("assists", 0), current_baseline.get("assists", 10), target_baseline.get("assists", 13)),
         ],
     ))
 
     # 3. Выживаемость
-    avg_deaths_baseline = current_baseline.get("deaths", 6)
-    avg_deaths_target = target_baseline.get("deaths", 5)
     categories.append(_build_category(
         key="survival",
         name="Выживаемость",
         icon="O",
         components=[
-            _component_inverted("deaths", "Смертей за игру (меньше = лучше)", player.get("deaths", 0), avg_deaths_baseline, avg_deaths_target),
-            _component("healing", "Лечение за игру", player.get("hero_healing", 0), 1500, 2500),
+            _component_inverted("deaths", "Смертей за игру (меньше = лучше)", player.get("deaths", 0), current_baseline.get("deaths", 5), target_baseline.get("deaths", 4)),
             _component("winrate", "Процент побед", player.get("winrate", 0.5) * 100, 50, 55),
+            _component("healing", "Лечение за игру", player.get("hero_healing", 0), 1000, 2000),
         ],
     ))
 
-    # 4. Картография и Вижн
-    obs_per_game = player.get("obs_per_game", 0)
-    sen_per_game = player.get("sen_per_game", 0)
+    # 4. Вижн (с проверкой наличия данных)
+    obs = player.get("obs_per_game", 0)
+    sen = player.get("sen_per_game", 0)
+    vision_has_data = has_data("obs_per_game") or has_data("sen_per_game")
     categories.append(_build_category(
         key="vision",
-        name="Картография и Вижн",
+        name="Вижн и Картография",
         icon="E",
         components=[
-            _component("observer_wards", "Обсервер варды за игру", obs_per_game, 2.0, 4.0),
-            _component("sentry_wards", "Сентри варды за игру", sen_per_game, 2.0, 5.0),
-            _component("wards_total", "Всего вардов за игру", obs_per_game + sen_per_game, 4.0, 8.0),
+            _component("observer_wards", "Обсервер варды/игра", obs, 2.0, 4.0),
+            _component("sentry_wards", "Сентри варды/игра", sen, 2.0, 4.0),
+        ] if vision_has_data else [
+            _component("vision_data", "Недостаточно данных — нужны parsed матчи", 0, 1, 1),
         ],
     ))
 
-    # 5. Инициация и Контроль
+    # 5. Объекты
     categories.append(_build_category(
-        key="initiation",
-        name="Инициация и Контроль",
-        icon="/",
+        key="objectives",
+        name="Давление на объекты",
+        icon="T",
         components=[
-            _component("tower_damage", "Урон по башням за игру", player.get("tower_damage", 0), current_baseline.get("tower_damage", 3000), target_baseline.get("tower_damage", 5000)),
-            _component("tower_kills", "Башен уничтожено за игру", player.get("tower_kills_per_game", 0), 0.5, 1.0),
-            _component("stuns", "Стан/контроль за игру", player.get("stuns_per_game", 0), 5.0, 10.0),
+            _component("tower_damage", "Урон по башням", player.get("tower_damage", 0), current_baseline.get("tower_damage", 2000), target_baseline.get("tower_damage", 3000)),
+            _component("tower_kills", "Башен уничтожено/игра", player.get("tower_kills_per_game", 0), 0.5, 1.0),
+            _component("objective_focus", "Фокус на объектах (tower/hero dmg)", player.get("tower_damage", 0) / max(player.get("hero_damage", 1), 1), 0.1, 0.15),
         ],
     ))
 
-    # 6. Ранняя игра
+    # 6. Механика
+    apm = player.get("apm", 0)
+    apm_has_data = apm > 0
     categories.append(_build_category(
-        key="early_game",
-        name="Ранняя игра",
-        icon="~",
+        key="mechanics",
+        name="Механический скилл",
+        icon="A",
         components=[
-            _component("xpm", "XPM (ранний опыт)", player.get("xpm", 0), current_baseline.get("xpm", 450), target_baseline.get("xpm", 550)),
-            _component("last_hits_total", "LH за игру", player.get("last_hits", 0), current_baseline.get("last_hits", 150), target_baseline.get("last_hits", 200)),
-            _component("gpm_early", "GPM (ранний фарм)", player.get("gpm", 0), current_baseline.get("gpm", 400), target_baseline.get("gpm", 500)),
+            _component("apm", "Действий в минуту (APM)", apm, 80, 120),
+            _component("xpm", "Опыт в минуту (XPM)", player.get("xpm", 0), current_baseline.get("xpm", 450), target_baseline.get("xpm", 550)),
+            _component("level", "Средний уровень", player.get("avg_level", 0), 19, 22),
+        ] if apm_has_data else [
+            _component("xpm", "Опыт в минуту (XPM)", player.get("xpm", 0), current_baseline.get("xpm", 450), target_baseline.get("xpm", 550)),
+            _component("level", "Средний уровень", player.get("avg_level", 0), 19, 22),
+        ],
+    ))
+
+    # 7. Стабильность
+    categories.append(_build_category(
+        key="consistency",
+        name="Стабильность",
+        icon="S",
+        components=[
+            _component("winrate", "Общий винрейт (%)", player.get("winrate", 0.5) * 100, 50, 55),
+            _component("hero_count", "Пул героев", player.get("hero_count", 0), 10, 20),
+            _component("total_games", "Опыт (всего игр)", min(player.get("total_games", 0) / 100, 10) * 10, 50, 80),
+        ],
+    ))
+
+    # 8. Контроль (stuns)
+    stuns = player.get("stuns_per_game", 0)
+    stuns_has_data = stuns > 0
+    categories.append(_build_category(
+        key="control",
+        name="Контроль и инициация",
+        icon="C",
+        components=[
+            _component("stuns", "Секунд стана/игра", stuns, 15, 25),
+        ] if stuns_has_data else [
+            _component("stuns_data", "Недостаточно данных — нужны parsed матчи", 0, 1, 1),
         ],
     ))
 
@@ -227,10 +263,16 @@ def _compute_player_averages(df: pd.DataFrame, acc: PlayerAccount = None) -> dic
         result["obs_per_game"] = (acc.total_obs_placed or 0) / max(total, 1)
         result["sen_per_game"] = (acc.total_sen_placed or 0) / max(total, 1)
         result["tower_kills_per_game"] = (acc.total_tower_kills or 0) / max(total, 1)
+        result["total_games"] = total
 
         wins = acc.win or 0
         losses = acc.lose or 0
         result["winrate"] = wins / max(wins + losses, 1)
+
+        # Additional metrics from totals
+        result["apm"] = getattr(acc, "avg_apm", 0) or 0
+        result["avg_level"] = getattr(acc, "avg_level", 0) or 0
+        result["hero_count"] = 0  # Will be computed from matches
 
     # From recent matches (override if available and more detailed)
     if not df.empty:
@@ -262,6 +304,10 @@ def _compute_player_averages(df: pd.DataFrame, acc: PlayerAccount = None) -> dic
     # KDA
     deaths = max(result.get("deaths", 1), 1)
     result["kda"] = round((result.get("kills", 0) + result.get("assists", 0)) / deaths, 2)
+
+    # Hero count from matches
+    if not df.empty and "hero_id" in df.columns:
+        result["hero_count"] = df["hero_id"].nunique()
 
     return result
 

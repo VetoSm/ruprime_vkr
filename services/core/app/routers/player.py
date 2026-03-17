@@ -31,8 +31,11 @@ class SteamAccountData(BaseModel):
     is_public: Optional[bool] = None
     matches_loaded: int = 0
     heroes_top: Optional[list] = None
+    rankings_top: Optional[list] = None
     error: Optional[str] = None
     warning: Optional[str] = None
+    parse_requested: int = 0
+    parse_message: Optional[str] = None
 
 
 @router.get("/profile", response_model=PlayerProfileResponse)

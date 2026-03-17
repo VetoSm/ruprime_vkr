@@ -162,6 +162,8 @@ class MlKaggleBaseline(Base):
     avg_net_worth = Column(Float, nullable=True)
     winrate = Column(Float, nullable=True)
     match_count = Column(Integer, nullable=True)
+    # Percentiles stored as JSON: {"p25": X, "p50": X, "p75": X, "p90": X, "p95": X}
+    percentiles = Column(JSON, nullable=True)
 
 
 class PlayerAccount(Base):

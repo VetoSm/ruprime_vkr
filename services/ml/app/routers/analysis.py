@@ -35,8 +35,11 @@ class PlayerAccountResponse(BaseModel):
     is_public: Optional[bool] = None
     matches_loaded: int = 0
     heroes_top: Optional[list] = None
+    rankings_top: Optional[list] = None
     error: Optional[str] = None
     warning: Optional[str] = None
+    parse_requested: int = 0
+    parse_message: Optional[str] = None
 
 
 # ---- Steam linking endpoints ----
@@ -138,6 +141,26 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
 
     db.commit()
 
+    # Request parse for recent matches (non-blocking background thread)
+    parse_requested = 0
+    parse_message = None
+    recent_match_ids = [m.get("match_id") for m in matches[:20] if m.get("match_id")]
+    if recent_match_ids:
+        import threading
+        from app.match_collector import request_match_parse
+
+        def _do_parse():
+            return request_match_parse(recent_match_ids)
+
+        parse_thread = threading.Thread(target=_do_parse, daemon=True)
+        parse_thread.start()
+        parse_requested = len(recent_match_ids)
+        parse_message = (
+            f"Запрошен парсинг {parse_requested} матчей в OpenDota. "
+            f"Полные данные (варды, станы, APM) будут доступны через 5-10 минут. "
+            f"Нажмите «Обновить данные» позже для получения обогащённой статистики."
+        )
+
     return PlayerAccountResponse(
         account_id=account_id,
         steam_id=acc.steam_id,
@@ -152,7 +175,10 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
         is_public=acc.is_public,
         matches_loaded=len(matches),
         heroes_top=data.get("heroes", [])[:10],
+        rankings_top=data.get("rankings", [])[:10],
         warning=data.get("warning"),
+        parse_requested=parse_requested,
+        parse_message=parse_message,
     )
 
 

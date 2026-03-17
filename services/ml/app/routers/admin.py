@@ -143,3 +143,39 @@ def start_training():
 def training_status():
     """Get training progress."""
     return get_train_state()
+
+
+# ---- Match Collector ----
+
+from app.match_collector import start_collector, stop_collector, get_collector_status, request_match_parse
+
+
+@router.post("/collector-start")
+def collector_start():
+    """Запустить фоновый сбор parsed матчей."""
+    return start_collector()
+
+
+@router.post("/collector-stop")
+def collector_stop():
+    """Остановить фоновый сбор."""
+    return stop_collector()
+
+
+@router.get("/collector-status")
+def collector_status():
+    """Статус сборщика: сколько собрано, последний запуск, логи."""
+    return get_collector_status()
+
+
+@router.post("/request-parse")
+def request_parse(match_ids: list[int]):
+    """Запросить парсинг конкретных матчей в OpenDota."""
+    return request_match_parse(match_ids)
+
+
+@router.post("/recompute-baselines")
+def recompute_baselines_now(db: Session = Depends(get_db)):
+    """Пересчитать baselines прямо сейчас."""
+    count = compute_baselines(db)
+    return {"status": "success", "baselines_computed": count}

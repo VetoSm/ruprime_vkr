@@ -5,7 +5,7 @@ export default function Landing() {
     <div>
       <div className="landing-hero">
         <h1>
-          Прокачай свою игру в <span>Dota 2</span>
+          <span>RuPrime</span> — прокачай свою игру в Dota 2
         </h1>
         <p>
           AI-аналитика, персональный подбор тренера и детальный анализ

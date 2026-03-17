@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { coreApi } from '../../api/client';
+import { RankBadge, RoleBadge } from '../../ui/GameComponents';
 
 export default function CoachProfilePage() {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [mmr, setMmr] = useState('');
   const [rank, setRank] = useState('');
-  const [roles, setRoles] = useState('');
+  const [roles, setRoles] = useState<string[]>([]);
   const [heroes, setHeroes] = useState('');
   const [rate, setRate] = useState('');
   const [exp, setExp] = useState('');
@@ -16,24 +19,27 @@ export default function CoachProfilePage() {
       const p = r.data;
       setMmr(p.mmr_estimate?.toString() || '');
       setRank(p.rank_tier || '');
-      setRoles(Array.isArray(p.main_roles) ? p.main_roles.join(', ') : '');
+      setRoles(Array.isArray(p.main_roles) ? p.main_roles : []);
       setHeroes(Array.isArray(p.hero_pool) ? p.hero_pool.join(', ') : '');
       setRate(p.hourly_rate?.toString() || '');
       setExp(p.experience_years?.toString() || '');
-      setAbout(p.about || '');
+      // Parse about for name
+      const aboutText = p.about || '';
+      setAbout(aboutText);
     }).catch(() => {});
   }, []);
 
   const save = async () => {
     try {
+      const fullAbout = [firstName, lastName].filter(Boolean).join(' ') + (about ? '\n' + about : '');
       await coreApi.post('/coach/profile', {
         mmr_estimate: mmr ? parseInt(mmr) : undefined,
         rank_tier: rank || undefined,
-        main_roles: roles ? roles.split(',').map(s => s.trim()) : undefined,
+        main_roles: roles.length > 0 ? roles : undefined,
         hero_pool: heroes ? heroes.split(',').map(s => s.trim()) : undefined,
         hourly_rate: rate ? parseFloat(rate) : undefined,
         experience_years: exp ? parseInt(exp) : undefined,
-        about: about || undefined,
+        about: fullAbout || undefined,
       });
       setMsg('Профиль сохранён!');
     } catch {
@@ -44,17 +50,32 @@ export default function CoachProfilePage() {
   return (
     <div>
       <div className="page-header">
-        <h1>Профиль тренера</h1>
-        <p>Редактируйте профиль тренера</p>
+        <h1>🎓 Профиль тренера</h1>
+        <p>Редактируйте профиль для привлечения учеников</p>
       </div>
 
       {msg && <div className="alert alert-success">{msg}</div>}
 
-      <div className="card">
+      <div className="card mb-20">
+        <h3 className="card-title">👤 Личные данные</h3>
+        <div className="grid-2">
+          <div className="form-group">
+            <label>Имя</label>
+            <input className="form-input" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Иван" />
+          </div>
+          <div className="form-group">
+            <label>Фамилия</label>
+            <input className="form-input" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Иванов" />
+          </div>
+        </div>
+      </div>
+
+      <div className="card mb-20">
+        <h3 className="card-title">⚔ Игровые данные</h3>
         <div className="grid-2">
           <div className="form-group">
             <label>Оценка MMR</label>
-            <input className="form-input" type="number" value={mmr} onChange={(e) => setMmr(e.target.value)} />
+            <input className="form-input" type="number" value={mmr} onChange={(e) => setMmr(e.target.value)} placeholder="6500" />
           </div>
           <div className="form-group">
             <label>Ранг</label>
@@ -65,29 +86,54 @@ export default function CoachProfilePage() {
               ))}
             </select>
           </div>
-          <div className="form-group">
-            <label>Основные роли (через запятую)</label>
-            <input className="form-input" value={roles} onChange={(e) => setRoles(e.target.value)} placeholder="POS1, POS2" />
-          </div>
-          <div className="form-group">
-            <label>Пул героев (через запятую)</label>
-            <input className="form-input" value={heroes} onChange={(e) => setHeroes(e.target.value)} placeholder="Invoker, Storm Spirit" />
-          </div>
-          <div className="form-group">
-            <label>Ставка ($/час)</label>
-            <input className="form-input" type="number" value={rate} onChange={(e) => setRate(e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label>Опыт (лет)</label>
-            <input className="form-input" type="number" value={exp} onChange={(e) => setExp(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Основные позиции</label>
+          <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+            {['POS1','POS2','POS3','POS4','POS5'].map((r) => {
+              const selected = roles.includes(r);
+              return (
+                <button key={r} type="button"
+                  className={`btn btn-sm ${selected ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setRoles(selected ? roles.filter(x => x !== r) : [...roles, r])}>
+                  <RoleBadge role={r} compact />
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="form-group">
-          <label>О себе</label>
-          <textarea className="form-input" value={about} onChange={(e) => setAbout(e.target.value)} placeholder="Расскажите ученикам о себе..." />
+          <label>Пул героев (через запятую)</label>
+          <input className="form-input" value={heroes} onChange={(e) => setHeroes(e.target.value)}
+            placeholder="Invoker, Storm Spirit, Shadow Fiend" />
         </div>
-        <button className="btn btn-primary" onClick={save}>Сохранить профиль</button>
       </div>
+
+      <div className="card mb-20">
+        <h3 className="card-title">💰 Услуги</h3>
+        <div className="grid-2">
+          <div className="form-group">
+            <label>Почасовая ставка (₽)</label>
+            <div className="flex gap-10" style={{ alignItems: 'center' }}>
+              <input className="form-input" type="number" value={rate} onChange={(e) => setRate(e.target.value)}
+                placeholder="1500" style={{ maxWidth: 200 }} />
+              <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>₽ / час</span>
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Опыт тренерства (лет)</label>
+            <input className="form-input" type="number" value={exp} onChange={(e) => setExp(e.target.value)}
+              placeholder="3" style={{ maxWidth: 150 }} />
+          </div>
+        </div>
+        <div className="form-group">
+          <label>О себе и методике</label>
+          <textarea className="form-input" value={about} onChange={(e) => setAbout(e.target.value)}
+            placeholder="Расскажите ученикам о вашем опыте и подходе к тренировкам..." />
+        </div>
+      </div>
+
+      <button className="btn btn-primary" onClick={save}>💾 Сохранить профиль</button>
     </div>
   );
 }

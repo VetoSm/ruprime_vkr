@@ -96,7 +96,13 @@ def fetch_player_totals(account_id: int) -> dict:
     for item in data:
         field = item.get("field")
         if field:
-            totals[field] = {"sum": item.get("sum", 0), "n": item.get("n", 0)}
+            n = item.get("n", 0)
+            s = item.get("sum", 0)
+            totals[field] = {
+                "sum": s,
+                "n": n,
+                "avg": round(s / n, 2) if n > 0 else 0,
+            }
     logger.info(f"Totals for {account_id}: {len(totals)} fields")
     return totals
 
@@ -195,6 +201,25 @@ def fetch_player_heroes(account_id: int) -> list[dict]:
     return sorted(heroes, key=lambda x: x["games"], reverse=True)
 
 
+def fetch_player_rankings(account_id: int) -> list[dict]:
+    """GET /players/{account_id}/rankings -- percentile rank per hero."""
+    time.sleep(RATE_LIMIT_DELAY)
+    data = _get(f"/players/{account_id}/rankings")
+    if not data or not isinstance(data, list):
+        return []
+    rankings = []
+    for r in data:
+        hero_id = r.get("hero_id")
+        pct = r.get("percent_rank")
+        if hero_id and pct is not None:
+            rankings.append({
+                "hero_id": int(hero_id),
+                "percent_rank": round(float(pct), 4),
+                "score": round(float(r.get("score", 0)), 2),
+            })
+    return sorted(rankings, key=lambda x: x["percent_rank"], reverse=True)
+
+
 def fetch_full_player_data(steam_id: str) -> dict:
     """Fetch everything: refresh -> profile -> wl -> totals -> recentMatches -> matches (paginated) -> heroes."""
     account_id = steam_id_to_account_id(steam_id)
@@ -223,6 +248,9 @@ def fetch_full_player_data(steam_id: str) -> dict:
 
     # 6. Heroes
     heroes = fetch_player_heroes(account_id)
+
+    # 7. Rankings (percentile per hero)
+    rankings = fetch_player_rankings(account_id)
 
     # Merge: recent matches have full stats, overlay onto all_matches
     recent_ids = {m["match_id"] for m in recent}
@@ -278,6 +306,7 @@ def fetch_full_player_data(steam_id: str) -> dict:
         "last_match_time": last_match_time,
         "matches": merged_matches,
         "heroes": heroes[:20],
+        "rankings": rankings[:20],
         "matches_count": len(merged_matches),
         "total_games": total_games,
         "warning": warning,
@@ -303,6 +332,14 @@ def fetch_full_player_data(steam_id: str) -> dict:
             "sen_n": totals.get("purchase_ward_sentry", {}).get("n"),
             "total_tower_kills": totals.get("tower_kills", {}).get("sum"),
             "tower_kills_n": totals.get("tower_kills", {}).get("n"),
+            # Additional metrics
+            "avg_actions_per_min": totals.get("actions_per_min", {}).get("avg"),
+            "apm_n": totals.get("actions_per_min", {}).get("n"),
+            "avg_lane_efficiency": totals.get("lane_efficiency_pct", {}).get("avg"),
+            "lane_eff_n": totals.get("lane_efficiency_pct", {}).get("n"),
+            "avg_neutral_kills": totals.get("neutral_kills", {}).get("avg"),
+            "avg_level": totals.get("level", {}).get("avg"),
+            "avg_pings": totals.get("pings", {}).get("avg"),
         },
     }
 

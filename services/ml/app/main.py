@@ -41,7 +41,20 @@ def startup():
     if os.path.isdir(images_path):
         app.mount("/ml/images", StaticFiles(directory=images_path), name="images")
 
+    # Auto-start match collector if enabled
+    auto_collect = os.getenv("AUTO_COLLECT_MATCHES", "true").lower()
+    if auto_collect in ("true", "1", "yes"):
+        from app.match_collector import start_collector
+        start_collector()
+
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "ml"}
+    from app.match_collector import get_collector_status
+    status = get_collector_status()
+    return {
+        "status": "ok",
+        "service": "ml",
+        "collector_running": status.get("running", False),
+        "matches_collected": status.get("matches_collected_total", 0),
+    }
