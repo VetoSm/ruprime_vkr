@@ -227,10 +227,12 @@ def analyze_player(account_id: int, player_profile_id: int = None, db: Session =
         "kda_over_time": [{"ts": r["month"], "kda": round(r["kda"], 2)} for _, r in monthly.iterrows()],
     }
 
-    # Roles distribution
-    roles_dist = df["lane_role"].value_counts(normalize=True).to_dict()
+    # Roles distribution — filter out 0 (unknown)
+    valid_roles = df["lane_role"].dropna()
+    valid_roles = valid_roles[valid_roles > 0]
+    roles_dist = valid_roles.value_counts(normalize=True).to_dict() if len(valid_roles) > 0 else {}
     roles_data = {
-        "actual_roles_distribution": {f"POS{int(k)}": round(v, 3) for k, v in roles_dist.items() if pd.notna(k)},
+        "actual_roles_distribution": {f"POS{int(k)}": round(v, 3) for k, v in roles_dist.items() if pd.notna(k) and int(k) > 0},
     }
 
     # Top heroes
@@ -497,10 +499,12 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
         "kda_over_time": [{"ts": t["batch"], "kda": t["kda"]} for t in trends_data],
     }
 
-    # Roles distribution
-    roles_dist = df["lane_role"].dropna().value_counts(normalize=True).to_dict()
+    # Roles distribution — filter out 0 (unknown) lane_role
+    valid_roles = df["lane_role"].dropna()
+    valid_roles = valid_roles[valid_roles > 0]
+    roles_dist = valid_roles.value_counts(normalize=True).to_dict() if len(valid_roles) > 0 else {}
     roles_data = {
-        "actual_roles_distribution": {f"POS{int(k)}": round(v, 3) for k, v in roles_dist.items() if pd.notna(k)},
+        "actual_roles_distribution": {f"POS{int(k)}": round(v, 3) for k, v in roles_dist.items() if pd.notna(k) and int(k) > 0},
     }
 
     # Top heroes

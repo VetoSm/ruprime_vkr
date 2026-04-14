@@ -60,6 +60,7 @@
   --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 
   --sidebar-width: 260px;
+  --sidebar-collapsed-width: 64px;
 }
 
 * {
@@ -102,6 +103,24 @@ a:hover {
   height: 100vh;
   overflow-y: auto;
   z-index: 10;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar.collapsed {
+  width: var(--sidebar-collapsed-width);
+}
+
+.sidebar.collapsed .sidebar-logo h2,
+.sidebar.collapsed .sidebar-logo span {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-nav li a {
+  justify-content: center;
+  padding: 11px 0;
+  gap: 0;
 }
 
 .sidebar-logo {
@@ -150,11 +169,135 @@ a:hover {
   border-left-color: var(--accent);
 }
 
+.sidebar-toggle {
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: auto;
+  transition: var(--transition);
+}
+.sidebar-toggle:hover {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
 .main-content {
   flex: 1;
   margin-left: var(--sidebar-width);
   padding: 28px 32px;
+  padding-top: 68px;
   min-height: 100vh;
+  transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-collapsed .main-content {
+  margin-left: var(--sidebar-collapsed-width);
+}
+
+/* ===== Topbar ===== */
+.topbar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: var(--sidebar-width);
+  height: 52px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 28px;
+  z-index: 9;
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-collapsed .topbar {
+  left: var(--sidebar-collapsed-width);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+.topbar-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* ===== AI Coach FAB ===== */
+.ai-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--purple), var(--accent));
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(124, 92, 252, 0.4);
+  z-index: 100;
+  transition: var(--transition);
+}
+.ai-fab:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 30px rgba(124, 92, 252, 0.6);
+}
+
+/* ===== Password Eye Toggle ===== */
+.input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.input-with-icon .form-input {
+  flex: 1;
+  padding-right: 44px;
+}
+.input-icon-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: var(--transition);
+}
+.input-icon-btn:hover {
+  color: var(--accent);
 }
 
 .page-header {
@@ -216,7 +359,9 @@ a:hover {
 @media (max-width: 768px) {
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
   .sidebar { display: none; }
-  .main-content { margin-left: 0; padding: 16px; }
+  .main-content { margin-left: 0; padding: 16px; padding-top: 68px; }
+  .topbar { left: 0; }
+  .ai-fab { bottom: 16px; right: 16px; width: 48px; height: 48px; }
 }
 
 /* ===== Stat Card ===== */

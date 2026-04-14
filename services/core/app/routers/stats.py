@@ -55,6 +55,7 @@ async def _get_or_create_analysis(profile: PlayerProfile, db: Session) -> dict |
                 total_games = (acc.get("win") or 0) + (acc.get("lose") or 0)
                 winrate = (acc.get("win") or 0) / total_games if total_games > 0 else 0
                 rank_tier = acc.get("rank_tier")
+                totals = acc.get("totals") or {}
 
                 RANK_NAMES = {1: "HERALD", 2: "GUARDIAN", 3: "CRUSADER", 4: "ARCHON",
                               5: "LEGEND", 6: "ANCIENT", 7: "DIVINE", 8: "IMMORTAL"}
@@ -68,20 +69,30 @@ async def _get_or_create_analysis(profile: PlayerProfile, db: Session) -> dict |
                     "ml_analysis_id": None,
                     "summary": {
                         "estimated_rank_tier": rank_name,
-                        "estimated_mmr": 0,
+                        "estimated_mmr": acc.get("mmr_estimate") or 0,
                         "games_analyzed": acc.get("matches_loaded", 0),
-                        "total_games": total_games,
+                        "total_games": acc.get("total_games") or total_games,
                         "winrate": round(winrate, 3),
-                        "gpm_avg": 0,
-                        "xpm_avg": 0,
-                        "kda_avg": 0,
+                        "gpm_avg": totals.get("avg_gpm") or 0,
+                        "xpm_avg": totals.get("avg_xpm") or 0,
+                        "kda_avg": round(
+                            ((totals.get("avg_kills") or 0) + (totals.get("avg_assists") or 0))
+                            / max((totals.get("avg_deaths") or 1), 1),
+                            2
+                        ) if totals else 0,
                         "personaname": acc.get("personaname"),
                         "avatar_url": acc.get("avatar_url"),
                         "estimated_hours": acc.get("estimated_hours", 0),
                     },
-                    "trends": {},
-                    "roles": {},
-                    "heroes": {"top_heroes": []},
+                    "trends": {
+                        "recent_matches": acc.get("recent_matches", []),
+                    },
+                    "roles": {
+                        "actual_roles_distribution": acc.get("roles_distribution", {}),
+                    },
+                    "heroes": {
+                        "top_heroes": acc.get("heroes_top", []),
+                    },
                     "comparisons": {},
                     "warning": acc.get("warning"),
                 }

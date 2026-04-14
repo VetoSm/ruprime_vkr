@@ -3,11 +3,11 @@ import { AuthProvider, useAuth } from './store/AuthContext';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import SteamAuthCallback from './pages/SteamAuthCallback';
 import PlayerDashboard from './pages/player/Dashboard';
-import PlayerProfile from './pages/player/Profile';
+import PlayerSettings from './pages/player/Profile';
 import PlayerStats from './pages/player/Stats';
 import PlayerCoaches from './pages/player/Coaches';
-import PlayerMatchmaking from './pages/player/Matchmaking';
 import PlayerRequests from './pages/player/Requests';
 import PlayerSchedule from './pages/player/Schedule';
 import PlayerAiChat from './pages/player/AiChat';
@@ -38,16 +38,20 @@ function AppRoutes() {
       <Route path="/" element={user ? <Navigate to="/dashboard" /> : <Landing />} />
       <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login />} />
       <Route path="/register" element={user ? <Navigate to="/dashboard" /> : <Register />} />
+      <Route path="/auth/steam-callback" element={<SteamAuthCallback />} />
 
       {/* Player routes */}
       <Route path="/dashboard" element={<ProtectedRoute><AppLayout><PlayerDashboard /></AppLayout></ProtectedRoute>} />
-      <Route path="/profile/player" element={<ProtectedRoute><AppLayout><PlayerProfile /></AppLayout></ProtectedRoute>} />
+      <Route path="/settings" element={<ProtectedRoute><AppLayout><PlayerSettings /></AppLayout></ProtectedRoute>} />
       <Route path="/stats" element={<ProtectedRoute><AppLayout><PlayerStats /></AppLayout></ProtectedRoute>} />
       <Route path="/coaches" element={<ProtectedRoute><AppLayout><PlayerCoaches /></AppLayout></ProtectedRoute>} />
-      <Route path="/matchmaking" element={<ProtectedRoute><AppLayout><PlayerMatchmaking /></AppLayout></ProtectedRoute>} />
       <Route path="/requests" element={<ProtectedRoute><AppLayout><PlayerRequests /></AppLayout></ProtectedRoute>} />
       <Route path="/schedule" element={<ProtectedRoute><AppLayout><PlayerSchedule /></AppLayout></ProtectedRoute>} />
       <Route path="/ai-chat" element={<ProtectedRoute><AppLayout><PlayerAiChat /></AppLayout></ProtectedRoute>} />
+
+      {/* Legacy redirects */}
+      <Route path="/profile/player" element={<Navigate to="/settings" />} />
+      <Route path="/matchmaking" element={<Navigate to="/coaches" />} />
 
       {/* Coach routes */}
       <Route path="/coach/dashboard" element={<ProtectedRoute roles={['COACH','ADMIN']}><AppLayout><CoachDashboard /></AppLayout></ProtectedRoute>} />

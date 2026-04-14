@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { coreApi } from '../../api/client';
+import { coreApi, authApi } from '../../api/client';
 import { loadHeroes, heroName, heroIcon } from '../../api/heroes';
 import { RankBadge, RoleBadge, InfoTooltip } from '../../ui/GameComponents';
+import { IconEye, IconEyeOff, IconSettings } from '../../ui/Icons';
 
 interface SteamData {
   linked: boolean;
@@ -10,13 +11,30 @@ interface SteamData {
   personaname?: string;
   avatar_url?: string;
   rank_tier?: number;
+  mmr_estimate?: number;
   win?: number;
   lose?: number;
+  total_games?: number;
+  totals?: {
+    avg_gpm?: number;
+    avg_xpm?: number;
+    avg_kills?: number;
+    avg_deaths?: number;
+    avg_assists?: number;
+  };
   estimated_hours?: number;
   last_match_time?: string;
   profile_url?: string;
   is_public?: boolean;
   matches_loaded?: number;
+  roles_distribution?: Record<string, number>;
+  recent_matches?: Array<{
+    match_id?: number;
+    hero_id?: number;
+    win?: boolean;
+    kda?: number;
+    gpm?: number;
+  }>;
   heroes_top?: any[];
   rankings_top?: any[];
   error?: string;
@@ -37,6 +55,13 @@ export default function PlayerProfile() {
   const [error, setError] = useState('');
   const [showSteamHelp, setShowSteamHelp] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showOldPwd, setShowOldPwd] = useState(false);
+  const [showNewPwd, setShowNewPwd] = useState(false);
+  const [pwdMsg, setPwdMsg] = useState('');
+  const [pwdError, setPwdError] = useState('');
 
   useEffect(() => {
     loadHeroes();
@@ -87,7 +112,7 @@ export default function PlayerProfile() {
   const refreshSteam = async () => {
     setMsg(''); setError(''); setLinking(true);
     try {
-      const res = await coreApi.post('/player/refresh-steam');
+      const res = await coreApi.post('/player/sync-steam');
       setSteamData({ linked: true, ...res.data });
       setMsg('Данные обновлены!');
     } catch (err: any) {
@@ -95,15 +120,33 @@ export default function PlayerProfile() {
     } finally { setLinking(false); }
   };
 
+  const changePassword = async () => {
+    setPwdMsg(''); setPwdError('');
+    if (newPassword !== confirmNewPassword) { setPwdError('Пароли не совпадают'); return; }
+    if (newPassword.length < 8) { setPwdError('Минимум 8 символов'); return; }
+    try {
+      await authApi.post('/auth/change-password', {
+        old_password: oldPassword,
+        new_password: newPassword,
+      });
+      setPwdMsg('Пароль изменён!');
+      setOldPassword(''); setNewPassword(''); setConfirmNewPassword('');
+    } catch (err: any) {
+      setPwdError(err.response?.data?.detail || 'Ошибка смены пароля');
+    }
+  };
+
   const isLinked = steamData?.linked && steamData?.personaname;
-  const totalGames = (steamData?.win || 0) + (steamData?.lose || 0);
+  const totalGames = steamData?.total_games || (steamData?.win || 0) + (steamData?.lose || 0);
   const winrate = totalGames > 0 ? ((steamData?.win || 0) / totalGames * 100).toFixed(1) : '0';
 
   return (
     <div>
       <div className="page-header">
-        <h1>Профиль игрока</h1>
-        <p>Привязка аккаунта, цели и предпочтения</p>
+        <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <IconSettings size={24} /> Настройки
+        </h1>
+        <p>Привязка Steam, смена пароля, цели и предпочтения</p>
       </div>
 
       {msg && <div className="alert alert-success" style={{ whiteSpace: 'pre-line' }}>{msg}</div>}
@@ -166,6 +209,10 @@ export default function PlayerProfile() {
               <span className="stat-pill-value">{steamData.win} / {steamData.lose}</span>
             </div>
             <div className="stat-pill">
+              <span className="stat-pill-label">MMR (оценка)</span>
+              <span className="stat-pill-value accent">{steamData.mmr_estimate || '—'}</span>
+            </div>
+            <div className="stat-pill">
               <span className="stat-pill-label">Часы</span>
               <span className="stat-pill-value accent">{steamData.estimated_hours?.toLocaleString()}</span>
             </div>
@@ -178,6 +225,54 @@ export default function PlayerProfile() {
               </span>
             </div>
           </div>
+
+          {steamData?.totals && (
+            <div className="card mb-20">
+              <div className="section-header">
+                <h3>Средние показатели</h3>
+                <div className="section-line" />
+              </div>
+              <div className="grid-3">
+                <div className="stat-pill"><span className="stat-pill-label">AVG GPM</span><span className="stat-pill-value">{steamData.totals.avg_gpm ?? '—'}</span></div>
+                <div className="stat-pill"><span className="stat-pill-label">AVG XPM</span><span className="stat-pill-value">{steamData.totals.avg_xpm ?? '—'}</span></div>
+                <div className="stat-pill"><span className="stat-pill-label">AVG KDA</span><span className="stat-pill-value">
+                  {steamData.totals.avg_kills != null && steamData.totals.avg_deaths != null && steamData.totals.avg_assists != null
+                    ? (((steamData.totals.avg_kills + steamData.totals.avg_assists) / Math.max(steamData.totals.avg_deaths, 1)).toFixed(2))
+                    : '—'}
+                </span></div>
+              </div>
+            </div>
+          )}
+
+          {steamData?.recent_matches && steamData.recent_matches.length > 0 && (
+            <div className="mb-20">
+              <div className="section-header">
+                <h3>Последние матчи</h3>
+                <div className="section-line" />
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Герой</th><th>Результат</th><th>KDA</th><th>GPM</th></tr>
+                  </thead>
+                  <tbody>
+                    {steamData.recent_matches.slice(0, 8).map((m) => (
+                      <tr key={m.match_id}>
+                        <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <img src={heroIcon(m.hero_id)} alt="" style={{ width: 24, height: 24, borderRadius: 4 }}
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          {heroName(m.hero_id)}
+                        </td>
+                        <td style={{ color: m.win ? 'var(--accent)' : 'var(--danger)' }}>{m.win ? 'Победа' : 'Поражение'}</td>
+                        <td>{m.kda ?? '—'}</td>
+                        <td>{m.gpm ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* === Top Heroes === */}
           {steamData.heroes_top && steamData.heroes_top.length > 0 && (
@@ -330,6 +425,59 @@ export default function PlayerProfile() {
             placeholder="Расскажите о своём стиле игры..." />
         </div>
         <button className="btn btn-primary" onClick={saveProfile}>Сохранить профиль</button>
+      </div>
+
+      {/* === Password Change === */}
+      <div className="card mb-20">
+        <div className="section-header">
+          <h3>Смена пароля</h3>
+          <div className="section-line" />
+        </div>
+        {pwdMsg && <div className="alert alert-success">{pwdMsg}</div>}
+        {pwdError && <div className="alert alert-error">{pwdError}</div>}
+        <div className="form-group">
+          <label>Текущий пароль</label>
+          <div className="input-with-icon">
+            <input
+              type={showOldPwd ? 'text' : 'password'}
+              className="form-input"
+              value={oldPassword}
+              onChange={(e) => setOldPassword(e.target.value)}
+              placeholder="Введите текущий пароль"
+            />
+            <button type="button" className="input-icon-btn" onClick={() => setShowOldPwd(!showOldPwd)} tabIndex={-1}>
+              {showOldPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
+            </button>
+          </div>
+        </div>
+        <div className="grid-2">
+          <div className="form-group">
+            <label>Новый пароль</label>
+            <div className="input-with-icon">
+              <input
+                type={showNewPwd ? 'text' : 'password'}
+                className="form-input"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Минимум 8 символов"
+              />
+              <button type="button" className="input-icon-btn" onClick={() => setShowNewPwd(!showNewPwd)} tabIndex={-1}>
+                {showNewPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
+              </button>
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Подтверждение</label>
+            <input
+              type="password"
+              className="form-input"
+              value={confirmNewPassword}
+              onChange={(e) => setConfirmNewPassword(e.target.value)}
+              placeholder="Повторите новый пароль"
+            />
+          </div>
+        </div>
+        <button className="btn btn-outline" onClick={changePassword}>Сменить пароль</button>
       </div>
     </div>
   );

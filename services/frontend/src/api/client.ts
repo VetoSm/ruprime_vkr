@@ -4,6 +4,14 @@ const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || 'http://localhost:8001';
 const CORE_URL = import.meta.env.VITE_CORE_API_URL || 'http://localhost:8002';
 const ML_URL = import.meta.env.VITE_ML_API_URL || 'http://localhost:8003';
 
+let isRefreshing = false;
+let refreshQueue: Array<(token: string) => void> = [];
+
+function processQueue(token: string) {
+  refreshQueue.forEach((cb) => cb(token));
+  refreshQueue = [];
+}
+
 function createClient(baseURL: string) {
   const client = axios.create({ baseURL });
   client.interceptors.request.use((config) => {
@@ -16,23 +24,43 @@ function createClient(baseURL: string) {
   client.interceptors.response.use(
     (res) => res,
     async (error) => {
-      if (error.response?.status === 401) {
-        // Try refresh
+      const originalRequest = error.config;
+      if (error.response?.status === 401 && !originalRequest._retry) {
         const refreshToken = localStorage.getItem('refresh_token');
-        if (refreshToken && !error.config._retry) {
-          error.config._retry = true;
-          try {
-            const resp = await authApi.post('/auth/refresh', { refresh_token: refreshToken });
-            const { access_token, refresh_token } = resp.data;
-            localStorage.setItem('access_token', access_token);
-            localStorage.setItem('refresh_token', refresh_token);
-            error.config.headers.Authorization = `Bearer ${access_token}`;
-            return client(error.config);
-          } catch {
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('refresh_token');
-            window.location.href = '/login';
-          }
+        if (!refreshToken) {
+          localStorage.removeItem('access_token');
+          window.location.href = '/login';
+          return Promise.reject(error);
+        }
+
+        if (isRefreshing) {
+          return new Promise((resolve) => {
+            refreshQueue.push((newToken: string) => {
+              originalRequest.headers.Authorization = `Bearer ${newToken}`;
+              resolve(client(originalRequest));
+            });
+          });
+        }
+
+        originalRequest._retry = true;
+        isRefreshing = true;
+
+        try {
+          const resp = await axios.post(`${AUTH_URL}/auth/refresh`, { refresh_token: refreshToken });
+          const { access_token, refresh_token: newRefresh } = resp.data;
+          localStorage.setItem('access_token', access_token);
+          localStorage.setItem('refresh_token', newRefresh);
+          originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          processQueue(access_token);
+          return client(originalRequest);
+        } catch {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          refreshQueue = [];
+          window.location.href = '/login';
+          return Promise.reject(error);
+        } finally {
+          isRefreshing = false;
         }
       }
       return Promise.reject(error);

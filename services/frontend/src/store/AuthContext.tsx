@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { authApi } from '../api/client';
 
 interface User {
@@ -15,6 +15,7 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (login: string, email: string, password: string, confirmPassword: string, role: string) => Promise<void>;
   logout: () => void;
+  applySteamSession: (accessToken: string, refreshToken: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -66,8 +67,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const applySteamSession = useCallback(async (accessToken: string, refreshToken: string) => {
+    localStorage.setItem('access_token', accessToken);
+    localStorage.setItem('refresh_token', refreshToken);
+    const me = await authApi.get('/auth/me');
+    setUser(me.data);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, applySteamSession }}>
       {children}
     </AuthContext.Provider>
   );

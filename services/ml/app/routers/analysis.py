@@ -27,19 +27,165 @@ class PlayerAccountResponse(BaseModel):
     personaname: Optional[str] = None
     avatar_url: Optional[str] = None
     rank_tier: Optional[int] = None
+    mmr_estimate: Optional[int] = None
     win: Optional[int] = None
     lose: Optional[int] = None
     estimated_hours: Optional[float] = None
+    total_games: Optional[int] = None
+    totals: Optional[dict] = None
     last_match_time: Optional[str] = None
     profile_url: Optional[str] = None
     is_public: Optional[bool] = None
     matches_loaded: int = 0
+    roles_distribution: Optional[dict] = None
+    recent_matches: Optional[list] = None
     heroes_top: Optional[list] = None
     rankings_top: Optional[list] = None
     error: Optional[str] = None
     warning: Optional[str] = None
     parse_requested: int = 0
     parse_message: Optional[str] = None
+
+
+def _normalize_mmr_estimate(raw_mmr) -> Optional[int]:
+    if isinstance(raw_mmr, dict):
+        raw_mmr = raw_mmr.get("estimate")
+    try:
+        if raw_mmr is None:
+            return None
+        return int(float(raw_mmr))
+    except Exception:
+        return None
+
+
+def _estimate_mmr_from_rank_tier(rank_tier: Optional[int]) -> Optional[int]:
+    if not rank_tier:
+        return None
+    medal = rank_tier // 10
+    stars = rank_tier % 10
+    base_by_medal = {
+        1: 500,
+        2: 1200,
+        3: 1900,
+        4: 2700,
+        5: 3500,
+        6: 4300,
+        7: 5200,
+        8: 6500,
+    }
+    base = base_by_medal.get(medal)
+    if base is None:
+        return None
+    return base + max(stars - 1, 0) * 150
+
+
+def _build_roles_distribution(matches: list[dict]) -> dict:
+    counts = {}
+    for m in matches:
+        role = m.get("lane_role")
+        try:
+            role = int(role)
+        except Exception:
+            continue
+        if role < 1 or role > 5:
+            continue
+        key = f"POS{role}"
+        counts[key] = counts.get(key, 0) + 1
+
+    total = sum(counts.values())
+    if total == 0:
+        return {}
+    return {k: round(v / total, 3) for k, v in counts.items()}
+
+
+def _build_recent_matches(matches: list[dict], limit: int = 12) -> list[dict]:
+    recent = []
+    for m in matches[:limit]:
+        kills = int(m.get("kills") or 0)
+        deaths = int(m.get("deaths") or 0)
+        assists = int(m.get("assists") or 0)
+        slot = m.get("player_slot")
+        radiant_win = m.get("radiant_win")
+        win = None
+        if radiant_win is not None:
+            win = bool(radiant_win) if (slot is not None and slot < 128) else not bool(radiant_win)
+        recent.append({
+            "match_id": m.get("match_id"),
+            "hero_id": m.get("hero_id"),
+            "start_time": m.get("start_time"),
+            "win": win,
+            "kills": kills,
+            "deaths": deaths,
+            "assists": assists,
+            "kda": round((kills + assists) / max(deaths, 1), 2),
+            "gpm": m.get("gold_per_min"),
+            "xpm": m.get("xp_per_min"),
+            "duration": m.get("duration"),
+            "lane_role": m.get("lane_role"),
+        })
+    return recent
+
+
+def _build_totals_payload(acc: PlayerAccount) -> dict:
+    return {
+        "total_games": acc.total_games,
+        "avg_gpm": acc.avg_gpm,
+        "avg_xpm": acc.avg_xpm,
+        "avg_kills": acc.avg_kills,
+        "avg_deaths": acc.avg_deaths,
+        "avg_assists": acc.avg_assists,
+        "avg_last_hits": acc.avg_last_hits,
+        "avg_denies": acc.avg_denies,
+        "avg_hero_damage": acc.avg_hero_damage,
+        "avg_tower_damage": acc.avg_tower_damage,
+        "avg_duration": acc.avg_duration,
+        "avg_hero_healing": acc.avg_hero_healing,
+        "total_stuns": acc.total_stuns,
+        "total_obs": acc.total_obs_placed,
+        "total_sen": acc.total_sen_placed,
+        "total_tower_kills": acc.total_tower_kills,
+    }
+
+
+def _build_heroes_top(matches: list[PlayerMatch], limit: int = 10) -> list[dict]:
+    heroes = {}
+    for m in matches:
+        hero_id = m.hero_id
+        if hero_id is None:
+            continue
+        if hero_id not in heroes:
+            heroes[hero_id] = {
+                "hero_id": hero_id,
+                "games": 0,
+                "win": 0,
+                "kills_sum": 0.0,
+                "deaths_sum": 0.0,
+                "assists_sum": 0.0,
+            }
+        heroes[hero_id]["games"] += 1
+        heroes[hero_id]["kills_sum"] += float(m.kills or 0)
+        heroes[hero_id]["deaths_sum"] += float(m.deaths or 0)
+        heroes[hero_id]["assists_sum"] += float(m.assists or 0)
+        if m.radiant_win is not None:
+            won = bool(m.radiant_win) if (m.player_slot is not None and m.player_slot < 128) else not bool(m.radiant_win)
+            if won:
+                heroes[hero_id]["win"] += 1
+
+    result = []
+    for row in heroes.values():
+        games = row["games"]
+        win = row["win"]
+        avg_kills = row["kills_sum"] / games if games > 0 else 0
+        avg_deaths = row["deaths_sum"] / games if games > 0 else 0
+        avg_assists = row["assists_sum"] / games if games > 0 else 0
+        result.append({
+            "hero_id": row["hero_id"],
+            "games": games,
+            "win": win,
+            "winrate": round(win / games, 3) if games > 0 else 0,
+            "avg_kda": round((avg_kills + avg_assists) / max(avg_deaths, 1), 2),
+        })
+    return sorted(result, key=lambda x: x["games"], reverse=True)[:limit]
 
 
 # ---- Steam linking endpoints ----
@@ -161,19 +307,31 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
             f"Нажмите «Обновить данные» позже для получения обогащённой статистики."
         )
 
+    mmr_estimate = _normalize_mmr_estimate(data.get("mmr_estimate"))
+    if mmr_estimate is None:
+        mmr_estimate = _estimate_mmr_from_rank_tier(acc.rank_tier)
+
+    roles_distribution = _build_roles_distribution(matches)
+    recent_matches = _build_recent_matches(matches)
+
     return PlayerAccountResponse(
         account_id=account_id,
         steam_id=acc.steam_id,
         personaname=acc.personaname,
         avatar_url=acc.avatar_url,
         rank_tier=acc.rank_tier,
+        mmr_estimate=mmr_estimate,
         win=acc.win,
         lose=acc.lose,
         estimated_hours=acc.estimated_hours,
+        total_games=acc.total_games,
+        totals=t,
         last_match_time=data.get("last_match_time"),
         profile_url=acc.profile_url,
         is_public=acc.is_public,
         matches_loaded=len(matches),
+        roles_distribution=roles_distribution,
+        recent_matches=recent_matches,
         heroes_top=data.get("heroes", [])[:10],
         rankings_top=data.get("rankings", [])[:10],
         warning=data.get("warning"),
@@ -197,7 +355,31 @@ def get_player_account(account_id: int, db: Session = Depends(get_db)):
     if not acc:
         raise HTTPException(status_code=404, detail="Аккаунт не найден")
 
-    matches_count = db.query(PlayerMatch).filter(PlayerMatch.account_id == account_id).count()
+    matches_rows = db.query(PlayerMatch).filter(
+        PlayerMatch.account_id == account_id
+    ).order_by(PlayerMatch.start_time.desc().nullslast()).all()
+    matches_count = len(matches_rows)
+
+    recent_matches = _build_recent_matches([{
+        "match_id": m.match_id,
+        "hero_id": m.hero_id,
+        "kills": m.kills,
+        "deaths": m.deaths,
+        "assists": m.assists,
+        "gold_per_min": m.gold_per_min,
+        "xp_per_min": m.xp_per_min,
+        "duration": m.duration,
+        "player_slot": m.player_slot,
+        "radiant_win": m.radiant_win,
+        "lane_role": m.lane_role,
+        "start_time": m.start_time,
+    } for m in matches_rows])
+    roles_distribution = _build_roles_distribution([{
+        "lane_role": m.lane_role,
+    } for m in matches_rows])
+    heroes_top = _build_heroes_top(matches_rows)
+    totals = _build_totals_payload(acc)
+    mmr_estimate = _estimate_mmr_from_rank_tier(acc.rank_tier)
 
     return PlayerAccountResponse(
         account_id=acc.account_id,
@@ -205,13 +387,19 @@ def get_player_account(account_id: int, db: Session = Depends(get_db)):
         personaname=acc.personaname,
         avatar_url=acc.avatar_url,
         rank_tier=acc.rank_tier,
+        mmr_estimate=mmr_estimate,
         win=acc.win,
         lose=acc.lose,
         estimated_hours=acc.estimated_hours,
+        total_games=acc.total_games,
+        totals=totals,
         last_match_time=str(acc.last_match_time) if acc.last_match_time else None,
         profile_url=acc.profile_url,
         is_public=acc.is_public,
         matches_loaded=matches_count,
+        roles_distribution=roles_distribution,
+        recent_matches=recent_matches,
+        heroes_top=heroes_top,
     )
 
 

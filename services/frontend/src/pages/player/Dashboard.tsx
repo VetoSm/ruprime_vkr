@@ -32,6 +32,7 @@ export default function PlayerDashboard() {
   const [steamData, setSteamData] = useState<any>(null);
   const [playerProfile, setPlayerProfile] = useState<any>(null);
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
+  const [retried, setRetried] = useState(false);
 
   useEffect(() => {
     loadHeroes();
@@ -42,10 +43,26 @@ export default function PlayerDashboard() {
 
   useEffect(() => {
     if (overview?.profile?.id) {
-      coreApi.get(`/player/${overview.profile.id}/stats/overview`).then((r) => setPlayerStats(r.data)).catch(() => {});
-      coreApi.get(`/player/${overview.profile.id}/detailed-features`).then((r) => setDetailedFeatures(r.data)).catch(() => {});
+      const pid = overview.profile.id;
+      coreApi.get(`/player/${pid}/stats/overview`).then((r) => setPlayerStats(r.data)).catch(() => {});
+      coreApi.get(`/player/${pid}/detailed-features`).then((r) => setDetailedFeatures(r.data)).catch(() => {});
     }
   }, [overview]);
+
+  useEffect(() => {
+    if (retried) return;
+    const isLinkedNow = steamData?.linked && steamData?.personaname;
+    const hasNoData = !detailedFeatures?.categories?.length && !playerStats?.summary?.games_analyzed;
+    if (isLinkedNow && hasNoData && overview?.profile?.id) {
+      setRetried(true);
+      coreApi.post('/player/sync-steam').then(() => {
+        const pid = overview.profile.id;
+        coreApi.get(`/player/${pid}/stats/overview`).then((r) => setPlayerStats(r.data)).catch(() => {});
+        coreApi.get(`/player/${pid}/detailed-features`).then((r) => setDetailedFeatures(r.data)).catch(() => {});
+        coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
+      }).catch(() => {});
+    }
+  }, [steamData, detailedFeatures, playerStats, overview, retried]);
 
   const summary = playerStats?.summary || {};
   const trends = playerStats?.trends || {};
@@ -68,7 +85,7 @@ export default function PlayerDashboard() {
     <div>
       {!isLinked && (
         <div className="alert alert-error mb-20">
-          Steam не привязан. <a href="/profile/player">Привяжите аккаунт</a> для получения статистики.
+          Steam не привязан. <a href="/settings">Привяжите аккаунт</a> для получения статистики.
         </div>
       )}
 
@@ -128,8 +145,9 @@ export default function PlayerDashboard() {
             </div>
           )}
 
-          <a href="/profile/player" className="btn btn-outline btn-sm" style={{ marginTop: 16 }}>
-            Редактировать профиль
+          <a href="/settings" className="btn btn-outline btn-sm" style={{ marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            Настройки
           </a>
         </div>
 
@@ -158,7 +176,7 @@ export default function PlayerDashboard() {
           ) : (
             <div className="card" style={{ padding: 40, textAlign: 'center' }}>
               <p className="text-muted">
-                {isLinked ? 'Навыки рассчитываются после загрузки матчей...' : 'Привяжите Steam аккаунт для анализа.'}
+                {isLinked ? 'Загрузка данных...' : 'Привяжите Steam аккаунт для анализа.'}
               </p>
             </div>
           )}

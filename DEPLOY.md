@@ -342,6 +342,17 @@ server {
 
 Сохраняем: `Ctrl+O`, Enter, `Ctrl+X`.
 
+**Вход через Steam (OpenID):** в `.env` на сервере (и пересобрать `auth` + `frontend`) задайте публичные URL:
+
+```bash
+STEAM_OPENID_ENABLED=true
+STEAM_RETURN_URL=https://ваш-домен.ru/auth/steam/callback
+STEAM_REALM=https://ваш-домен.ru/
+FRONTEND_STEAM_REDIRECT=https://ваш-домен.ru/auth/steam-callback
+```
+
+`STEAM_REALM` должен быть «родителем» `STEAM_RETURN_URL` (как у Valve). Локально оставьте значения по умолчанию из `docker-compose.yml`.
+
 ```bash
 sudo ln -s /etc/nginx/sites-available/dota-coach /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default

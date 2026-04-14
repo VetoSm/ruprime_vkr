@@ -192,6 +192,26 @@ def logout_all(current_user: AuthUser = Depends(get_current_user), db: Session =
     return MessageResponse(message="All sessions revoked")
 
 
+# ---------- POST /auth/change-password ----------
+@router.post("/change-password", response_model=MessageResponse)
+def change_password(
+    body: dict,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    old_password = body.get("old_password", "")
+    new_password = body.get("new_password", "")
+
+    if not verify_password(old_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Неверный текущий пароль")
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Минимум 8 символов")
+
+    current_user.password_hash = hash_password(new_password)
+    db.commit()
+    return MessageResponse(message="Пароль изменён")
+
+
 # ---------- POST /auth/link-steam ----------
 @router.post("/link-steam", response_model=LinkSteamResponse)
 def link_steam(body: LinkSteamRequest, current_user: AuthUser = Depends(get_current_user), db: Session = Depends(get_db)):

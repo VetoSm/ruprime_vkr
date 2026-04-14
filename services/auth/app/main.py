@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from app.models import AuthUser, AuthSession, AuthRole, AuthProvider, RoleEnum  # noqa: F401
 from app.routers.auth import router as auth_router
+from app.routers.steam_auth import router as steam_auth_router
 
 app = FastAPI(title="Dota2 Coach - Auth Service", version="1.0.0")
 
@@ -18,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(steam_auth_router, prefix="/auth")
 
 
 @app.on_event("startup")

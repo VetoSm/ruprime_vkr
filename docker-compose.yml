@@ -26,6 +26,10 @@ services:
       JWT_ACCESS_EXPIRES_MIN: ${JWT_ACCESS_EXPIRES_MIN}
       JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS}
       SEED_TEST_DATA: ${SEED_TEST_DATA}
+      STEAM_OPENID_ENABLED: ${STEAM_OPENID_ENABLED:-true}
+      STEAM_RETURN_URL: ${STEAM_RETURN_URL:-http://localhost:8001/auth/steam/callback}
+      STEAM_REALM: ${STEAM_REALM:-http://localhost:8001/}
+      FRONTEND_STEAM_REDIRECT: ${FRONTEND_STEAM_REDIRECT:-http://localhost:3000/auth/steam-callback}
     depends_on:
       postgres:
         condition: service_healthy

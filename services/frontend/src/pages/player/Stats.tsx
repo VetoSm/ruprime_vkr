@@ -23,17 +23,33 @@ export default function PlayerStats() {
   const [stats, setStats] = useState<any>(null);
   const [features, setFeatures] = useState<any>(null);
   const [tab, setTab] = useState('trends');
+  const [pid, setPid] = useState<number | null>(null);
+  const [retried, setRetried] = useState(false);
 
   useEffect(() => {
     loadHeroes();
     coreApi.get('/me/overview').then((r) => {
-      const pid = r.data?.profile?.id;
-      if (pid) {
-        coreApi.get(`/player/${pid}/stats/overview`).then((r2) => setStats(r2.data)).catch(() => {});
-        coreApi.get(`/player/${pid}/detailed-features`).then((r2) => setFeatures(r2.data)).catch(() => {});
+      const profileId = r.data?.profile?.id;
+      if (profileId) {
+        setPid(profileId);
+        coreApi.get(`/player/${profileId}/stats/overview`).then((r2) => setStats(r2.data)).catch(() => {});
+        coreApi.get(`/player/${profileId}/detailed-features`).then((r2) => setFeatures(r2.data)).catch(() => {});
       }
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (retried || !pid) return;
+    const hasNoRoles = !stats?.roles?.actual_roles_distribution || Object.keys(stats.roles.actual_roles_distribution).length === 0;
+    const hasNoStats = !stats?.summary?.games_analyzed;
+    if (hasNoRoles && hasNoStats) return;
+    if (hasNoRoles && !hasNoStats) {
+      setRetried(true);
+      coreApi.post('/player/sync-steam').then(() => {
+        coreApi.get(`/player/${pid}/stats/overview`).then((r2) => setStats(r2.data)).catch(() => {});
+      }).catch(() => {});
+    }
+  }, [stats, pid, retried]);
 
   const summary = stats?.summary || {};
   const trends = stats?.trends || {};
@@ -222,7 +238,7 @@ export default function PlayerStats() {
             </div>
           ) : (
             <p className="text-muted text-center" style={{ padding: 30 }}>
-              Нет данных по позициям. Данные доступны для parsed матчей.
+              Данные по позициям загружаются...
             </p>
           )}
         </div>

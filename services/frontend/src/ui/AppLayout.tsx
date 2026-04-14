@@ -1,22 +1,22 @@
-import { ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { ReactNode, useState } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
 import {
-  IconHome, IconSword, IconChart, IconGraduate, IconSearch,
-  IconClipboard, IconCalendar, IconBot, IconTarget, IconUser,
+  IconHome, IconChart, IconGraduate,
+  IconClipboard, IconCalendar, IconTarget, IconUser,
   IconStar, IconShield, IconUsers, IconScroll, IconDatabase,
-  IconTrendUp, IconLogout, IconZap,
+  IconTrendUp, IconLogout, IconZap, IconSettings,
+  IconChevronLeft, IconChevronRight, IconMessageCircle,
 } from './Icons';
 
 const NAV_CONFIG: Record<string, { icon: (p: any) => JSX.Element }> = {
   '/dashboard':       { icon: IconHome },
-  '/profile/player':  { icon: IconSword },
+  '/settings':        { icon: IconSettings },
   '/stats':           { icon: IconChart },
   '/coaches':         { icon: IconGraduate },
-  '/matchmaking':     { icon: IconSearch },
   '/requests':        { icon: IconClipboard },
   '/schedule':        { icon: IconCalendar },
-  '/ai-chat':         { icon: IconBot },
+  '/ai-chat':         { icon: IconMessageCircle },
   '/coach/dashboard': { icon: IconTarget },
   '/coach/profile':   { icon: IconUser },
   '/coach/schedule':  { icon: IconCalendar },
@@ -30,16 +30,16 @@ const NAV_CONFIG: Record<string, { icon: (p: any) => JSX.Element }> = {
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [collapsed, setCollapsed] = useState(false);
+  const [showAiChat, setShowAiChat] = useState(false);
 
   const playerLinks = [
-    { to: '/dashboard', label: 'Обзор' },
-    { to: '/profile/player', label: 'Профиль' },
+    { to: '/dashboard', label: 'Профиль' },
     { to: '/stats', label: 'Статистика' },
     { to: '/coaches', label: 'Тренеры' },
-    { to: '/matchmaking', label: 'Подбор тренера' },
     { to: '/requests', label: 'Мои заявки' },
     { to: '/schedule', label: 'Расписание' },
-    { to: '/ai-chat', label: 'AI Тренер' },
   ];
 
   const coachLinks = [
@@ -62,14 +62,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   if (user?.role === 'ADMIN') links = [...adminLinks, ...coachLinks, ...playerLinks];
 
   return (
-    <div className="app-layout">
-      <aside className="sidebar">
+    <div className={`app-layout ${collapsed ? 'sidebar-collapsed' : ''}`}>
+      <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-logo">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <IconZap size={22} color="var(--accent)" />
-            <h2>RUPRIME</h2>
+            {!collapsed && <h2>RUPRIME</h2>}
           </div>
-          <span>{user?.login} • {user?.role}</span>
+          {!collapsed && <span>{user?.login} • {user?.role}</span>}
         </div>
         <ul className="sidebar-nav">
           {links.map((link) => {
@@ -77,29 +77,51 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             const Icon = cfg?.icon || IconHome;
             return (
               <li key={link.to}>
-                <NavLink to={link.to} className={({ isActive }) => isActive ? 'active' : ''}>
+                <NavLink to={link.to} className={({ isActive }) => isActive ? 'active' : ''}
+                  title={collapsed ? link.label : undefined}>
                   <span style={{ width: 20, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
                     <Icon size={16} />
                   </span>
-                  {link.label}
+                  {!collapsed && link.label}
                 </NavLink>
               </li>
             );
           })}
           <li>
             <a href="#" onClick={(e) => { e.preventDefault(); logout(); }}
-              style={{ color: 'var(--danger)' }}>
+              style={{ color: 'var(--danger)' }} title={collapsed ? 'Выйти' : undefined}>
               <span style={{ width: 20, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
                 <IconLogout size={16} />
               </span>
-              Выйти
+              {!collapsed && 'Выйти'}
             </a>
           </li>
         </ul>
+        <button className="sidebar-toggle" onClick={() => setCollapsed(!collapsed)}
+          title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}>
+          {collapsed ? <IconChevronRight size={16} /> : <IconChevronLeft size={16} />}
+        </button>
       </aside>
       <main className="main-content">
+        <div className="topbar">
+          <div />
+          <div className="topbar-actions">
+            <button className="topbar-btn" onClick={() => navigate('/settings')}
+              title="Настройки">
+              <IconSettings size={18} />
+            </button>
+          </div>
+        </div>
         {children}
       </main>
+
+      {/* AI Coach FAB */}
+      <button className="ai-fab" onClick={() => {
+        setShowAiChat(!showAiChat);
+        if (!showAiChat) navigate('/ai-chat');
+      }} title="AI Тренер">
+        <IconMessageCircle size={24} color="#fff" />
+      </button>
     </div>
   );
 }

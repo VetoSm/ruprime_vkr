@@ -23,13 +23,18 @@ class SteamAccountData(BaseModel):
     personaname: Optional[str] = None
     avatar_url: Optional[str] = None
     rank_tier: Optional[int] = None
+    mmr_estimate: Optional[int] = None
     win: Optional[int] = None
     lose: Optional[int] = None
+    total_games: Optional[int] = None
+    totals: Optional[dict] = None
     estimated_hours: Optional[float] = None
     last_match_time: Optional[str] = None
     profile_url: Optional[str] = None
     is_public: Optional[bool] = None
     matches_loaded: int = 0
+    roles_distribution: Optional[dict] = None
+    recent_matches: Optional[list] = None
     heroes_top: Optional[list] = None
     rankings_top: Optional[list] = None
     error: Optional[str] = None
@@ -177,6 +182,86 @@ async def link_steam(
                "PLAYER_PROFILE", profile.id,
                {"steam_id": steam_id, "account_id": data.get("account_id"), "personaname": data.get("personaname")},
                ip_address=request.client.host if request.client else None)
+
+    return SteamAccountData(**data)
+
+
+@router.post("/sync-steam", response_model=SteamAccountData)
+async def sync_steam(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Полная синхронизация Steam-данных для уже привязанного аккаунта:
+    - обновляет профиль/матчи из OpenDota через ML
+    - обновляет PlayerProfile в Core
+    - переиспользует тот же формат ответа, что и link-steam
+    """
+    profile = db.query(PlayerProfile).filter(
+        PlayerProfile.core_user_id == current_user.user_id
+    ).first()
+
+    if not profile or not profile.steam_id:
+        raise HTTPException(status_code=400, detail="Сначала привяжите Steam аккаунт")
+
+    steam_id = profile.steam_id.strip()
+    if not steam_id or not steam_id.isdigit():
+        raise HTTPException(status_code=400, detail="Некорректный Steam ID в профиле. Перепривяжите аккаунт.")
+
+    # Refresh data in ML (same pipeline as link-steam)
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{settings.ML_SERVICE_URL}/ml/link-steam-account",
+                json={"steam_id": steam_id},
+            )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"ML сервис ошибка: {resp.text}")
+        data = resp.json()
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"ML сервис недоступен: {str(e)}")
+
+    if data.get("error"):
+        return SteamAccountData(**data)
+
+    profile.dota_account_id = str(data.get("account_id", ""))
+    rank_tier = data.get("rank_tier")
+    if rank_tier:
+        medal = rank_tier // 10
+        rank_names = {1: "HERALD", 2: "GUARDIAN", 3: "CRUSADER", 4: "ARCHON",
+                      5: "LEGEND", 6: "ANCIENT", 7: "DIVINE", 8: "IMMORTAL"}
+        stars = rank_tier % 10
+        profile.actual_rank_tier = f"{rank_names.get(medal, 'UNKNOWN')} [{stars}]"
+
+    db.commit()
+    db.refresh(profile)
+
+    if data.get("matches_count", 0) > 0:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{settings.ML_SERVICE_URL}/ml/analyze-player/{data['account_id']}",
+                    params={"player_profile_id": profile.id},
+                )
+            if resp.status_code == 200:
+                analysis = resp.json()
+                if analysis.get("ml_analysis_id"):
+                    profile.ml_analysis_id = analysis["ml_analysis_id"]
+                    db.commit()
+        except Exception:
+            pass
+
+    log_action(
+        db,
+        current_user.user_id,
+        current_user.role,
+        "SYNC_STEAM",
+        "PLAYER_PROFILE",
+        profile.id,
+        {"steam_id": steam_id, "account_id": data.get("account_id"), "personaname": data.get("personaname")},
+        ip_address=request.client.host if request.client else None,
+    )
 
     return SteamAccountData(**data)
 
