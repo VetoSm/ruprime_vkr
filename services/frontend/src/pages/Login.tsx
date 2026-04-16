@@ -60,7 +60,12 @@ export default function Login() {
               </button>
             </div>
           </div>
-          <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ width: '100%', display: 'flex', justifyContent: 'center', margin: '0 auto' }}
+            disabled={loading}
+          >
             {loading ? 'Входим...' : 'Войти'}
           </button>
         </form>

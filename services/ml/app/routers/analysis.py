@@ -1,18 +1,23 @@
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func as sqlfunc
 
 from app.database import get_db
 from app.models import MlPlayerAnalysis, MlConstantHero, PlayerAccount, PlayerMatch
 from app.schemas import PlayerAnalysisResponse, HeroResponse
 from app.feature_engine import analyze_player
 from app.opendota_client import fetch_full_player_data, steam_id_to_account_id
+from app.player_sync_manager import schedule_deep_sync, get_sync_status
 
 router = APIRouter(prefix="/ml", tags=["ml-analysis"])
+
+BACKGROUND_REFRESH_MINUTES = max(15, int(os.getenv("PLAYER_BACKGROUND_REFRESH_MINUTES", "120")))
+INITIAL_PARSE_MATCHES = max(25, int(os.getenv("PLAYER_INITIAL_PARSE_MATCHES", "80")))
 
 
 # ---- Schemas for steam linking ----
@@ -126,6 +131,30 @@ def _build_recent_matches(matches: list[dict], limit: int = 12) -> list[dict]:
     return recent
 
 
+def _closed_stats_warning(matches_loaded: int, win: Optional[int], lose: Optional[int]) -> Optional[str]:
+    wins = int(win or 0)
+    losses = int(lose or 0)
+    if matches_loaded == 0 and wins == 0 and losses == 0:
+        return (
+            "Статистика закрыта или недоступна в OpenDota.\n"
+            "1. Откройте Dota 2 -> Настройки -> Социальные сети\n"
+            "2. Включите «Показывать данные матчей» (Expose Public Match Data)\n"
+            "3. Подождите 5-10 минут и нажмите «Обновить данные»"
+        )
+    return None
+
+
+def _should_background_refresh(acc: PlayerAccount) -> bool:
+    fetched_at = acc.fetched_at
+    if not fetched_at:
+        return True
+    now = datetime.now(timezone.utc)
+    if fetched_at.tzinfo is None:
+        fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+    age_minutes = (now - fetched_at).total_seconds() / 60.0
+    return age_minutes >= BACKGROUND_REFRESH_MINUTES
+
+
 def _build_totals_payload(acc: PlayerAccount) -> dict:
     return {
         "total_games": acc.total_games,
@@ -199,6 +228,33 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
     steam_id = body.steam_id.strip()
     if not steam_id:
         raise HTTPException(status_code=400, detail="Steam ID не указан")
+    account_id = steam_id_to_account_id(steam_id)
+
+    # Reuse cached account data if we already have this OpenDota account in DB.
+    existing_acc = db.query(PlayerAccount).filter(PlayerAccount.account_id == account_id).first()
+    if existing_acc:
+        cached_matches_count = db.query(sqlfunc.count(PlayerMatch.id)).filter(
+            PlayerMatch.account_id == account_id
+        ).scalar() or 0
+
+        sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=False)
+        cached_response = get_player_account(account_id, db)
+        cached_response.parse_message = (
+            f"Найдены сохранённые данные ({cached_matches_count} матчей). "
+            "Запущена фоновая догрузка: обновим профиль, подтянем больше матчей и расширенные данные."
+        )
+        if sync_job.get("status") == "already_scheduled":
+            cached_response.parse_message = (
+                f"Найдены сохранённые данные ({cached_matches_count} матчей). "
+                "Фоновая догрузка уже выполняется."
+            )
+        if not cached_response.warning:
+            cached_response.warning = _closed_stats_warning(
+                cached_matches_count,
+                existing_acc.win,
+                existing_acc.lose,
+            )
+        return cached_response
 
     # Fetch from OpenDota
     data = fetch_full_player_data(steam_id)
@@ -209,7 +265,7 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
             error=data["error"],
         )
 
-    account_id = data["account_id"]
+    account_id = int(data["account_id"])
 
     # Save/update player_accounts
     acc = db.query(PlayerAccount).filter(PlayerAccount.account_id == account_id).first()
@@ -290,13 +346,13 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
     # Request parse for recent matches (non-blocking background thread)
     parse_requested = 0
     parse_message = None
-    recent_match_ids = [m.get("match_id") for m in matches[:20] if m.get("match_id")]
+    recent_match_ids = [m.get("match_id") for m in matches[:INITIAL_PARSE_MATCHES] if m.get("match_id")]
     if recent_match_ids:
         import threading
         from app.match_collector import request_match_parse
 
         def _do_parse():
-            return request_match_parse(recent_match_ids)
+            return request_match_parse(recent_match_ids, max_requests=INITIAL_PARSE_MATCHES)
 
         parse_thread = threading.Thread(target=_do_parse, daemon=True)
         parse_thread.start()
@@ -306,6 +362,15 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
             f"Полные данные (варды, станы, APM) будут доступны через 5-10 минут. "
             f"Нажмите «Обновить данные» позже для получения обогащённой статистики."
         )
+
+    sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=True)
+    sync_msg = (
+        "Запущена фоновая глубокая синхронизация: догружаем максимум матчей, "
+        "расширенные данные и кэшируем других игроков из этих матчей."
+    )
+    if sync_job.get("status") == "already_scheduled":
+        sync_msg = "Фоновая глубокая синхронизация уже выполняется."
+    parse_message = f"{parse_message}\n{sync_msg}" if parse_message else sync_msg
 
     mmr_estimate = _normalize_mmr_estimate(data.get("mmr_estimate"))
     if mmr_estimate is None:
@@ -334,7 +399,7 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
         recent_matches=recent_matches,
         heroes_top=data.get("heroes", [])[:10],
         rankings_top=data.get("rankings", [])[:10],
-        warning=data.get("warning"),
+        warning=data.get("warning") or _closed_stats_warning(len(matches), acc.win, acc.lose),
         parse_requested=parse_requested,
         parse_message=parse_message,
     )
@@ -346,6 +411,12 @@ def refresh_player_data(account_id: int, db: Session = Depends(get_db)):
     from app.opendota_client import account_id_to_steam_id
     steam_id = account_id_to_steam_id(account_id)
     return link_steam_account(LinkSteamRequest(steam_id=steam_id), db)
+
+
+@router.get("/player-sync-status/{account_id}")
+def player_sync_status(account_id: int):
+    """Статус фоновой догрузки матчей для игрока."""
+    return get_sync_status(account_id)
 
 
 @router.get("/player-account/{account_id}", response_model=PlayerAccountResponse)
@@ -380,6 +451,15 @@ def get_player_account(account_id: int, db: Session = Depends(get_db)):
     heroes_top = _build_heroes_top(matches_rows)
     totals = _build_totals_payload(acc)
     mmr_estimate = _estimate_mmr_from_rank_tier(acc.rank_tier)
+    warning = _closed_stats_warning(matches_count, acc.win, acc.lose)
+
+    parse_message = None
+    if _should_background_refresh(acc):
+        sync_job = schedule_deep_sync(acc.account_id, steam_id=acc.steam_id, force=False)
+        if sync_job.get("status") == "queued":
+            parse_message = "Запущена фоновая догрузка данных (без блокировки интерфейса)."
+        elif sync_job.get("status") == "already_scheduled":
+            parse_message = "Фоновая догрузка данных уже выполняется."
 
     return PlayerAccountResponse(
         account_id=acc.account_id,
@@ -400,6 +480,8 @@ def get_player_account(account_id: int, db: Session = Depends(get_db)):
         roles_distribution=roles_distribution,
         recent_matches=recent_matches,
         heroes_top=heroes_top,
+        warning=warning,
+        parse_message=parse_message,
     )
 
 

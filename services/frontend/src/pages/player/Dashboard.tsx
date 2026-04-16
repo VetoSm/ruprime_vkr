@@ -23,6 +23,7 @@ const FEATURE_TIPS: Record<string, string> = {
 };
 
 const CHART_STYLE = { background: '#151c2e', border: '1px solid #1e2a45', color: '#e8edf5' };
+const STEAM_PENDING_KEY = 'steam_pending_link_id';
 
 export default function PlayerDashboard() {
   const { user } = useAuth();
@@ -33,6 +34,7 @@ export default function PlayerDashboard() {
   const [playerProfile, setPlayerProfile] = useState<any>(null);
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [retried, setRetried] = useState(false);
+  const [pendingSteamChecked, setPendingSteamChecked] = useState(false);
 
   useEffect(() => {
     loadHeroes();
@@ -48,6 +50,37 @@ export default function PlayerDashboard() {
       coreApi.get(`/player/${pid}/detailed-features`).then((r) => setDetailedFeatures(r.data)).catch(() => {});
     }
   }, [overview]);
+
+  useEffect(() => {
+    if (pendingSteamChecked) return;
+    if (!overview?.profile?.id) return;
+    const pendingSteamId = localStorage.getItem(STEAM_PENDING_KEY);
+    if (!pendingSteamId) {
+      setPendingSteamChecked(true);
+      return;
+    }
+    if (steamData?.linked && steamData?.personaname) {
+      localStorage.removeItem(STEAM_PENDING_KEY);
+      setPendingSteamChecked(true);
+      return;
+    }
+
+    setPendingSteamChecked(true);
+    const pid = overview.profile.id;
+    (async () => {
+      try {
+        await coreApi.post('/player/link-steam', { steam_id: pendingSteamId });
+        await coreApi.post('/player/sync-steam').catch(() => {});
+        localStorage.removeItem(STEAM_PENDING_KEY);
+        coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
+        coreApi.get('/player/profile').then((r) => setPlayerProfile(r.data)).catch(() => {});
+        coreApi.get(`/player/${pid}/stats/overview`).then((r) => setPlayerStats(r.data)).catch(() => {});
+        coreApi.get(`/player/${pid}/detailed-features`).then((r) => setDetailedFeatures(r.data)).catch(() => {});
+      } catch {
+        /* останется ручная кнопка в настройках, но без потери pending steam id */
+      }
+    })();
+  }, [overview, steamData, pendingSteamChecked]);
 
   useEffect(() => {
     if (retried) return;
@@ -109,16 +142,22 @@ export default function PlayerDashboard() {
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             {estimated_mmr > 0 && (
               <div className="stat-pill" style={{ minWidth: 80, padding: '10px 14px' }}>
-                <span className="stat-pill-label">MMR</span>
+                <span className="stat-pill-label" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  MMR <InfoTooltip text="Оценка рейтинга по вашей статистике матчей." />
+                </span>
                 <span className="stat-pill-value accent">{estimated_mmr}</span>
               </div>
             )}
             <div className="stat-pill" style={{ minWidth: 80, padding: '10px 14px' }}>
-              <span className="stat-pill-label">Винрейт</span>
+              <span className="stat-pill-label" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                Винрейт <InfoTooltip text="Доля побед среди всех доступных матчей." />
+              </span>
               <span className="stat-pill-value">{winrate > 0 ? `${(winrate * 100).toFixed(0)}%` : '—'}</span>
             </div>
             <div className="stat-pill" style={{ minWidth: 80, padding: '10px 14px' }}>
-              <span className="stat-pill-label">Часы</span>
+              <span className="stat-pill-label" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                Часы <InfoTooltip text="Оценка суммарного игрового времени по данным OpenDota." />
+              </span>
               <span className="stat-pill-value">{hours || '—'}</span>
             </div>
           </div>
@@ -271,7 +310,7 @@ export default function PlayerDashboard() {
       {/* === Quick Stats === */}
       <div className="grid-4">
         <div className="stat-card">
-          <div className="stat-card-label">Винрейт</div>
+          <div className="stat-card-label">Винрейт <InfoTooltip text="Доля побед среди всех ваших игр." /></div>
           <div className="stat-card-value">{winrate > 0 ? `${(winrate * 100).toFixed(1)}%` : '—'}</div>
         </div>
         <div className="stat-card">

@@ -16,6 +16,37 @@ from app.schemas import (
 router = APIRouter(tags=["sessions"])
 
 
+def _to_session_response(session: TrainingSession, db: Session) -> TrainingSessionResponse:
+    req = db.query(TrainingRequest).filter(TrainingRequest.id == session.training_request_id).first()
+    player_profile = None
+    coach_profile = None
+
+    if req:
+        player_profile = db.query(PlayerProfile).filter(PlayerProfile.id == req.player_profile_id).first()
+    if session.coach_profile_id:
+        coach_profile = db.query(CoachProfile).filter(CoachProfile.id == session.coach_profile_id).first()
+
+    player_label = f"Игрок #{player_profile.id}" if player_profile else "Игрок"
+    coach_label = f"Тренер #{coach_profile.id}" if coach_profile else f"Тренер #{session.coach_profile_id}"
+
+    return TrainingSessionResponse(
+        id=session.id,
+        training_request_id=session.training_request_id,
+        coach_profile_id=session.coach_profile_id,
+        player_profile_id=player_profile.id if player_profile else None,
+        player_core_user_id=player_profile.core_user_id if player_profile else None,
+        coach_core_user_id=coach_profile.core_user_id if coach_profile else None,
+        player_label=player_label,
+        coach_label=coach_label,
+        request_status=req.status.value if req else None,
+        scheduled_at=session.scheduled_at,
+        duration_minutes=session.duration_minutes,
+        status=session.status.value,
+        report=session.report,
+        created_at=session.created_at,
+    )
+
+
 @router.get("/training-sessions/my", response_model=list[TrainingSessionResponse])
 def my_sessions(
     current_user: CurrentUser = Depends(get_current_user),
@@ -47,19 +78,7 @@ def my_sessions(
             TrainingSession.created_at.desc()
         ).limit(100).all()
 
-    return [
-        TrainingSessionResponse(
-            id=s.id,
-            training_request_id=s.training_request_id,
-            coach_profile_id=s.coach_profile_id,
-            scheduled_at=s.scheduled_at,
-            duration_minutes=s.duration_minutes,
-            status=s.status.value,
-            report=s.report,
-            created_at=s.created_at,
-        )
-        for s in sessions
-    ]
+    return [_to_session_response(s, db) for s in sessions]
 
 
 @router.patch("/training-sessions/{session_id}", response_model=TrainingSessionResponse)
@@ -73,6 +92,20 @@ def patch_session(
     session = db.query(TrainingSession).filter(TrainingSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    req = db.query(TrainingRequest).filter(TrainingRequest.id == session.training_request_id).first()
+    player_profile = db.query(PlayerProfile).filter(
+        PlayerProfile.id == (req.player_profile_id if req else -1)
+    ).first()
+    coach_profile = db.query(CoachProfile).filter(
+        CoachProfile.id == session.coach_profile_id
+    ).first()
+
+    is_admin = current_user.role == "ADMIN"
+    is_owner_player = bool(player_profile and player_profile.core_user_id == current_user.user_id)
+    is_owner_coach = bool(coach_profile and coach_profile.core_user_id == current_user.user_id)
+
+    if not (is_admin or is_owner_player or is_owner_coach):
+        raise HTTPException(status_code=403, detail="Нет доступа к сессии")
 
     if body.action == "CANCEL":
         session.status = SessionStatus.CANCELLED
@@ -80,11 +113,15 @@ def patch_session(
                    "TRAINING_SESSION", session_id)
 
     elif body.action == "COMPLETE":
+        if not (is_admin or is_owner_coach):
+            raise HTTPException(status_code=403, detail="Только тренер или админ могут завершить сессию")
         session.status = SessionStatus.COMPLETED
         log_action(db, current_user.user_id, current_user.role, "COMPLETE_SESSION",
                    "TRAINING_SESSION", session_id)
 
     elif body.action == "RESCHEDULE":
+        if not (is_admin or is_owner_player or is_owner_coach):
+            raise HTTPException(status_code=403, detail="Нет доступа на перенос сессии")
         if not body.scheduled_at:
             raise HTTPException(status_code=400, detail="New scheduled_at required for reschedule")
 
@@ -105,32 +142,14 @@ def patch_session(
         log_action(db, current_user.user_id, current_user.role, "RESCHEDULE_SESSION",
                    "TRAINING_SESSION", new_session.id)
 
-        return TrainingSessionResponse(
-            id=new_session.id,
-            training_request_id=new_session.training_request_id,
-            coach_profile_id=new_session.coach_profile_id,
-            scheduled_at=new_session.scheduled_at,
-            duration_minutes=new_session.duration_minutes,
-            status=new_session.status.value,
-            report=new_session.report,
-            created_at=new_session.created_at,
-        )
+        return _to_session_response(new_session, db)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
 
     db.commit()
     db.refresh(session)
 
-    return TrainingSessionResponse(
-        id=session.id,
-        training_request_id=session.training_request_id,
-        coach_profile_id=session.coach_profile_id,
-        scheduled_at=session.scheduled_at,
-        duration_minutes=session.duration_minutes,
-        status=session.status.value,
-        report=session.report,
-        created_at=session.created_at,
-    )
+    return _to_session_response(session, db)
 
 
 @router.post("/training-sessions/{session_id}/report", response_model=MessageResponse)

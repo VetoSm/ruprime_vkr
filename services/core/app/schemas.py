@@ -92,6 +92,12 @@ class TrainingSessionResponse(BaseModel):
     id: int
     training_request_id: int
     coach_profile_id: int
+    player_profile_id: Optional[int] = None
+    player_core_user_id: Optional[int] = None
+    coach_core_user_id: Optional[int] = None
+    player_label: Optional[str] = None
+    coach_label: Optional[str] = None
+    request_status: Optional[str] = None
     scheduled_at: Optional[datetime] = None
     duration_minutes: Optional[int] = None
     status: str
@@ -186,7 +192,26 @@ class AdminStatsResponse(BaseModel):
     admins: int
     active_requests: int
     total_sessions: int
+    planned_sessions: int = 0
+    completed_sessions: int = 0
+    cancelled_sessions: int = 0
     avg_coach_rating: Optional[float] = None
+
+
+class AdminProfileBrief(BaseModel):
+    id: int
+    core_user_id: int
+    profile_type: str
+    rank_or_mmr: Optional[str] = None
+    roles: Optional[Any] = None
+    about: Optional[str] = None
+    sessions_total: int = 0
+    sessions_completed: int = 0
+
+
+class AdminProfilesResponse(BaseModel):
+    players: list[AdminProfileBrief]
+    coaches: list[AdminProfileBrief]
 
 
 class MeOverviewResponse(BaseModel):

@@ -227,7 +227,19 @@ def fetch_player_rankings(account_id: int) -> list[dict]:
     return sorted(rankings, key=lambda x: x["percent_rank"], reverse=True)
 
 
-def fetch_full_player_data(steam_id: str) -> dict:
+def fetch_match_details(match_id: int) -> Optional[dict]:
+    """GET /matches/{match_id} with per-player detailed stats."""
+    time.sleep(RATE_LIMIT_DELAY)
+    data = _get(f"/matches/{match_id}")
+    if not data or not isinstance(data, dict):
+        return None
+    players = data.get("players")
+    if not players or not isinstance(players, list):
+        return None
+    return data
+
+
+def fetch_full_player_data(steam_id: str, max_matches: int = 500) -> dict:
     """Fetch everything: refresh -> profile -> wl -> totals -> recentMatches -> matches (paginated) -> heroes."""
     account_id = steam_id_to_account_id(steam_id)
     logger.info(f"=== Full fetch for steam_id={steam_id}, account_id={account_id} ===")
@@ -250,8 +262,8 @@ def fetch_full_player_data(steam_id: str) -> dict:
     # 4. Recent matches (20, with full stats)
     recent = fetch_recent_matches(account_id)
 
-    # 5. All matches (up to 500, basic stats)
-    all_matches = fetch_player_matches_paginated(account_id, max_matches=500)
+    # 5. All matches (basic stats, configurable cap)
+    all_matches = fetch_player_matches_paginated(account_id, max_matches=max_matches)
 
     # 6. Heroes
     heroes = fetch_player_heroes(account_id)

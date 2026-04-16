@@ -8,6 +8,7 @@ const ERRORS: Record<string, string> = {
   steam_disabled: 'Вход через Steam отключён на сервере.',
   steam_failed: 'Ошибка Steam.',
 };
+const STEAM_PENDING_KEY = 'steam_pending_link_id';
 
 export default function SteamAuthCallback() {
   const [msg, setMsg] = useState('Завершение входа через Steam...');
@@ -49,10 +50,12 @@ export default function SteamAuthCallback() {
         await applySteamSession(access, refresh);
         if (cancelled) return;
         if (steamId) {
+          localStorage.setItem(STEAM_PENDING_KEY, steamId);
           try {
             await coreApi.post('/player/link-steam', { steam_id: steamId });
+            localStorage.removeItem(STEAM_PENDING_KEY);
           } catch {
-            /* ML/OpenDota могут ответить позже — пользователь обновит данные в настройках */
+            /* Привяжем автоматически на Dashboard/Settings повторно */
           }
         }
         window.history.replaceState(null, '', '/auth/steam-callback');

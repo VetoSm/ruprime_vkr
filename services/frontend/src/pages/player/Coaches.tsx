@@ -22,7 +22,7 @@ export default function PlayerCoaches() {
   const fetchRecommended = async (role?: string, focus?: string) => {
     setMatchLoading(true);
     try {
-      const res = await coreApi.post('/matchmaking/requests', {
+      const res = await coreApi.post('/matchmaking/recommend-preview', {
         desired_role: role || undefined,
         focus_area: focus || undefined,
         use_ai_coach: false,
@@ -42,13 +42,100 @@ export default function PlayerCoaches() {
     return true;
   });
 
-  const recommendedIds = new Set(recommended.map((r: any) => r.coach_profile_id));
+  const recommendedScore = new Map<number, any>();
+  for (const r of recommended) {
+    if (!recommendedScore.has(r.coach_profile_id)) {
+      recommendedScore.set(r.coach_profile_id, r);
+    }
+  }
+  const bestMatches = filteredCoaches
+    .filter((c) => recommendedScore.has(c.id))
+    .sort((a, b) => (recommendedScore.get(b.id)?.score || 0) - (recommendedScore.get(a.id)?.score || 0))
+    .slice(0, 5);
+  const bestIds = new Set(bestMatches.map((c) => c.id));
+  const otherCoaches = filteredCoaches.filter((c) => !bestIds.has(c.id));
 
-  const sortedCoaches = [...filteredCoaches].sort((a, b) => {
-    const aRec = recommendedIds.has(a.id) ? 1 : 0;
-    const bRec = recommendedIds.has(b.id) ? 1 : 0;
-    return bRec - aRec;
-  });
+  const renderCoachCard = (coach: any, rec?: any) => (
+    <div key={coach.id} className="card" style={{
+      position: 'relative',
+      borderColor: rec ? 'var(--accent)' : undefined,
+      borderWidth: rec ? 2 : undefined,
+    }}>
+      {rec && (
+        <span className="badge badge-accent" style={{
+          position: 'absolute', top: 10, right: 10, fontSize: '0.7rem',
+        }}>
+          {(rec.score * 100).toFixed(0)}% match
+        </span>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+        <div>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6 }}>
+            {coach.about?.split('\n')[0] || `Тренер #${coach.id}`}
+          </h3>
+          <div className="flex gap-10" style={{ alignItems: 'center' }}>
+            {coach.rank_tier && <RankBadge rankName={coach.rank_tier} size="sm" />}
+            {coach.is_verified && <span className="badge badge-accent">Верифицирован</span>}
+          </div>
+        </div>
+        {coach.hourly_rate && (
+          <div style={{
+            textAlign: 'right', padding: '8px 14px',
+            background: 'rgba(0,212,170,0.06)', borderRadius: 12,
+            border: '1px solid rgba(0,212,170,0.15)',
+          }}>
+            <div style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--accent)' }}>
+              {coach.hourly_rate.toLocaleString()} ₽
+            </div>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>за час</div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div>
+          <span className="text-muted" style={{ fontSize: '0.78rem' }}>MMR: </span>
+          <strong>{coach.mmr_estimate ? coach.mmr_estimate.toLocaleString() : '—'}</strong>
+        </div>
+        <div>
+          <span className="text-muted" style={{ fontSize: '0.78rem' }}>Опыт: </span>
+          <strong>{coach.experience_years ? `${coach.experience_years} лет` : '—'}</strong>
+        </div>
+      </div>
+
+      {Array.isArray(coach.main_roles) && coach.main_roles.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          {coach.main_roles.map((r: string) => <RoleBadge key={r} role={r} compact />)}
+        </div>
+      )}
+
+      {Array.isArray(coach.hero_pool) && coach.hero_pool.length > 0 && (
+        <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: 10 }}>
+          Герои: {coach.hero_pool.join(', ')}
+        </div>
+      )}
+
+      {rec?.reasons?.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div className="text-muted" style={{ fontSize: '0.76rem', marginBottom: 4 }}>Почему подходит:</div>
+          <ul style={{ margin: 0, paddingLeft: 16 }}>
+            {rec.reasons.slice(0, 3).map((reason: string, idx: number) => (
+              <li key={idx} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{reason}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {coach.about && (
+        <p style={{
+          fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.6,
+          borderTop: '1px solid var(--border-color)', paddingTop: 10, marginTop: 4,
+        }}>
+          {coach.about.length > 140 ? coach.about.slice(0, 140) + '...' : coach.about}
+        </p>
+      )}
+    </div>
+  );
 
   return (
     <div>
@@ -56,30 +143,6 @@ export default function PlayerCoaches() {
         <h1>Тренеры</h1>
         <p>Лучшие тренеры, подобранные под ваш профиль</p>
       </div>
-
-      {/* Recommended section */}
-      {recommended.length > 0 && !matchLoading && (
-        <div className="card mb-20" style={{ borderColor: 'var(--accent)', borderWidth: 2 }}>
-          <h3 style={{ margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--accent)' }}>★</span> Рекомендованные для вас
-          </h3>
-          <div className="grid-3">
-            {recommended.slice(0, 3).map((rec: any, i: number) => (
-              <div key={i} className="stat-card" style={{ textAlign: 'left' }}>
-                <div className="flex-between mb-10">
-                  <strong>Тренер #{rec.coach_profile_id}</strong>
-                  <span className="badge badge-accent">{(rec.score * 100).toFixed(0)}% совпадение</span>
-                </div>
-                <ul style={{ paddingLeft: 16, margin: 0 }}>
-                  {rec.reasons?.slice(0, 2).map((r: string, j: number) => (
-                    <li key={j} style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{r}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Filters */}
       <div className="flex-between mb-20">
@@ -133,7 +196,7 @@ export default function PlayerCoaches() {
       {/* Coach List */}
       {loading ? (
         <p className="text-muted">Загрузка...</p>
-      ) : sortedCoaches.length === 0 ? (
+      ) : filteredCoaches.length === 0 ? (
         <div className="card" style={{ padding: 48, textAlign: 'center' }}>
           <p className="text-muted">
             {coaches.length === 0
@@ -142,79 +205,31 @@ export default function PlayerCoaches() {
           </p>
         </div>
       ) : (
-        <div className="grid-2">
-          {sortedCoaches.map((coach) => {
-            const isRec = recommendedIds.has(coach.id);
-            return (
-              <div key={coach.id} className="card" style={{
-                position: 'relative',
-                borderColor: isRec ? 'var(--accent)' : undefined,
-                borderWidth: isRec ? 2 : undefined,
-              }}>
-                {isRec && (
-                  <span className="badge badge-accent" style={{
-                    position: 'absolute', top: 10, right: 10, fontSize: '0.7rem',
-                  }}>Рекомендован</span>
-                )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
-                  <div>
-                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6 }}>
-                      {coach.about?.split('\n')[0] || `Тренер #${coach.id}`}
-                    </h3>
-                    <div className="flex gap-10" style={{ alignItems: 'center' }}>
-                      {coach.rank_tier && <RankBadge rankName={coach.rank_tier} size="sm" />}
-                      {coach.is_verified && <span className="badge badge-accent">Верифицирован</span>}
-                    </div>
-                  </div>
-                  {coach.hourly_rate && (
-                    <div style={{
-                      textAlign: 'right', padding: '8px 14px',
-                      background: 'rgba(0,212,170,0.06)', borderRadius: 12,
-                      border: '1px solid rgba(0,212,170,0.15)',
-                    }}>
-                      <div style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--accent)' }}>
-                        {coach.hourly_rate.toLocaleString()} ₽
-                      </div>
-                      <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>за час</div>
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
-                  <div>
-                    <span className="text-muted" style={{ fontSize: '0.78rem' }}>MMR: </span>
-                    <strong>{coach.mmr_estimate ? coach.mmr_estimate.toLocaleString() : '—'}</strong>
-                  </div>
-                  <div>
-                    <span className="text-muted" style={{ fontSize: '0.78rem' }}>Опыт: </span>
-                    <strong>{coach.experience_years ? `${coach.experience_years} лет` : '—'}</strong>
-                  </div>
-                </div>
-
-                {Array.isArray(coach.main_roles) && coach.main_roles.length > 0 && (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-                    {coach.main_roles.map((r: string) => <RoleBadge key={r} role={r} compact />)}
-                  </div>
-                )}
-
-                {Array.isArray(coach.hero_pool) && coach.hero_pool.length > 0 && (
-                  <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: 10 }}>
-                    Герои: {coach.hero_pool.join(', ')}
-                  </div>
-                )}
-
-                {coach.about && (
-                  <p style={{
-                    fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.6,
-                    borderTop: '1px solid var(--border-color)', paddingTop: 10, marginTop: 4,
-                  }}>
-                    {coach.about.length > 120 ? coach.about.slice(0, 120) + '...' : coach.about}
-                  </p>
-                )}
+        <>
+          <div className="card mb-20" style={{ borderColor: 'var(--accent)', borderWidth: 2 }}>
+            <h3 style={{ margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: 'var(--accent)' }}>★</span> Лучше всего подходят (до 5)
+            </h3>
+            {bestMatches.length === 0 ? (
+              <p className="text-muted">Пока не удалось определить персональные мэтчи. Проверьте привязку Steam и статистику.</p>
+            ) : (
+              <div className="grid-2">
+                {bestMatches.map((coach) => renderCoachCard(coach, recommendedScore.get(coach.id)))}
               </div>
-            );
-          })}
-        </div>
+            )}
+          </div>
+
+          <div>
+            <h3 style={{ margin: '0 0 12px' }}>Остальные тренеры</h3>
+            {otherCoaches.length === 0 ? (
+              <div className="card"><p className="text-muted">Нет других тренеров по текущему фильтру.</p></div>
+            ) : (
+              <div className="grid-2">
+                {otherCoaches.map((coach) => renderCoachCard(coach))}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

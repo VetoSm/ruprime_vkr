@@ -8,6 +8,7 @@ import {
   IconTrendUp, IconLogout, IconZap, IconSettings,
   IconChevronLeft, IconChevronRight, IconMessageCircle,
 } from './Icons';
+import SiteFooter from './SiteFooter';
 
 const NAV_CONFIG: Record<string, { icon: (p: any) => JSX.Element }> = {
   '/dashboard':       { icon: IconHome },
@@ -23,6 +24,7 @@ const NAV_CONFIG: Record<string, { icon: (p: any) => JSX.Element }> = {
   '/coach/reviews':   { icon: IconStar },
   '/admin/dashboard': { icon: IconShield },
   '/admin/users':     { icon: IconUsers },
+  '/admin/sessions':  { icon: IconCalendar },
   '/admin/logs':      { icon: IconScroll },
   '/admin/ml-import': { icon: IconDatabase },
   '/admin/ml-data':   { icon: IconTrendUp },
@@ -51,15 +53,23 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   const adminLinks = [
     { to: '/admin/dashboard', label: 'Панель админа' },
-    { to: '/admin/users', label: 'Пользователи' },
+    { to: '/admin/users', label: 'Профили' },
+    { to: '/admin/sessions', label: 'Записи и календарь' },
     { to: '/admin/logs', label: 'Логи' },
     { to: '/admin/ml-import', label: 'Импорт данных' },
     { to: '/admin/ml-data', label: 'Данные ML' },
   ];
 
   let links = playerLinks;
-  if (user?.role === 'COACH') links = [...coachLinks, ...playerLinks];
-  if (user?.role === 'ADMIN') links = [...adminLinks, ...coachLinks, ...playerLinks];
+  if (user?.role === 'COACH') links = coachLinks;
+  if (user?.role === 'ADMIN') links = adminLinks;
+
+  const settingsPath = user?.role === 'COACH'
+    ? '/coach/profile'
+    : user?.role === 'ADMIN'
+      ? '/admin/users'
+      : '/settings';
+  const showAiFab = user?.role === 'PLAYER';
 
   return (
     <div className={`app-layout ${collapsed ? 'sidebar-collapsed' : ''}`}>
@@ -89,6 +99,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           })}
           <li>
             <a href="#" onClick={(e) => { e.preventDefault(); logout(); }}
+              aria-label="Выйти из аккаунта"
               style={{ color: 'var(--danger)' }} title={collapsed ? 'Выйти' : undefined}>
               <span style={{ width: 20, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
                 <IconLogout size={16} />
@@ -98,6 +109,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </li>
         </ul>
         <button className="sidebar-toggle" onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
           title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}>
           {collapsed ? <IconChevronRight size={16} /> : <IconChevronLeft size={16} />}
         </button>
@@ -106,22 +118,27 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <div className="topbar">
           <div />
           <div className="topbar-actions">
-            <button className="topbar-btn" onClick={() => navigate('/settings')}
+            <button className="topbar-btn" onClick={() => navigate(settingsPath)}
+              aria-label="Открыть настройки"
               title="Настройки">
               <IconSettings size={18} />
             </button>
           </div>
         </div>
         {children}
+        <SiteFooter />
       </main>
 
       {/* AI Coach FAB */}
-      <button className="ai-fab" onClick={() => {
-        setShowAiChat(!showAiChat);
-        if (!showAiChat) navigate('/ai-chat');
-      }} title="AI Тренер">
-        <IconMessageCircle size={24} color="#fff" />
-      </button>
+      {showAiFab && (
+        <button className="ai-fab" onClick={() => {
+          setShowAiChat(!showAiChat);
+          if (!showAiChat) navigate('/ai-chat');
+        }} aria-label="Открыть AI тренера" title="AI Тренер">
+          <IconMessageCircle size={24} color="#fff" />
+          <span className="ai-fab-badge">AI</span>
+        </button>
+      )}
     </div>
   );
 }

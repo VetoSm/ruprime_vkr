@@ -1,0 +1,76 @@
+graph TB
+    subgraph CLIENT["Клиент"]
+        Browser["Браузер"]
+    end
+
+    subgraph PROXY["Nginx + SSL"]
+        NG["ru-prime.ru<br/>Reverse Proxy"]
+    end
+
+    subgraph DOCKER["Docker Compose"]
+        subgraph FE["Frontend :3000"]
+            React["React + Vite + TS<br/>Личный кабинет<br/>Дашборды<br/>Подбор тренера"]
+        end
+
+        subgraph AUTH["Auth Service :8001"]
+            AuthAPI["FastAPI<br/>JWT-авторизация<br/>Роли: Player / Coach / Admin"]
+        end
+
+        subgraph CORE["Core Service :8002"]
+            CoreAPI["FastAPI<br/>Профили игроков и тренеров<br/>Steam-привязка<br/>Прокси к ML/LLM"]
+        end
+
+        subgraph ML["ML Service :8003"]
+            MLAPI["FastAPI<br/>Baseline Comparison<br/>8 категорий Score 0-10<br/>Gap-анализ<br/>Coach Matching"]
+            FE_ENGINE["Feature Engine<br/>Baselines: AVG + p25-p95<br/>по (ранг × герой × роль)"]
+            DETAILED["Detailed Features<br/>8 категорий × компоненты<br/>Score / Target / Gap"]
+        end
+
+        subgraph LLM["LLM Service :8004"]
+            LLMAPI["FastAPI<br/>AI-советы (заглушка)<br/>Контекст: feature gaps"]
+        end
+
+        subgraph DB["PostgreSQL :5432"]
+            PG[("База данных<br/>users, profiles<br/>ml_kaggle_baselines<br/>player_accounts<br/>player_matches<br/>ml_player_analyses")]
+        end
+    end
+
+    subgraph EXT["Внешние источники"]
+        OD["OpenDota API<br/>Профиль, матчи<br/>Totals, Rankings<br/>Парсинг матчей"]
+        KG["Kaggle Dataset<br/>594K записей<br/>Pro League 2024-2025"]
+    end
+
+    Browser --> NG
+    NG --> React
+    NG --> AuthAPI
+    NG --> CoreAPI
+    NG --> MLAPI
+    NG --> LLMAPI
+
+    React --> AuthAPI
+    React --> CoreAPI
+    CoreAPI --> AuthAPI
+    CoreAPI --> MLAPI
+    CoreAPI --> LLMAPI
+
+    MLAPI --> FE_ENGINE
+    MLAPI --> DETAILED
+    FE_ENGINE --> PG
+    DETAILED --> PG
+    AuthAPI --> PG
+    CoreAPI --> PG
+    MLAPI --> PG
+    MLAPI --> OD
+    KG -.->|"Загрузка CSV"| PG
+
+    classDef frontend fill:#1a1a2e,stroke:#00d4ff,color:#fff
+    classDef service fill:#16213e,stroke:#0f3460,color:#fff
+    classDef db fill:#0f3460,stroke:#e94560,color:#fff
+    classDef external fill:#533483,stroke:#e94560,color:#fff
+    classDef proxy fill:#2d3436,stroke:#00cec9,color:#fff
+
+    class React frontend
+    class AuthAPI,CoreAPI,MLAPI,LLMAPI,FE_ENGINE,DETAILED service
+    class PG db
+    class OD,KG external
+    class NG proxy

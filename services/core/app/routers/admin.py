@@ -13,7 +13,7 @@ from app.models import (
 )
 from app.schemas import (
     AdminUserResponse, AdminPatchUser, AdminStatsResponse,
-    ActionLogResponse, MessageResponse,
+    ActionLogResponse, MessageResponse, AdminProfilesResponse, AdminProfileBrief,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -34,6 +34,9 @@ def admin_stats(
         TrainingRequest.status.notin_(["CANCELLED", "REJECTED"])
     ).count()
     total_sessions = db.query(TrainingSession).count()
+    planned_sessions = db.query(TrainingSession).filter(TrainingSession.status == "PLANNED").count()
+    completed_sessions = db.query(TrainingSession).filter(TrainingSession.status == "COMPLETED").count()
+    cancelled_sessions = db.query(TrainingSession).filter(TrainingSession.status == "CANCELLED").count()
 
     avg_rating = db.query(sqlfunc.avg(CoachReview.rating)).scalar()
     avg_rating_val = round(float(avg_rating), 2) if avg_rating else None
@@ -48,8 +51,68 @@ def admin_stats(
         admins=0,
         active_requests=active_requests,
         total_sessions=total_sessions,
+        planned_sessions=planned_sessions,
+        completed_sessions=completed_sessions,
+        cancelled_sessions=cancelled_sessions,
         avg_coach_rating=avg_rating_val,
     )
+
+
+@router.get("/profiles", response_model=AdminProfilesResponse)
+def admin_profiles(
+    request: Request,
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Профили игроков и тренеров для админ-панели."""
+    players_rows = db.query(PlayerProfile).order_by(PlayerProfile.id.desc()).all()
+    coaches_rows = db.query(CoachProfile).order_by(CoachProfile.id.desc()).all()
+
+    players = []
+    for p in players_rows:
+        sessions_total = db.query(sqlfunc.count(TrainingSession.id)).join(
+            TrainingRequest, TrainingRequest.id == TrainingSession.training_request_id
+        ).filter(TrainingRequest.player_profile_id == p.id).scalar() or 0
+        sessions_completed = db.query(sqlfunc.count(TrainingSession.id)).join(
+            TrainingRequest, TrainingRequest.id == TrainingSession.training_request_id
+        ).filter(
+            TrainingRequest.player_profile_id == p.id,
+            TrainingSession.status == "COMPLETED",
+        ).scalar() or 0
+        players.append(AdminProfileBrief(
+            id=p.id,
+            core_user_id=p.core_user_id,
+            profile_type="PLAYER",
+            rank_or_mmr=p.actual_rank_tier,
+            roles=p.actual_roles,
+            about=p.about,
+            sessions_total=sessions_total,
+            sessions_completed=sessions_completed,
+        ))
+
+    coaches = []
+    for c in coaches_rows:
+        sessions_total = db.query(sqlfunc.count(TrainingSession.id)).filter(
+            TrainingSession.coach_profile_id == c.id
+        ).scalar() or 0
+        sessions_completed = db.query(sqlfunc.count(TrainingSession.id)).filter(
+            TrainingSession.coach_profile_id == c.id,
+            TrainingSession.status == "COMPLETED",
+        ).scalar() or 0
+        coaches.append(AdminProfileBrief(
+            id=c.id,
+            core_user_id=c.core_user_id,
+            profile_type="COACH",
+            rank_or_mmr=str(c.mmr_estimate) if c.mmr_estimate is not None else c.rank_tier,
+            roles=c.main_roles,
+            about=c.about,
+            sessions_total=sessions_total,
+            sessions_completed=sessions_completed,
+        ))
+
+    log_action(db, current_user.user_id, current_user.role, "VIEW_ADMIN_PROFILES",
+               ip_address=request.client.host if request.client else None)
+    return AdminProfilesResponse(players=players, coaches=coaches)
 
 
 @router.get("/users", response_model=list[AdminUserResponse])

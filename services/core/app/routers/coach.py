@@ -1,12 +1,19 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
-from app.models import CoachProfile
+from app.models import CoachProfile, CoreUser
 from app.schemas import CoachProfileUpdate, CoachProfileResponse
 
 router = APIRouter(tags=["coach"])
+
+HIDE_TEST_COACHES = os.getenv("HIDE_TEST_COACHES", "true").lower() in ("true", "1", "yes")
+TEST_COACH_AUTH_IDS = {
+    int(v.strip()) for v in os.getenv("TEST_COACH_AUTH_IDS", "4,5").split(",") if v.strip().isdigit()
+}
 
 
 @router.get("/coach/profile", response_model=CoachProfileResponse)
@@ -74,14 +81,26 @@ def list_coaches(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """List all coaches with optional filters."""
-    query = db.query(CoachProfile)
+    query = db.query(CoachProfile).join(
+        CoreUser, CoreUser.id == CoachProfile.core_user_id
+    )
 
     if min_rate is not None:
         query = query.filter(CoachProfile.hourly_rate >= min_rate)
     if max_rate is not None:
         query = query.filter(CoachProfile.hourly_rate <= max_rate)
 
-    coaches = query.order_by(CoachProfile.mmr_estimate.desc().nullslast()).all()
+    if HIDE_TEST_COACHES and TEST_COACH_AUTH_IDS:
+        query = query.filter(~CoreUser.auth_user_id.in_(TEST_COACH_AUTH_IDS))
+
+    # Show only filled coach profiles in the catalog.
+    query = query.filter(
+        CoachProfile.about.isnot(None),
+        CoachProfile.hourly_rate.isnot(None),
+        CoachProfile.mmr_estimate.isnot(None),
+    )
+
+    coaches = query.order_by(CoachProfile.id.desc()).all()
 
     # Filter by role in Python (JSON field)
     if role:

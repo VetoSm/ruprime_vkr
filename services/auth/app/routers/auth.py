@@ -15,6 +15,7 @@ from app.security import (
     decode_access_token, generate_refresh_token, hash_refresh_token,
 )
 from app.config import settings
+from app.rate_limit import check_rate_limit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -40,7 +41,16 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> AuthUse
 
 # ---------- POST /auth/register ----------
 @router.post("/register", response_model=RegisterResponse, status_code=201)
-def register(body: RegisterRequest, db: Session = Depends(get_db)):
+def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, retry_after = check_rate_limit("register_ip", client_ip, max_requests=20, window_seconds=60)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many registration attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     # Validate passwords match
     if body.password != body.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
@@ -85,6 +95,15 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
 # ---------- POST /auth/login ----------
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, retry_after = check_rate_limit("login_ip", client_ip, max_requests=40, window_seconds=60)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     user = db.query(AuthUser).filter(AuthUser.email == body.email.strip()).first()
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -116,7 +135,16 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
 
 # ---------- POST /auth/refresh ----------
 @router.post("/refresh", response_model=TokenResponse)
-def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
+def refresh(body: RefreshRequest, request: Request, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, retry_after = check_rate_limit("refresh_ip", client_ip, max_requests=80, window_seconds=60)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many refresh attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     hashed = hash_refresh_token(body.refresh_token)
     session = db.query(AuthSession).filter(AuthSession.refresh_token == hashed).first()
     if not session:

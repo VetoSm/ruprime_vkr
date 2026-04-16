@@ -10,9 +10,14 @@ from app.routers.steam_auth import router as steam_auth_router
 
 app = FastAPI(title="Dota2 Coach - Auth Service", version="1.0.0")
 
+cors_origins = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -20,6 +25,17 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(steam_auth_router, prefix="/auth")
+
+
+@app.middleware("http")
+async def security_headers_middleware(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 @app.on_event("startup")
@@ -41,7 +57,7 @@ def startup():
         db.commit()
 
         # Seed test accounts if enabled
-        seed = os.getenv("SEED_TEST_DATA", "true").lower()
+        seed = os.getenv("SEED_TEST_DATA", "false").lower()
         if seed in ("true", "1", "yes"):
             from app.seed_test_data import seed_test_accounts
             seed_test_accounts(db)

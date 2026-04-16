@@ -309,11 +309,11 @@ def _recompute_baselines():
         _log(f"Ошибка пересчёта baselines: {e}")
 
 
-def request_match_parse(match_ids: list[int]) -> dict:
+def request_match_parse(match_ids: list[int], max_requests: int = 80) -> dict:
     """Request OpenDota to parse specific matches (for player linking)."""
     results = {"requested": 0, "failed": 0, "ids": []}
 
-    for match_id in match_ids[:20]:  # Max 20
+    for match_id in match_ids[:max_requests]:
         time.sleep(RATE_DELAY)
         try:
             with httpx.Client(timeout=10) as client:

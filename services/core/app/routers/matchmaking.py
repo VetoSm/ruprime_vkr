@@ -1,3 +1,5 @@
+import os
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -6,7 +8,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
 from app.models import (
-    PlayerProfile, CoachProfile, TrainingRequest, TrainingSession,
+    PlayerProfile, CoachProfile, TrainingRequest, TrainingSession, CoreUser,
     RequestStatus, SessionStatus,
 )
 from app.schemas import (
@@ -15,6 +17,23 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/matchmaking", tags=["matchmaking"])
+
+HIDE_TEST_COACHES = os.getenv("HIDE_TEST_COACHES", "true").lower() in ("true", "1", "yes")
+TEST_COACH_AUTH_IDS = {
+    int(v.strip()) for v in os.getenv("TEST_COACH_AUTH_IDS", "4,5").split(",") if v.strip().isdigit()
+}
+
+
+def _available_coaches(db: Session):
+    query = db.query(CoachProfile).join(CoreUser, CoreUser.id == CoachProfile.core_user_id)
+    if HIDE_TEST_COACHES and TEST_COACH_AUTH_IDS:
+        query = query.filter(~CoreUser.auth_user_id.in_(TEST_COACH_AUTH_IDS))
+    query = query.filter(
+        CoachProfile.about.isnot(None),
+        CoachProfile.hourly_rate.isnot(None),
+        CoachProfile.mmr_estimate.isnot(None),
+    )
+    return query.order_by(CoachProfile.id.desc()).all()
 
 
 @router.post("/requests", response_model=TrainingRequestResponse)
@@ -49,8 +68,8 @@ async def create_request(
 
     # Call ML service with real coach data
     try:
-        # Fetch all coaches to send to ML for scoring
-        all_coaches = db.query(CoachProfile).all()
+        # Fetch all available coaches to send to ML for scoring
+        all_coaches = _available_coaches(db)
         coaches_payload = [
             {
                 "id": c.id,
@@ -113,6 +132,77 @@ async def create_request(
         recommended_coaches=req.recommended_coaches,
         created_at=req.created_at,
     )
+
+
+@router.post("/recommend-preview")
+async def recommend_preview(
+    body: CreateTrainingRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Preview coach recommendations without creating a training request."""
+    if current_user.role != "PLAYER":
+        raise HTTPException(status_code=403, detail="Only players can request recommendations")
+
+    profile = db.query(PlayerProfile).filter(
+        PlayerProfile.core_user_id == current_user.user_id
+    ).first()
+    if not profile:
+        profile = PlayerProfile(core_user_id=current_user.user_id)
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+
+    all_coaches = _available_coaches(db)
+    coaches_payload = [
+        {
+            "id": c.id,
+            "mmr_estimate": c.mmr_estimate,
+            "main_roles": c.main_roles,
+            "hero_pool": c.hero_pool,
+            "hourly_rate": c.hourly_rate,
+            "experience_years": c.experience_years,
+        }
+        for c in all_coaches
+    ]
+
+    ml_payload = {
+        "player_profile": {
+            "player_profile_id": profile.id,
+            "steam_id": profile.steam_id,
+            "dota_account_id": profile.dota_account_id,
+            "actual_rank_tier": profile.actual_rank_tier,
+            "actual_roles": profile.actual_roles,
+            "desired_rank_tier": profile.desired_rank_tier,
+            "desired_roles": profile.desired_roles,
+            "training_goals": profile.training_goals,
+        },
+        "request": {
+            "training_request_id": None,
+            "desired_role": body.desired_role,
+            "focus_area": body.focus_area,
+            "use_ai_coach": False,
+        },
+        "coaches": coaches_payload,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(f"{settings.ML_SERVICE_URL}/ml/match-coaches", json=ml_payload)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"ML error: {resp.text}")
+        data = resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"ML unavailable: {str(e)}")
+
+    log_action(db, current_user.user_id, current_user.role, "PREVIEW_RECOMMENDATIONS",
+               "PLAYER_PROFILE", profile.id)
+    return {
+        "recommended_coaches": data.get("recommended_coaches", []),
+        "coaches_count": len(coaches_payload),
+    }
 
 
 @router.get("/requests/my", response_model=list[TrainingRequestResponse])

@@ -129,6 +129,11 @@ export default function Register() {
         <p className="text-center mt-20 text-muted">
           Уже есть аккаунт? <Link to="/login">Войти</Link>
         </p>
+        {role === 'COACH' && (
+          <p className="text-center mt-12 text-muted" style={{ fontSize: '0.82rem' }}>
+            Хотите посмотреть презентацию для тренеров? <Link to="/coach-landing">Открыть</Link>
+          </p>
+        )}
       </div>
     </div>
   );

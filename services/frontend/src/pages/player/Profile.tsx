@@ -3,6 +3,7 @@ import { coreApi, authApi } from '../../api/client';
 import { loadHeroes, heroName, heroIcon } from '../../api/heroes';
 import { RankBadge, RoleBadge, InfoTooltip } from '../../ui/GameComponents';
 import { IconEye, IconEyeOff, IconSettings } from '../../ui/Icons';
+const STEAM_PENDING_KEY = 'steam_pending_link_id';
 
 interface SteamData {
   linked: boolean;
@@ -62,6 +63,7 @@ export default function PlayerProfile() {
   const [showNewPwd, setShowNewPwd] = useState(false);
   const [pwdMsg, setPwdMsg] = useState('');
   const [pwdError, setPwdError] = useState('');
+  const [autoLinkTried, setAutoLinkTried] = useState(false);
 
   useEffect(() => {
     loadHeroes();
@@ -74,6 +76,42 @@ export default function PlayerProfile() {
     }).catch(() => {});
     coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (autoLinkTried) return;
+    if (steamData?.linked) {
+      localStorage.removeItem(STEAM_PENDING_KEY);
+      setAutoLinkTried(true);
+      return;
+    }
+    const pendingSteamId = localStorage.getItem(STEAM_PENDING_KEY);
+    if (!pendingSteamId) {
+      setAutoLinkTried(true);
+      return;
+    }
+    setAutoLinkTried(true);
+
+    (async () => {
+      setLinking(true);
+      try {
+        await coreApi.post('/player/link-steam', { steam_id: pendingSteamId });
+        const syncRes = await coreApi.post('/player/sync-steam').catch(() => null);
+        if (syncRes?.data) {
+          setSteamData({ linked: true, ...syncRes.data });
+        } else {
+          const res = await coreApi.get('/player/steam-data');
+          setSteamData(res.data);
+        }
+        localStorage.removeItem(STEAM_PENDING_KEY);
+        setMsg('Steam-аккаунт привязан автоматически.');
+        coreApi.get('/player/profile').then((r) => setProfile(r.data)).catch(() => {});
+      } catch {
+        setError('Автопривязка Steam не удалась. Можно повторить кнопкой ниже.');
+      } finally {
+        setLinking(false);
+      }
+    })();
+  }, [steamData, autoLinkTried]);
 
   const saveProfile = async () => {
     setMsg(''); setError('');
@@ -133,6 +171,18 @@ export default function PlayerProfile() {
       setOldPassword(''); setNewPassword(''); setConfirmNewPassword('');
     } catch (err: any) {
       setPwdError(err.response?.data?.detail || 'Ошибка смены пароля');
+    }
+  };
+
+  const logoutAllSessions = async () => {
+    setPwdMsg(''); setPwdError('');
+    try {
+      await authApi.post('/auth/logout-all');
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      window.location.href = '/login';
+    } catch (err: any) {
+      setPwdError(err.response?.data?.detail || 'Не удалось завершить все сессии');
     }
   };
 
@@ -445,7 +495,13 @@ export default function PlayerProfile() {
               onChange={(e) => setOldPassword(e.target.value)}
               placeholder="Введите текущий пароль"
             />
-            <button type="button" className="input-icon-btn" onClick={() => setShowOldPwd(!showOldPwd)} tabIndex={-1}>
+            <button
+              type="button"
+              className="input-icon-btn"
+              onClick={() => setShowOldPwd(!showOldPwd)}
+              tabIndex={-1}
+              aria-label={showOldPwd ? 'Скрыть текущий пароль' : 'Показать текущий пароль'}
+            >
               {showOldPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
             </button>
           </div>
@@ -461,7 +517,13 @@ export default function PlayerProfile() {
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Минимум 8 символов"
               />
-              <button type="button" className="input-icon-btn" onClick={() => setShowNewPwd(!showNewPwd)} tabIndex={-1}>
+              <button
+                type="button"
+                className="input-icon-btn"
+                onClick={() => setShowNewPwd(!showNewPwd)}
+                tabIndex={-1}
+                aria-label={showNewPwd ? 'Скрыть новый пароль' : 'Показать новый пароль'}
+              >
                 {showNewPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
               </button>
             </div>
@@ -477,7 +539,10 @@ export default function PlayerProfile() {
             />
           </div>
         </div>
-        <button className="btn btn-outline" onClick={changePassword}>Сменить пароль</button>
+        <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+          <button className="btn btn-outline" onClick={changePassword}>Сменить пароль</button>
+          <button className="btn btn-danger" onClick={logoutAllSessions}>Выйти на всех устройствах</button>
+        </div>
       </div>
     </div>
   );

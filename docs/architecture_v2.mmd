@@ -1,0 +1,64 @@
+graph TB
+    subgraph CLIENT["Клиент"]
+        Browser["Браузер"]
+    end
+
+    subgraph PROXY["Nginx + SSL"]
+        NG["ru-prime.ru<br/>Reverse Proxy"]
+    end
+
+    subgraph DOCKER["Docker Compose"]
+        subgraph FE["Frontend :3000"]
+            React["React + Vite + TS<br/>Личный кабинет<br/>Дашборды<br/>Подбор тренера"]
+        end
+
+        subgraph AUTH["Auth :8001"]
+            AuthAPI["FastAPI<br/>JWT-авторизация<br/>Роли: Player / Coach / Admin"]
+        end
+
+        subgraph CORE["Core :8002"]
+            CoreAPI["FastAPI<br/>Профили игроков и тренеров<br/>Steam-привязка<br/>Прокси к сервисам"]
+        end
+
+        subgraph ANALYTICS["Analytics :8003"]
+            AAPI["FastAPI<br/>Baseline Comparison<br/>8 категорий Score 0-10<br/>Gap-анализ<br/>Coach Matching"]
+            FE_ENGINE["Feature Engine<br/>Baselines: AVG + p25-p95<br/>по (ранг × герой × роль)"]
+            DETAILED["Detailed Features<br/>8 категорий × компоненты<br/>Score / Target / Gap"]
+        end
+
+        subgraph LLM["LLM :8004"]
+            LLMAPI["FastAPI<br/>Генерация персональных<br/>советов на основе<br/>gap-анализа"]
+        end
+
+        subgraph DB["PostgreSQL :5432"]
+            PG[("База данных<br/>users, profiles<br/>ml_kaggle_baselines<br/>player_accounts<br/>player_matches<br/>ml_player_analyses")]
+        end
+    end
+
+    subgraph EXT["Внешние источники"]
+        OD["OpenDota API<br/>Профиль, матчи<br/>Totals, Rankings<br/>Парсинг матчей"]
+        KG["Kaggle Dataset<br/>594K записей<br/>Pro League 2024-2025"]
+    end
+
+    Browser --> NG
+    NG --> React
+    NG --> AuthAPI
+    NG --> CoreAPI
+    NG --> AAPI
+    NG --> LLMAPI
+
+    React --> AuthAPI
+    React --> CoreAPI
+    CoreAPI --> AuthAPI
+    CoreAPI --> AAPI
+    CoreAPI --> LLMAPI
+
+    AAPI --> FE_ENGINE
+    AAPI --> DETAILED
+    FE_ENGINE --> PG
+    DETAILED --> PG
+    AuthAPI --> PG
+    CoreAPI --> PG
+    AAPI --> PG
+    AAPI --> OD
+    KG -.->|"Загрузка CSV"| PG

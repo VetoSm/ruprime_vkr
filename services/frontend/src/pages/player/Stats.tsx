@@ -76,7 +76,7 @@ export default function PlayerStats() {
           <div className="stat-card-value">{summary.games_analyzed || features?.total_matches || 0}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">Винрейт</div>
+          <div className="stat-card-label">Винрейт <InfoTooltip text="Доля побед среди проанализированных матчей." /></div>
           <div className="stat-card-value">{summary.winrate ? `${(summary.winrate * 100).toFixed(1)}%` : '—'}</div>
         </div>
         <div className="stat-card">
@@ -84,7 +84,7 @@ export default function PlayerStats() {
           <div className="stat-card-value">{summary.kda_avg || '—'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">MMR</div>
+          <div className="stat-card-label">MMR <InfoTooltip text="Оценка рейтинга по матчевой статистике." /></div>
           <div className="stat-card-value text-accent">{summary.estimated_mmr || '—'}</div>
         </div>
       </div>
