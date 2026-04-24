@@ -325,16 +325,22 @@ def list_coach_applications(
     current_user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List users with a coach application. Admin only.
+    """List every user involved in the coach lifecycle. Admin only.
 
     ``status`` filter accepts ``PENDING`` / ``APPROVED`` / ``REJECTED``.
-    Default returns everything that is not NONE.
+
+    Without a filter we return everyone who is either:
+
+    * a current COACH (no matter what coach_application_status says, so we
+      never lose sight of unverified coaches left over from old seeds), or
+    * a PLAYER who submitted a real application (status != NONE).
     """
     if current_user.role != RoleEnum.ADMIN:
         raise HTTPException(status_code=403, detail="Admin only")
 
     q = db.query(AuthUser).filter(
-        AuthUser.coach_application_status != CoachApplicationStatus.NONE
+        (AuthUser.coach_application_status != CoachApplicationStatus.NONE)
+        | (AuthUser.role == RoleEnum.COACH)
     )
     if status:
         try:
