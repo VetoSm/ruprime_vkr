@@ -11,6 +11,9 @@ export default function MlData() {
   const [analyses, setAnalyses] = useState<any>(null);
   const [accounts, setAccounts] = useState<any>(null);
   const [accountDetail, setAccountDetail] = useState<any>(null);
+  const [allLinks, setAllLinks] = useState<any[]>([]);
+  const [busyRefreshAcc, setBusyRefreshAcc] = useState<number | null>(null);
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
   const [selectedTable, setSelectedTable] = useState('ml_raw_matches');
   const [tableOffset, setTableOffset] = useState(0);
   const [mmrFilter, setMmrFilter] = useState('');
@@ -77,7 +80,28 @@ export default function MlData() {
       const res = await coreApi.get('/admin/ml-data/player-accounts');
       setAccounts(res.data);
     } catch {}
+    // Also pull the full user list to show links that aren't in ML yet
+    // (closed profiles, fake Steam IDs from seeds, or rate-limited ones).
+    try {
+      const full = await coreApi.get('/admin/users-full');
+      setAllLinks((full.data?.items || []).filter((u: any) => u.steam_linked));
+    } catch {
+      setAllLinks([]);
+    }
     setLoading(false);
+  };
+
+  const refreshAccount = async (accountId: number) => {
+    setBusyRefreshAcc(accountId); setRefreshMsg(null);
+    try {
+      const res = await coreApi.post(`/admin/steam/${accountId}/refresh`);
+      setRefreshMsg(res.data?.message || 'Запрошена фоновая загрузка.');
+      setTimeout(loadAccounts, 2000);
+    } catch (e: any) {
+      setRefreshMsg(e?.response?.data?.detail || 'Не удалось запустить догрузку');
+    } finally {
+      setBusyRefreshAcc(null);
+    }
   };
 
   const loadAccountDetail = async (accountId: number) => {
@@ -336,9 +360,96 @@ export default function MlData() {
           {!accountDetail ? (
             /* List of accounts */
             <div>
+              {refreshMsg && <div className="alert alert-success mb-20">{refreshMsg}</div>}
+
+              {/* Summary: all Steam-links grouped by load status */}
+              {allLinks.length > 0 && (() => {
+                const loaded = allLinks.filter((u: any) => u.dota_personaname);
+                const pending = allLinks.filter((u: any) => !u.dota_personaname);
+                return (
+                  <div className="grid-3 mb-20">
+                    <div className="stat-card">
+                      <div className="stat-card-label">Привязали Steam</div>
+                      <div className="stat-card-value">{allLinks.length}</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-card-label">Данные загружены</div>
+                      <div className="stat-card-value text-accent">{loaded.length}</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-card-label">Ожидают / не загрузились</div>
+                      <div className="stat-card-value" style={{ color: 'var(--warning)' }}>{pending.length}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {allLinks.length > 0 && (
+                <div className="card mb-20">
+                  <h3 className="card-title">Все привязки Steam ({allLinks.length})</h3>
+                  <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: 12 }}>
+                    Здесь видно всех, кто подвязал Steam, включая аккаунты без данных в OpenDota (закрытый профиль, свежие аккаунты, rate-limit при первой загрузке).
+                    Для «не загружен» можно запустить догрузку вручную.
+                  </p>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Логин</th>
+                          <th>Роль</th>
+                          <th>Steam ID</th>
+                          <th>Account ID</th>
+                          <th>Dota-ник</th>
+                          <th>Ранг</th>
+                          <th>Игр</th>
+                          <th>Статус</th>
+                          <th>Действие</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allLinks.map((u: any) => {
+                          const loaded = Boolean(u.dota_personaname);
+                          return (
+                            <tr key={u.auth_user_id}>
+                              <td>{u.login}</td>
+                              <td><span className="badge badge-accent">{u.role}</span></td>
+                              <td style={{ fontSize: '0.78rem' }}>{u.steam_id || '—'}</td>
+                              <td style={{ fontSize: '0.78rem' }}>{u.dota_account_id || '—'}</td>
+                              <td>{u.dota_personaname || <span className="text-muted">—</span>}</td>
+                              <td style={{ fontSize: '0.82rem' }}>{u.dota_rank_name || '—'}</td>
+                              <td>{u.lifetime_games?.toLocaleString('ru-RU') ?? '—'}</td>
+                              <td>
+                                {loaded ? (
+                                  <span className="badge badge-accent">Загружены</span>
+                                ) : (
+                                  <span className="badge" style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning)', color: 'var(--warning)' }}>Нет данных</span>
+                                )}
+                              </td>
+                              <td>
+                                {u.dota_account_id && (
+                                  <button
+                                    className="btn btn-outline btn-sm"
+                                    disabled={busyRefreshAcc === Number(u.dota_account_id)}
+                                    onClick={() => refreshAccount(Number(u.dota_account_id))}
+                                  >
+                                    {busyRefreshAcc === Number(u.dota_account_id) ? 'Запрашиваем…' : 'Догрузить'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               {accounts?.accounts && accounts.accounts.length > 0 ? (
                 <div>
-                  <h3 className="card-title mb-20">Привязанные аккаунты — {accounts.total}</h3>
+                  <h3 className="card-title mb-20">
+                    Подробности по загруженным аккаунтам ({accounts.total})
+                  </h3>
                   {accounts.accounts.map((a: any) => (
                     <div key={a.account_id} className="card mb-10" style={{ cursor: 'pointer' }}
                       onClick={() => loadAccountDetail(a.account_id)}>

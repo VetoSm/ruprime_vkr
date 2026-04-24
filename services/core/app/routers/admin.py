@@ -689,6 +689,38 @@ async def admin_change_role(
     return MessageResponse(message=f"Роль пользователя #{auth_user_id} → {new_role}")
 
 
+@router.post("/steam/{account_id}/refresh", response_model=MessageResponse)
+async def admin_refresh_steam_account(
+    account_id: int,
+    request: Request,
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Manually kick a fresh deep-sync for one Steam/Dota account. Used by
+    the admin UI to force a re-download for accounts whose data hasn't
+    been pulled yet (closed profiles, earlier rate-limit, etc.)."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{settings.ML_SERVICE_URL}/ml/refresh-player-data/{account_id}",
+                headers=ml_headers(),
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"ML недоступен: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+    log_action(
+        db, current_user.user_id, current_user.role, "ADMIN_REFRESH_STEAM",
+        metadata={"account_id": account_id, "ml_status": resp.status_code},
+        ip_address=request.client.host if request.client else None,
+    )
+    msg = "Запрошена фоновая загрузка данных."
+    if isinstance(data, dict) and data.get("parse_message"):
+        msg = str(data["parse_message"])[:160]
+    return MessageResponse(message=msg)
+
+
 @router.post("/backfill/players", response_model=MessageResponse)
 async def backfill_players(
     request: Request,
