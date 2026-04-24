@@ -3,7 +3,6 @@ import { trackEvent } from '../utils/telemetry';
 
 const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || 'http://localhost:8001';
 const CORE_URL = import.meta.env.VITE_CORE_API_URL || 'http://localhost:8002';
-const ML_URL = import.meta.env.VITE_ML_API_URL || 'http://localhost:8003';
 
 const ACCESS_TOKEN_KEY = 'access_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
@@ -133,4 +132,4 @@ function createClient(baseURL: string) {
 
 export const authApi = createClient(AUTH_URL);
 export const coreApi = createClient(CORE_URL);
-export const mlApi = createClient(ML_URL);
+// NB: ml is internal-only; frontend talks to core which proxies to ml.

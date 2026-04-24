@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
+from app.ml_client import ml_headers
 from app.models import PlayerProfile, AiAdviceHistory
 from app.schemas import AiChatRequest, AiChatResponse, AiHistoryEntry
 
@@ -28,7 +29,8 @@ async def ai_chat(
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(
-                    f"{settings.ML_SERVICE_URL}/ml/player-analysis/{profile.ml_analysis_id}"
+                    f"{settings.ML_SERVICE_URL}/ml/player-analysis/{profile.ml_analysis_id}",
+                    headers=ml_headers(),
                 )
             if resp.status_code == 200:
                 ml_data = resp.json()
@@ -50,6 +52,7 @@ async def ai_chat(
                 resp = await client.get(
                     f"{settings.ML_SERVICE_URL}/ml/detailed-features/{profile.dota_account_id}",
                     params=params,
+                    headers=ml_headers(),
                 )
             if resp.status_code == 200:
                 feat_data = resp.json()

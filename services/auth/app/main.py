@@ -56,6 +56,18 @@ def startup():
                 db.add(AuthRole(name=role_name, description=desc))
         db.commit()
 
+        # One-shot forced re-login: when FORCE_REVOKE_ALL_SESSIONS=true is set on
+        # startup, mark every active refresh session as revoked so short-lived
+        # access tokens expire on their own and refresh is impossible. This is
+        # used during security rollouts (e.g. JWT payload change, shortened TTL)
+        # to invalidate any previously issued credentials.
+        force_revoke = os.getenv("FORCE_REVOKE_ALL_SESSIONS", "false").lower()
+        if force_revoke in ("true", "1", "yes"):
+            db.query(AuthSession).filter(AuthSession.revoked == False).update(  # noqa: E712
+                {"revoked": True}
+            )
+            db.commit()
+
         # Seed test accounts if enabled
         seed = os.getenv("SEED_TEST_DATA", "false").lower()
         if seed in ("true", "1", "yes"):

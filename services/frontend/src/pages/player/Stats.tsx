@@ -72,12 +72,12 @@ export default function PlayerStats() {
 
       <div className="grid-4 mb-20">
         <div className="stat-card">
-          <div className="stat-card-label">Игр <InfoTooltip text="Количество проанализированных матчей." /></div>
-          <div className="stat-card-value">{summary.games_analyzed || features?.total_matches || 0}</div>
+          <div className="stat-card-label">Всего игр <InfoTooltip text="Количество сыгранных матчей по данным Steam/OpenDota." /></div>
+          <div className="stat-card-value">{summary.total_games || features?.total_games_lifetime || 0}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">Винрейт <InfoTooltip text="Доля побед среди проанализированных матчей." /></div>
-          <div className="stat-card-value">{summary.winrate ? `${(summary.winrate * 100).toFixed(1)}%` : '—'}</div>
+          <div className="stat-card-label">Винрейт <InfoTooltip text="Доля побед за всё время." /></div>
+          <div className="stat-card-value">{summary.winrate !== null && summary.winrate !== undefined ? `${(summary.winrate * 100).toFixed(1)}%` : '—'}</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-label">KDA <InfoTooltip text="(Убийства + Ассисты) / Смерти" /></div>

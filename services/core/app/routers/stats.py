@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
+from app.ml_client import ml_headers
 from app.models import PlayerProfile
 
 router = APIRouter(tags=["stats"])
@@ -17,7 +18,8 @@ async def _get_or_create_analysis(profile: PlayerProfile, db: Session) -> dict |
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(
-                    f"{settings.ML_SERVICE_URL}/ml/player-analysis/{profile.ml_analysis_id}"
+                    f"{settings.ML_SERVICE_URL}/ml/player-analysis/{profile.ml_analysis_id}",
+                    headers=ml_headers(),
                 )
             if resp.status_code == 200:
                 return resp.json()
@@ -31,6 +33,7 @@ async def _get_or_create_analysis(profile: PlayerProfile, db: Session) -> dict |
                 resp = await client.get(
                     f"{settings.ML_SERVICE_URL}/ml/analyze-player/{profile.dota_account_id}",
                     params={"player_profile_id": profile.id},
+                    headers=ml_headers(),
                 )
             if resp.status_code == 200:
                 data = resp.json()
@@ -47,7 +50,8 @@ async def _get_or_create_analysis(profile: PlayerProfile, db: Session) -> dict |
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(
-                    f"{settings.ML_SERVICE_URL}/ml/player-account/{profile.dota_account_id}"
+                    f"{settings.ML_SERVICE_URL}/ml/player-account/{profile.dota_account_id}",
+                    headers=ml_headers(),
                 )
             if resp.status_code == 200:
                 acc = resp.json()
@@ -198,6 +202,7 @@ async def player_detailed_features(
             resp = await client.get(
                 f"{settings.ML_SERVICE_URL}/ml/detailed-features/{profile.dota_account_id}",
                 params=params,
+                headers=ml_headers(),
             )
         if resp.status_code == 200:
             log_action(db, current_user.user_id, current_user.role, "VIEW_DETAILED_FEATURES",

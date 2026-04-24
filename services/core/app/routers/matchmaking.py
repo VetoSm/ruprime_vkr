@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
+from app.ml_client import ml_headers
 from app.models import (
     PlayerProfile, CoachProfile, TrainingRequest, TrainingSession, CoreUser,
     RequestStatus, SessionStatus,
@@ -66,7 +67,43 @@ async def create_request(
     db.commit()
     db.refresh(req)
 
-    # Call ML service with real coach data
+    # Shortcut: if the player applied to a specific coach (e.g. clicked
+    # "Записаться" on a coach card), skip ML matching and pre-fill that coach
+    # as the sole recommendation. The coach can confirm/decline from their
+    # schedule. We also stash the player's optional ``message`` so the coach
+    # has context when reviewing the application.
+    if body.preferred_coach_profile_id:
+        preferred = db.query(CoachProfile).filter(
+            CoachProfile.id == body.preferred_coach_profile_id,
+            CoachProfile.is_verified == True,  # noqa: E712
+        ).first()
+        if preferred:
+            req.recommended_coaches = [{
+                "coach_profile_id": preferred.id,
+                "score": 1.0,
+                "reasons": ["Выбран игроком напрямую"],
+                "message": (body.message or "").strip() or None,
+                "direct_application": True,
+            }]
+            req.status = RequestStatus.WAITING_CONFIRMATION
+            db.commit()
+            db.refresh(req)
+            log_action(
+                db, current_user.user_id, current_user.role, "CREATE_REQUEST_DIRECT",
+                "TRAINING_REQUEST", req.id, {"coach_profile_id": preferred.id},
+            )
+            return TrainingRequestResponse(
+                id=req.id,
+                player_profile_id=req.player_profile_id,
+                desired_role=req.desired_role,
+                focus_area=req.focus_area,
+                status=req.status.value,
+                ml_analysis_id=req.ml_analysis_id,
+                recommended_coaches=req.recommended_coaches,
+                created_at=req.created_at,
+            )
+
+    # Otherwise run the ML matcher as usual.
     try:
         # Fetch all available coaches to send to ML for scoring
         all_coaches = _available_coaches(db)
@@ -103,7 +140,11 @@ async def create_request(
         }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(f"{settings.ML_SERVICE_URL}/ml/match-coaches", json=ml_payload)
+            resp = await client.post(
+                f"{settings.ML_SERVICE_URL}/ml/match-coaches",
+                json=ml_payload,
+                headers=ml_headers(),
+            )
 
         if resp.status_code == 200:
             data = resp.json()
@@ -188,7 +229,11 @@ async def recommend_preview(
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(f"{settings.ML_SERVICE_URL}/ml/match-coaches", json=ml_payload)
+            resp = await client.post(
+                f"{settings.ML_SERVICE_URL}/ml/match-coaches",
+                json=ml_payload,
+                headers=ml_headers(),
+            )
         if resp.status_code != 200:
             raise HTTPException(status_code=502, detail=f"ML error: {resp.text}")
         data = resp.json()

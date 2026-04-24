@@ -18,6 +18,7 @@ from app.routers.ai_chat import router as ai_chat_router
 from app.routers.admin import router as admin_router
 from app.routers.sessions import router as sessions_router
 from app.routers.public import router as public_router
+from app.routers.ml_proxy import router as ml_proxy_router
 
 app = FastAPI(title="Dota2 Coach - Core Service", version="1.0.0")
 
@@ -43,6 +44,7 @@ app.include_router(ai_chat_router)
 app.include_router(admin_router)
 app.include_router(sessions_router)
 app.include_router(public_router)
+app.include_router(ml_proxy_router)
 
 
 @app.middleware("http")

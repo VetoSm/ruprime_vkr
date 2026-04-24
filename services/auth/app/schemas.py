@@ -42,6 +42,7 @@ class RegisterResponse(BaseModel):
     role: str
     is_active: bool
     is_verified: bool
+    coach_application_status: str = "NONE"
     created_at: datetime
 
     class Config:
@@ -71,6 +72,7 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     is_verified: bool
+    coach_application_status: str = "NONE"
 
     class Config:
         from_attributes = True

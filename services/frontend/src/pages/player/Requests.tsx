@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 
 export default function PlayerRequests() {
   const [requests, setRequests] = useState<any[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [role, setRole] = useState('');
+  const [focus, setFocus] = useState('');
+  const [useAi, setUseAi] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     coreApi.get('/matchmaking/requests/my').then((r) => setRequests(r.data)).catch(() => {});
@@ -13,15 +21,103 @@ export default function PlayerRequests() {
     setRequests(requests.map(r => r.id === id ? { ...r, status: 'CANCELLED' } : r));
   };
 
+  const createRequest = async () => {
+    setLoading(true); setMsg(null); setErr(null);
+    try {
+      const res = await coreApi.post('/matchmaking/requests', {
+        desired_role: role || undefined,
+        focus_area: focus || undefined,
+        use_ai_coach: useAi,
+      });
+      setRequests([res.data, ...requests]);
+      setMsg(
+        res.data?.recommended_coaches?.length
+          ? `Заявка создана. Подобрано рекомендаций: ${res.data.recommended_coaches.length}.`
+          : 'Заявка создана. Рекомендации появятся в течение минуты.'
+      );
+      setCreating(false);
+      setRole(''); setFocus(''); setUseAi(false);
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || 'Не удалось создать заявку');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div>
-      <div className="page-header">
-        <h1>Мои запросы</h1>
-        <p>Просмотр и управление запросами на тренировки</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h1>Мои заявки</h1>
+          <p>Создавайте заявки на подбор тренера и следите за их статусом</p>
+        </div>
+        <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+          <Link to="/coaches" className="btn btn-outline">Открыть каталог тренеров</Link>
+          <button className="btn btn-primary" onClick={() => setCreating((v) => !v)}>
+            {creating ? 'Скрыть форму' : 'Новая заявка'}
+          </button>
+        </div>
       </div>
 
+      {msg && <div className="alert alert-success mb-20">{msg}</div>}
+      {err && <div className="alert alert-error mb-20">{err}</div>}
+
+      {creating && (
+        <div className="card mb-20">
+          <div className="section-header">
+            <h3>Новая заявка на подбор</h3>
+            <div className="section-line" />
+          </div>
+          <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: 12 }}>
+            Система подберёт подходящих тренеров под вашу статистику и цели. Если хотите записаться к конкретному — откройте каталог и нажмите «Записаться» на карточке.
+          </p>
+          <div className="grid-2">
+            <div className="form-group">
+              <label>Желаемая позиция</label>
+              <select className="form-select" value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="">Любая</option>
+                <option value="POS1">POS1 · Керри</option>
+                <option value="POS2">POS2 · Мид</option>
+                <option value="POS3">POS3 · Оффлейн</option>
+                <option value="POS4">POS4 · Софт саппорт</option>
+                <option value="POS5">POS5 · Хард саппорт</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Область фокуса</label>
+              <select className="form-select" value={focus} onChange={(e) => setFocus(e.target.value)}>
+                <option value="">Общее</option>
+                <option value="lane_control">Контроль линии</option>
+                <option value="macro">Макро / движение по карте</option>
+                <option value="hero_pool">Пул героев</option>
+                <option value="teamfight">Позиционирование в тимфайтах</option>
+                <option value="communication">Коммуникация</option>
+              </select>
+            </div>
+          </div>
+          <div className="form-group">
+            <label>
+              <input type="checkbox" checked={useAi} onChange={(e) => setUseAi(e.target.checked)} />{' '}
+              Также получить рекомендации ИИ-коуча
+            </label>
+          </div>
+          <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={createRequest} disabled={loading}>
+              {loading ? 'Создаём...' : 'Создать заявку'}
+            </button>
+            <button className="btn btn-outline" onClick={() => setCreating(false)} disabled={loading}>Отмена</button>
+          </div>
+        </div>
+      )}
+
       {requests.length === 0 ? (
-        <div className="card"><p className="text-muted">Запросов пока нет.</p></div>
+        <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+          <p className="text-muted" style={{ marginBottom: 14 }}>Пока нет ни одной заявки. Создайте первую — мы подберём тренеров под вашу статистику.</p>
+          <div className="flex gap-10" style={{ justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={() => setCreating(true)}>Новая заявка</button>
+            <Link to="/coaches" className="btn btn-outline">Каталог тренеров</Link>
+          </div>
+        </div>
       ) : (
         <div className="table-wrap">
           <table>
@@ -39,10 +135,10 @@ export default function PlayerRequests() {
               {requests.map((r) => (
                 <tr key={r.id}>
                   <td>{r.id}</td>
-                  <td>{r.desired_role || '-'}</td>
-                  <td>{r.focus_area || '-'}</td>
+                  <td>{r.desired_role || '—'}</td>
+                  <td>{r.focus_area || '—'}</td>
                   <td>
-                    <span className={`badge ${r.status === 'CANCELLED' ? 'badge-danger' : r.status === 'ACCEPTED' ? 'badge-accent' : 'badge-warning'}`}>
+                    <span className={`badge ${r.status === 'CANCELLED' || r.status === 'REJECTED' ? 'badge-danger' : r.status === 'ACCEPTED' ? 'badge-accent' : 'badge-warning'}`}>
                       {r.status}
                     </span>
                   </td>

@@ -60,6 +60,11 @@ class CreateTrainingRequest(BaseModel):
     desired_role: Optional[str] = None
     focus_area: Optional[str] = None
     use_ai_coach: bool = False
+    # When the player is applying to a specific coach (via /coaches catalog),
+    # we record the coach up-front instead of running the ML matcher. The
+    # request starts in WAITING_CONFIRMATION so the coach knows to react.
+    preferred_coach_profile_id: Optional[int] = None
+    message: Optional[str] = None
 
 
 class PatchTrainingRequest(BaseModel):
@@ -201,12 +206,14 @@ class AdminStatsResponse(BaseModel):
 class AdminProfileBrief(BaseModel):
     id: int
     core_user_id: int
+    auth_user_id: Optional[int] = None
     profile_type: str
     rank_or_mmr: Optional[str] = None
     roles: Optional[Any] = None
     about: Optional[str] = None
     sessions_total: int = 0
     sessions_completed: int = 0
+    is_verified: Optional[bool] = None
 
 
 class AdminProfilesResponse(BaseModel):

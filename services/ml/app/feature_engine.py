@@ -194,7 +194,7 @@ def analyze_player(account_id: int, player_profile_id: int = None, db: Session =
     # Estimate MMR
     avg_rank_tier = df["rank_tier"].dropna().mean()
     mmr_band = rank_tier_to_mmr_band(avg_rank_tier)
-    estimated_mmr = _estimate_mmr_from_stats(df, mmr_band)
+    estimated_mmr = estimate_mmr(avg_rank_tier, df, mmr_band)
 
     # Summary
     summary = {
@@ -298,6 +298,45 @@ def analyze_player(account_id: int, player_profile_id: int = None, db: Session =
         "weaknesses_ranked": weaknesses,
         "strengths_ranked": strengths,
     }
+
+
+_RANK_TIER_TO_MMR = {
+    1: 500,   # Herald
+    2: 1200,  # Guardian
+    3: 1900,  # Crusader
+    4: 2700,  # Archon
+    5: 3500,  # Legend
+    6: 4300,  # Ancient
+    7: 5200,  # Divine
+    8: 6500,  # Immortal
+}
+
+
+def estimate_mmr(rank_tier: int | float | None, df: pd.DataFrame | None = None, mmr_band: str | None = None) -> int:
+    """Single source of truth for "estimated MMR".
+
+    Prefers the rank_tier → MMR mapping (Valve's own calibration is always
+    closer to reality than any heuristic on averages). Only falls back to
+    the stats-based heuristic when the profile is closed / rank unknown.
+    The whole app — analyze_player, detailed_features, the dashboard card —
+    must go through this function so we stop showing two different numbers
+    for the same user.
+    """
+    if rank_tier:
+        try:
+            rt = int(rank_tier)
+        except (TypeError, ValueError):
+            rt = 0
+        if rt > 0:
+            medal = rt // 10
+            stars = rt % 10
+            base = _RANK_TIER_TO_MMR.get(medal)
+            if base is not None:
+                return base + max(stars - 1, 0) * 150
+
+    if df is None or df.empty:
+        return 1000
+    return _estimate_mmr_from_stats(df, mmr_band or "crusader")
 
 
 def _estimate_mmr_from_stats(df: pd.DataFrame, mmr_band: str) -> int:
@@ -414,14 +453,45 @@ def _compute_strengths_weaknesses(df: pd.DataFrame, mmr_band: str) -> tuple[list
     return strengths, weaknesses
 
 
+# Game modes treated as "ranked / serious": Ranked AP, Captains, RD, SD.
+# Turbo (23) and 1v1 Mid (21) are excluded by default because their economy,
+# duration and damage numbers skew averages vs. kaggle baselines.
+RANKED_GAME_MODES = {2, 3, 4, 22}
+
+
+def _filter_ranked(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only matches whose game_mode is in RANKED_GAME_MODES.
+
+    NULL game_mode is kept (old rows loaded before game_mode became reliable)
+    to avoid wiping all historical data for existing users; will be pruned
+    once we backfill modes. Rows with an *explicit* turbo/1v1 mode are dropped.
+    """
+    if "game_mode" not in df.columns:
+        return df
+    mask = df["game_mode"].isna() | df["game_mode"].isin(RANKED_GAME_MODES)
+    return df[mask].copy()
+
+
 def analyze_player_from_account(account_id: int, player_profile_id: int = None, db: Session = None) -> dict:
     """
     Analyze a player based on their data in player_matches table (from OpenDota).
     This is separate from Kaggle data in ml_raw_players.
+
+    Notes on data accuracy:
+    * Input is every match we managed to load for this account (no LIMIT).
+      Deep-sync fills this table up to PLAYER_DEEP_SYNC_MAX_MATCHES in the
+      background; summary will stabilise as more matches arrive.
+    * Turbo / 1v1 modes are removed — their economy breaks comparability
+      with kaggle baselines.
+    * Per-match CS/min and damage/min are computed on each match and then
+      averaged, which is mathematically different from (mean last_hits) /
+      (mean duration) and gives the correct expected value.
+    * Matches without a radiant_win signal are excluded from winrate instead
+      of being silently counted as losses.
     """
     query = f"""
     SELECT
-        match_id, hero_id, lane_role,
+        match_id, hero_id, lane_role, game_mode,
         kills, deaths, assists,
         gold_per_min, xp_per_min,
         last_hits, denies,
@@ -430,25 +500,40 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
     FROM player_matches
     WHERE account_id = {account_id}
     ORDER BY start_time DESC NULLS LAST
-    LIMIT 200
     """
 
-    df = pd.read_sql(query, engine)
+    df_all = pd.read_sql(query, engine)
 
-    if df.empty:
+    if df_all.empty:
         analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
         return _minimal_analysis(analysis_id, player_profile_id)
 
-    # Compute win
-    df["win"] = df.apply(
-        lambda r: (r["radiant_win"] if r["player_slot"] is not None and r["player_slot"] < 128
-                   else (not r["radiant_win"] if r["radiant_win"] is not None else False)),
-        axis=1,
-    ).astype(int)
+    df = _filter_ranked(df_all)
+    if df.empty:
+        # All loaded matches were turbo/1v1 — fall back to all modes so we
+        # don't show an empty analysis, but flag it.
+        df = df_all.copy()
+        ranked_only_notice = "Не найдено рейтинговых матчей, метрики посчитаны по всем режимам."
+    else:
+        ranked_only_notice = None
+
+    # Win per match — only when we actually know radiant_win and player_slot.
+    def _win_row(row):
+        rw = row.get("radiant_win")
+        slot = row.get("player_slot")
+        if rw is None or slot is None:
+            return None
+        return int(rw) if int(slot) < 128 else int(not rw)
+
+    df["win"] = df.apply(_win_row, axis=1)
 
     # KDA
     df["kda"] = (df["kills"].fillna(0) + df["assists"].fillna(0)) / df["deaths"].fillna(0).clip(lower=1)
     df["duration_minutes"] = df["duration"].fillna(0) / 60.0
+    # Per-match rates (mean of ratios is correct; ratio of means is not).
+    safe_dur = df["duration_minutes"].where(df["duration_minutes"] > 0)
+    df["cs_per_min"] = (df["last_hits"].fillna(0) / safe_dur).where(safe_dur.notna())
+    df["hero_damage_per_min"] = (df["hero_damage"].fillna(0) / safe_dur).where(safe_dur.notna())
 
     # Get rank from player_accounts if available
     rank_query = f"SELECT rank_tier FROM player_accounts WHERE account_id = {account_id}"
@@ -459,14 +544,43 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
         rank_tier = 0
 
     mmr_band = rank_tier_to_mmr_band(rank_tier or 0)
-    estimated_mmr = _estimate_mmr_from_stats(df, mmr_band)
+    estimated_mmr = estimate_mmr(rank_tier, df, mmr_band)
 
-    # Summary
+    # Winrate: mean of win column where it is known. If all values are null
+    # (no decidable matches), fall back to None so the UI can hide the number
+    # instead of showing a fake "0%".
+    decidable_wins = df["win"].dropna()
+    winrate_val = round(float(decidable_wins.mean()), 3) if len(decidable_wins) > 0 else None
+
+    # Lifetime/parsed counts from player_accounts so that the analysis shares
+    # the same "всего игр" source of truth as the rest of the app.
+    lifetime_games = 0
+    parsed_games_n = 0
+    try:
+        counts_df = pd.read_sql(
+            f"SELECT COALESCE(lifetime_games, 0) AS lifetime_games, "
+            f"COALESCE(parsed_games_n, 0) AS parsed_games_n, "
+            f"COALESCE(win, 0) AS win, COALESCE(lose, 0) AS lose "
+            f"FROM player_accounts WHERE account_id = {account_id}",
+            engine,
+        )
+        if not counts_df.empty:
+            r = counts_df.iloc[0]
+            lifetime_games = int(r["lifetime_games"] or (r["win"] + r["lose"]))
+            parsed_games_n = int(r["parsed_games_n"])
+    except Exception:
+        pass
+
     summary = {
         "estimated_rank_tier": mmr_band,
         "estimated_mmr": estimated_mmr,
-        "games_analyzed": len(df),
-        "winrate": round(df["win"].mean(), 3),
+        # User-visible "всего игр" is always lifetime.
+        "total_games": lifetime_games,
+        # Analytics-only counts — kept for tech panel / debugging.
+        "games_analyzed": int(len(df)),
+        "games_analyzed_ranked": int(len(df)) if ranked_only_notice is None else None,
+        "parsed_games_n": parsed_games_n,
+        "winrate": winrate_val,
         "gpm_avg": round(df["gold_per_min"].fillna(0).mean(), 1),
         "xpm_avg": round(df["xp_per_min"].fillna(0).mean(), 1),
         "kda_avg": round(df["kda"].mean(), 2),
@@ -474,6 +588,9 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
         "avg_deaths": round(df["deaths"].fillna(0).mean(), 1),
         "avg_assists": round(df["assists"].fillna(0).mean(), 1),
         "avg_duration_min": round(df["duration_minutes"].mean(), 1),
+        "cs_per_min_avg": round(float(df["cs_per_min"].dropna().mean() or 0), 2),
+        "hero_damage_per_min_avg": round(float(df["hero_damage_per_min"].dropna().mean() or 0), 0),
+        "notice": ranked_only_notice,
     }
 
     # Trends by time periods (group by batches of 20 games)
@@ -484,11 +601,12 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
         batch = df_sorted.iloc[i:i + batch_size]
         if len(batch) == 0:
             continue
+        decidable = batch["win"].dropna()
         trends_data.append({
             "batch": f"Матчи {i+1}-{min(i+batch_size, len(df_sorted))}",
             "gpm": round(batch["gold_per_min"].fillna(0).mean(), 1),
             "xpm": round(batch["xp_per_min"].fillna(0).mean(), 1),
-            "winrate": round(batch["win"].mean(), 3),
+            "winrate": round(float(decidable.mean()), 3) if len(decidable) > 0 else None,
             "kda": round(batch["kda"].mean(), 2),
         })
 
@@ -513,10 +631,19 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
         winrate=("win", "mean"),
         avg_kda=("kda", "mean"),
     ).reset_index().sort_values("games", ascending=False).head(10)
+    def _safe_round(v, digits):
+        try:
+            if v is None or pd.isna(v):
+                return None
+            return round(float(v), digits)
+        except Exception:
+            return None
+
     heroes_data = {
         "top_heroes": [
             {"hero_id": int(r["hero_id"]), "games": int(r["games"]),
-             "winrate": round(r["winrate"], 3), "avg_kda": round(r["avg_kda"], 2)}
+             "winrate": _safe_round(r["winrate"], 3),
+             "avg_kda": _safe_round(r["avg_kda"], 2)}
             for _, r in hero_stats.iterrows()
         ]
     }
@@ -524,11 +651,11 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
     # Comparisons with baselines
     comparisons = _compute_comparisons(df, mmr_band)
 
-    # Features
-    dur_mean = df["duration_minutes"].mean()
+    # Features. All "per minute" fields use the per-match series computed above,
+    # not a ratio of means, which would bias towards long/short games.
     features = {
-        "lane_cs_per_min": round(df["last_hits"].fillna(0).mean() / max(dur_mean, 1), 2),
-        "hero_damage_per_min": round(df["hero_damage"].fillna(0).mean() / max(dur_mean, 1), 0),
+        "lane_cs_per_min": round(float(df["cs_per_min"].dropna().mean() or 0), 2),
+        "hero_damage_per_min": round(float(df["hero_damage_per_min"].dropna().mean() or 0), 0),
         "tower_damage_per_game": round(df["tower_damage"].fillna(0).mean(), 0),
         "avg_gpm": round(df["gold_per_min"].fillna(0).mean(), 1),
         "avg_xpm": round(df["xp_per_min"].fillna(0).mean(), 1),

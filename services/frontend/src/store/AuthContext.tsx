@@ -12,6 +12,8 @@ interface User {
   login: string;
   role: string;
   is_active: boolean;
+  is_verified?: boolean;
+  coach_application_status?: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
 interface AuthState {
@@ -61,6 +63,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (access_token && refresh_token) {
           localStorage.setItem(ACCESS_TOKEN_KEY, access_token);
           localStorage.setItem(REFRESH_TOKEN_KEY, refresh_token);
+          // After a silent refresh, re-read /auth/me so role/verification
+          // changes (e.g. admin just approved this user as a coach) land
+          // in React state without requiring a manual page reload.
+          try {
+            const me = await authApi.get('/auth/me');
+            setUser(me.data);
+          } catch {
+            /* non-fatal; next page navigation will re-fetch anyway */
+          }
           scheduleSilentRefresh();
         }
       } catch {

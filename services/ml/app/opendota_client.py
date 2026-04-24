@@ -281,10 +281,20 @@ def fetch_full_player_data(steam_id: str, max_matches: int = 500) -> dict:
     # Sort by start_time desc
     merged_matches.sort(key=lambda x: x.get("start_time") or 0, reverse=True)
 
-    # Compute totals-based averages
-    totals_n = totals.get("duration", {}).get("n", 0) or totals.get("kills", {}).get("n", 0)
-    total_games_wl = wl.get("win", 0) + wl.get("lose", 0)
-    total_games = max(totals_n, total_games_wl)
+    # Single source of truth for "number of games":
+    #   lifetime_games  — everything the player ever played (public + turbo + custom...).
+    #                     Only /wl is truly lifetime; /totals.n is parsed-only.
+    #   parsed_games_n  — how many matches OpenDota actually has detailed stats for.
+    # All lifetime averages (avg_gpm, avg_kills, ...) are parsed-only averages, so
+    # we must divide cumulative fields (wards placed, stuns) by parsed_games_n,
+    # NEVER by lifetime_games.
+    lifetime_games = int(wl.get("win", 0) + wl.get("lose", 0))
+    parsed_candidates = [
+        totals.get("duration", {}).get("n", 0),
+        totals.get("kills", {}).get("n", 0),
+        totals.get("gold_per_min", {}).get("n", 0),
+    ]
+    parsed_games_n = max([int(x or 0) for x in parsed_candidates] + [0])
 
     def avg(field):
         t = totals.get(field, {})
@@ -327,11 +337,18 @@ def fetch_full_player_data(steam_id: str, max_matches: int = 500) -> dict:
         "heroes": heroes[:20],
         "rankings": rankings[:20],
         "matches_count": len(merged_matches),
-        "total_games": total_games,
+        # Canonical counts (use these, not /totals.n):
+        "lifetime_games": lifetime_games,
+        "parsed_games_n": parsed_games_n,
+        # Back-compat alias: external callers sometimes read `total_games`.
+        # Point it at the lifetime value so nothing silently reads parsed-only.
+        "total_games": lifetime_games,
         "warning": warning,
         # Lifetime averages from /totals
         "totals": {
-            "total_games": total_games,
+            "lifetime_games": lifetime_games,
+            "parsed_games_n": parsed_games_n,
+            "total_games": lifetime_games,  # kept for compat; same value
             "avg_gpm": avg("gold_per_min"),
             "avg_xpm": avg("xp_per_min"),
             "avg_kills": avg("kills"),
@@ -362,7 +379,11 @@ def fetch_full_player_data(steam_id: str, max_matches: int = 500) -> dict:
         },
     }
 
-    logger.info(f"=== Result: {result['personaname']}, rank={result['rank_tier']}, "
-                f"W/L={result['win']}/{result['lose']}, matches={result['matches_count']}, "
-                f"hours={result['estimated_hours']}, total_games={total_games} ===")
+    logger.info(
+        "=== Result: %s, rank=%s, W/L=%s/%s, loaded=%s, "
+        "lifetime=%s, parsed=%s, hours=%s ===",
+        result["personaname"], result["rank_tier"],
+        result["win"], result["lose"], result["matches_count"],
+        lifetime_games, parsed_games_n, result["estimated_hours"],
+    )
     return result

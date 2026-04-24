@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 import { useAuth } from '../../store/AuthContext';
 import { loadHeroes } from '../../api/heroes';
@@ -35,6 +36,7 @@ export default function PlayerDashboard() {
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [retried, setRetried] = useState(false);
   const [pendingSteamChecked, setPendingSteamChecked] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<any>(null);
 
   useEffect(() => {
     loadHeroes();
@@ -42,6 +44,30 @@ export default function PlayerDashboard() {
     coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
     coreApi.get('/player/profile').then((r) => setPlayerProfile(r.data)).catch(() => {});
   }, []);
+
+  // Poll deep-sync status while a job is running so the dashboard can show
+  // live progress ("загрузили 812 из 3000 матчей"). We stop polling when the
+  // worker reports done/error or when the user has no linked account yet.
+  useEffect(() => {
+    if (!steamData?.linked) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await coreApi.get('/player/sync-status');
+        if (cancelled) return;
+        setSyncStatus(r.data);
+        const status = r.data?.status;
+        if (status && status !== 'queued' && status !== 'running') return;
+      } catch {
+        return;
+      }
+      if (!cancelled) {
+        window.setTimeout(tick, 4000);
+      }
+    };
+    tick();
+    return () => { cancelled = true; };
+  }, [steamData?.linked]);
 
   useEffect(() => {
     if (overview?.profile?.id) {
@@ -103,7 +129,14 @@ export default function PlayerDashboard() {
   const displayName = steamData?.personaname || user?.login || 'Игрок';
   const avatarUrl = steamData?.avatar_url;
   const estimated_mmr = summary.estimated_mmr || 0;
-  const totalGames = summary.total_games || summary.games_analyzed || (steamData?.win || 0) + (steamData?.lose || 0) || 0;
+  // "Всего игр" показывается пользователю. Источник правды — lifetime_games
+  // из steamData (wl.win + wl.lose). summary.* и matches_loaded отражают
+  // количество проанализированных / загруженных матчей и пользователю не
+  // показываются, чтобы не было двух разных чисел на одном экране.
+  const totalGames =
+    steamData?.lifetime_games ??
+    steamData?.total_games ??
+    ((steamData?.win || 0) + (steamData?.lose || 0)) || 0;
   const winrate = summary.winrate || (totalGames > 0 ? (steamData?.win || 0) / totalGames : 0);
   const hours = summary.estimated_hours || steamData?.estimated_hours || 0;
   const desiredRankStr = playerProfile?.desired_rank_tier || 'IMMORTAL';
@@ -114,11 +147,72 @@ export default function PlayerDashboard() {
   const topGaps = detailedFeatures?.top_gaps || [];
   const overallScore = detailedFeatures?.overall_score || 0;
 
+  const coachPending = user?.coach_application_status === 'PENDING';
+  const coachRejected = user?.coach_application_status === 'REJECTED';
+  const coachApprovedButStillPlayer =
+    user?.coach_application_status === 'APPROVED' && user?.role === 'PLAYER';
+
   return (
     <div>
+      {coachApprovedButStillPlayer && (
+        <div
+          className="alert mb-20"
+          style={{
+            background: 'var(--accent-bg)',
+            border: '1px solid var(--accent)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <strong>Заявка на тренера одобрена.</strong>{' '}
+          Панель тренера станет доступна в течение ≈30 минут (когда обновится токен), или сразу после
+          повторного входа. <a href="/login" style={{ color: 'var(--accent-bright)' }}>Войти заново</a>.
+        </div>
+      )}
+      {coachPending && (
+        <div
+          className="alert mb-20"
+          style={{
+            background: 'var(--purple-bg)',
+            border: '1px solid var(--purple)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          Заявка на роль тренера в рассмотрении. Пока вы пользуетесь сервисом как игрок — вся статистика, цели и матчи доступны. Когда администратор одобрит заявку, у вас появится панель тренера.
+        </div>
+      )}
+      {coachRejected && (
+        <div className="alert alert-error mb-20">
+          Заявка на роль тренера отклонена. Если считаете это ошибкой — напишите в поддержку.
+        </div>
+      )}
       {!isLinked && (
         <div className="alert alert-error mb-20">
-          Steam не привязан. <a href="/settings">Привяжите аккаунт</a> для получения статистики.
+          Steam не привязан. <Link to="/settings">Привяжите аккаунт</Link> для получения статистики.
+        </div>
+      )}
+
+      {isLinked && syncStatus?.scheduled && (syncStatus.status === 'queued' || syncStatus.status === 'running') && (
+        <div
+          className="alert mb-20"
+          style={{
+            background: 'var(--accent-bg)',
+            border: '1px solid var(--accent)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <strong>Загружаем данные Dota.</strong>{' '}
+          {syncStatus.message || 'Догружаем матчи и детальные события в фоне.'}
+          {typeof syncStatus.fetched_matches === 'number' && (
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+              Загружено матчей: {syncStatus.fetched_matches.toLocaleString('ru-RU')}
+              {typeof syncStatus.parse_requested === 'number' && (
+                <> · Запросили детальный парсинг: {syncStatus.parse_requested}</>
+              )}
+            </div>
+          )}
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+            Не закрывайте страницу — обновим карточки автоматически.
+          </div>
         </div>
       )}
 
@@ -184,10 +278,10 @@ export default function PlayerDashboard() {
             </div>
           )}
 
-          <a href="/settings" className="btn btn-outline btn-sm" style={{ marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Link to="/settings" className="btn btn-outline btn-sm" style={{ marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
             Настройки
-          </a>
+          </Link>
         </div>
 
         {/* Right: Skills Grid */}
@@ -282,7 +376,7 @@ export default function PlayerDashboard() {
             );
           })}
           <div style={{ marginTop: 16 }}>
-            <a href="/ai-chat" className="btn btn-purple">Спросить AI-тренера</a>
+            <Link to="/ai-chat" className="btn btn-purple">Спросить AI-тренера</Link>
           </div>
         </div>
       )}

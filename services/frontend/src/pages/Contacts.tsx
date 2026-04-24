@@ -7,7 +7,7 @@ export default function Contacts() {
           По вопросам поддержки, удаления данных аккаунта и сотрудничества:
         </p>
         <p>
-          Email: <a href="mailto:support@ruprime.gg">support@ruprime.gg</a>
+          Email: <a href="mailto:support@ru-prime.ru">support@ru-prime.ru</a>
         </p>
       </div>
     </div>

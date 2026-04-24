@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { coreApi, authApi } from '../../api/client';
 import { loadHeroes, heroName, heroIcon } from '../../api/heroes';
 import { RankBadge, RoleBadge, InfoTooltip } from '../../ui/GameComponents';
 import { IconEye, IconEyeOff, IconSettings } from '../../ui/Icons';
 const STEAM_PENDING_KEY = 'steam_pending_link_id';
+const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || 'http://localhost:8001';
 
 interface SteamData {
   linked: boolean;
@@ -16,6 +18,8 @@ interface SteamData {
   win?: number;
   lose?: number;
   total_games?: number;
+  lifetime_games?: number;
+  parsed_games_n?: number;
   totals?: {
     avg_gpm?: number;
     avg_xpm?: number;
@@ -64,6 +68,18 @@ export default function PlayerProfile() {
   const [pwdMsg, setPwdMsg] = useState('');
   const [pwdError, setPwdError] = useState('');
   const [autoLinkTried, setAutoLinkTried] = useState(false);
+  const [showManualSteam, setShowManualSteam] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get('linked') === '1') {
+      setMsg('Steam привязан. Статистика обновится за минуту.');
+      coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
+      const next = new URLSearchParams(searchParams);
+      next.delete('linked');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     loadHeroes();
@@ -129,10 +145,22 @@ export default function PlayerProfile() {
     }
   };
 
+  const linkSteamViaOpenId = async () => {
+    setMsg(''); setError('');
+    try {
+      // Ask auth to drop the signed link-intent cookie (HttpOnly, same
+      // origin as /auth/steam/login) and then bounce to Steam.
+      await authApi.post('/auth/steam/link-intent', {}, { withCredentials: true });
+      window.location.href = `${AUTH_URL}/auth/steam/login?mode=link`;
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Не удалось начать привязку через Steam');
+    }
+  };
+
   const linkSteam = async () => {
     setMsg(''); setError(''); setLinking(true);
     try {
-      const res = await coreApi.post('/player/link-steam', { steam_id: steamId });
+      const res = await coreApi.post('/player/link-steam', { steam_id: steamId, trusted: false });
       const data = res.data;
       if (data.error) { setError(data.error); }
       else {
@@ -187,7 +215,10 @@ export default function PlayerProfile() {
   };
 
   const isLinked = steamData?.linked && steamData?.personaname;
-  const totalGames = steamData?.total_games || (steamData?.win || 0) + (steamData?.lose || 0);
+  const totalGames =
+    steamData?.lifetime_games ??
+    steamData?.total_games ??
+    ((steamData?.win || 0) + (steamData?.lose || 0));
   const winrate = totalGames > 0 ? ((steamData?.win || 0) / totalGames * 100).toFixed(1) : '0';
 
   return (
@@ -225,7 +256,7 @@ export default function PlayerProfile() {
                     ~{steamData.estimated_hours} часов
                   </span>
                   <span className="badge badge-accent" style={{ fontSize: '0.8rem' }}>
-                    {steamData.matches_loaded} матчей загружено
+                    {totalGames.toLocaleString('ru-RU')} игр
                   </span>
                 </div>
               </div>
@@ -396,30 +427,59 @@ export default function PlayerProfile() {
         <div className="hero-card mb-20">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <h3 style={{ margin: 0, fontWeight: 700 }}>Подключение Steam / Dota 2</h3>
-            <InfoTooltip text="Привяжите Steam ID чтобы загрузить статистику матчей, ранг, героев и получить персональный анализ." />
+            <InfoTooltip text="Рекомендуется вход через Steam: мы проверим владение аккаунтом и подгрузим статистику автоматически." />
           </div>
-          <button className="btn btn-outline btn-sm mb-10" onClick={() => setShowSteamHelp(!showSteamHelp)}>
-            Как найти Steam ID
+          <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: 14 }}>
+            Нажмите «Привязать через Steam» — откроется официальная страница Steam. После входа вернётесь сюда с подтверждённой привязкой и данными матчей.
+          </p>
+          <button
+            className="btn btn-primary"
+            onClick={linkSteamViaOpenId}
+            disabled={linking}
+            style={{ width: '100%' }}
+          >
+            {linking ? 'Подключаем...' : 'Привязать через Steam'}
           </button>
-          {showSteamHelp && (
-            <div className="alert alert-success" style={{ fontSize: '0.85rem' }}>
-              <strong>Инструкция:</strong>
-              <ol style={{ paddingLeft: 18, marginTop: 8, lineHeight: 1.8 }}>
-                <li>Откройте <strong>Steam</strong> → имя вверху справа → <strong>«Об аккаунте»</strong></li>
-                <li>SteamID64 — число вида <code>76561198xxxxxxxxx</code></li>
-                <li>Или <a href="https://steamid.io" target="_blank" rel="noreferrer">steamid.io</a> → вставьте ссылку на профиль</li>
-                <li>Убедитесь что <strong>история матчей публичная</strong> в настройках Dota 2</li>
-              </ol>
+
+          <div style={{ marginTop: 18 }}>
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() => setShowManualSteam((v) => !v)}
+            >
+              {showManualSteam ? 'Скрыть ручной ввод' : 'Или ввести SteamID64 вручную'}
+            </button>
+          </div>
+
+          {showManualSteam && (
+            <div className="mt-20">
+              <div className="alert" style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning)', fontSize: '0.85rem' }}>
+                <strong>Ручной режим:</strong> мы не проверяем, что указанный SteamID64 принадлежит вам.
+                Используйте только если рекомендованный вход через Steam недоступен.
+              </div>
+              <button className="btn btn-outline btn-sm mb-10" onClick={() => setShowSteamHelp(!showSteamHelp)}>
+                Как найти Steam ID
+              </button>
+              {showSteamHelp && (
+                <div className="alert alert-success" style={{ fontSize: '0.85rem' }}>
+                  <strong>Инструкция:</strong>
+                  <ol style={{ paddingLeft: 18, marginTop: 8, lineHeight: 1.8 }}>
+                    <li>Откройте <strong>Steam</strong> → имя вверху справа → <strong>«Об аккаунте»</strong></li>
+                    <li>SteamID64 — число вида <code>76561198xxxxxxxxx</code></li>
+                    <li>Или <a href="https://steamid.io" target="_blank" rel="noreferrer">steamid.io</a> → вставьте ссылку на профиль</li>
+                    <li>Убедитесь что <strong>история матчей публичная</strong> в настройках Dota 2</li>
+                  </ol>
+                </div>
+              )}
+              <div className="form-group" style={{ marginTop: 12 }}>
+                <label>Steam ID (SteamID64)</label>
+                <input className="form-input" value={steamId} onChange={(e) => setSteamId(e.target.value)}
+                  placeholder="76561198xxxxxxxxx" />
+              </div>
+              <button className="btn btn-outline" onClick={linkSteam} disabled={linking}>
+                {linking ? 'Подключение (~15 сек)...' : 'Привязать вручную'}
+              </button>
             </div>
           )}
-          <div className="form-group" style={{ marginTop: 12 }}>
-            <label>Steam ID (SteamID64)</label>
-            <input className="form-input" value={steamId} onChange={(e) => setSteamId(e.target.value)}
-              placeholder="76561198xxxxxxxxx" />
-          </div>
-          <button className="btn btn-primary" onClick={linkSteam} disabled={linking}>
-            {linking ? 'Подключение (~15 сек)...' : 'Привязать Steam'}
-          </button>
         </div>
       )}
 
@@ -476,6 +536,9 @@ export default function PlayerProfile() {
         </div>
         <button className="btn btn-primary" onClick={saveProfile}>Сохранить профиль</button>
       </div>
+
+      {/* === Become a coach === */}
+      <CoachUpgradeCard />
 
       {/* === Password Change === */}
       <div className="card mb-20">
@@ -544,6 +607,73 @@ export default function PlayerProfile() {
           <button className="btn btn-danger" onClick={logoutAllSessions}>Выйти на всех устройствах</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+function CoachUpgradeCard() {
+  const [status, setStatus] = useState<string>('NONE');
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    authApi.get('/auth/me').then((r) => {
+      setStatus(r.data?.coach_application_status || 'NONE');
+    }).catch(() => {});
+  }, []);
+
+  const apply = async () => {
+    setLoading(true); setMsg(null); setErr(null);
+    try {
+      const r = await authApi.post('/auth/apply-coach');
+      setStatus(r.data?.coach_application_status || 'PENDING');
+      setMsg('Заявка отправлена. Ждите подтверждения тех-аккаунтом.');
+    } catch (e: any) {
+      setErr(e.response?.data?.detail || 'Не удалось отправить заявку');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="card mb-20">
+      <div className="section-header">
+        <h3>Стать тренером</h3>
+        <div className="section-line" />
+      </div>
+      {msg && <div className="alert alert-success">{msg}</div>}
+      {err && <div className="alert alert-error">{err}</div>}
+
+      {status === 'PENDING' && (
+        <div
+          className="alert"
+          style={{ background: 'var(--purple-bg)', border: '1px solid var(--purple)' }}
+        >
+          Заявка на роль тренера уже отправлена и рассматривается. Пока вы продолжаете пользоваться сервисом как игрок.
+        </div>
+      )}
+      {status === 'APPROVED' && (
+        <p className="text-muted" style={{ fontSize: '0.9rem' }}>
+          Вы уже подтверждённый тренер. Панель тренера доступна в меню.
+        </p>
+      )}
+      {status === 'REJECTED' && (
+        <div className="alert alert-error">
+          Заявка ранее была отклонена. Обновите профиль и подайте снова.
+        </div>
+      )}
+      {(status === 'NONE' || status === 'REJECTED') && (
+        <>
+          <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: 12 }}>
+            Заявка уходит на тех-аккаунт. После подтверждения ваш профиль появится в каталоге, а у вас откроется панель тренера. До подтверждения роль остаётся «Игрок» и вы продолжаете видеть свою статистику.
+          </p>
+          <button className="btn btn-primary" onClick={apply} disabled={loading}>
+            {loading ? 'Отправляем...' : 'Подать заявку на роль тренера'}
+          </button>
+        </>
+      )}
     </div>
   );
 }

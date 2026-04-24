@@ -13,6 +13,23 @@ class RoleEnum(str, enum.Enum):
     ADMIN = "ADMIN"
 
 
+class CoachApplicationStatus(str, enum.Enum):
+    """Lifecycle of a user's "I want to be a coach" request.
+
+    NONE      — user never asked, or is already COACH.
+    PENDING   — user submitted the request; admin (tech account) has not
+                reviewed it yet. The user keeps role=PLAYER in the meantime
+                so the UI shows them player-side.
+    APPROVED  — admin accepted; role was flipped to COACH as a side effect.
+    REJECTED  — admin declined. Status may be reset to NONE to allow retry.
+    """
+
+    NONE = "NONE"
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 class AuthUser(Base):
     __tablename__ = "auth_users"
 
@@ -23,6 +40,13 @@ class AuthUser(Base):
     role = Column(SAEnum(RoleEnum, name="role_enum", create_type=True), default=RoleEnum.PLAYER, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
+    coach_application_status = Column(
+        SAEnum(CoachApplicationStatus, name="coach_application_status_enum", create_type=True),
+        default=CoachApplicationStatus.NONE,
+        nullable=False,
+    )
+    coach_application_requested_at = Column(DateTime(timezone=True), nullable=True)
+    coach_approved_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

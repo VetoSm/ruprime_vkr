@@ -37,11 +37,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [showAiChat, setShowAiChat] = useState(false);
 
   const playerLinks = [
-    { to: '/dashboard', label: 'Профиль' },
+    { to: '/dashboard', label: 'Дашборд' },
     { to: '/stats', label: 'Статистика' },
     { to: '/coaches', label: 'Тренеры' },
     { to: '/requests', label: 'Мои заявки' },
     { to: '/schedule', label: 'Расписание' },
+    { to: '/ai-chat', label: 'AI Тренер' },
+    { to: '/settings', label: 'Настройки' },
   ];
 
   const coachLinks = [

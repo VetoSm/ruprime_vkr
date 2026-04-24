@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ruprime.gg/sitemap.xml
+Sitemap: https://ru-prime.ru/sitemap.xml

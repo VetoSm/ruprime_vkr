@@ -183,8 +183,15 @@ class PlayerAccount(Base):
     profile_url = Column(Text, nullable=True)
     is_public = Column(Boolean, default=True)
     fetched_at = Column(DateTime(timezone=True), server_default=func.now())
-    # Aggregated totals from /totals endpoint
+    # === Canonical game counts (data-accuracy baseline). ===
+    # total_games is kept for back-compat but now mirrors lifetime_games.
+    # Use `lifetime_games` for "all games the player ever played" (wl.win+wl.lose).
+    # Use `parsed_games_n` when dividing cumulative fields (wards, stuns) —
+    # those come from parsed matches only.
     total_games = Column(Integer, nullable=True)
+    lifetime_games = Column(Integer, nullable=True)
+    parsed_games_n = Column(Integer, nullable=True)
+    # Aggregated totals from /totals endpoint (averages over parsed matches)
     avg_gpm = Column(Float, nullable=True)
     avg_xpm = Column(Float, nullable=True)
     avg_kills = Column(Float, nullable=True)

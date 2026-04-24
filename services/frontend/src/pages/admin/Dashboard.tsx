@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 import { InfoTooltip } from '../../ui/GameComponents';
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<any>(null);
+  const [pendingCoaches, setPendingCoaches] = useState<number | null>(null);
 
   useEffect(() => {
     coreApi.get('/admin/stats').then((r) => setStats(r.data)).catch(() => {});
+    coreApi.get('/admin/coach-applications', { params: { status: 'PENDING' } })
+      .then((r) => setPendingCoaches((r.data?.items || []).length))
+      .catch(() => setPendingCoaches(null));
   }, []);
 
   return (
@@ -15,6 +20,30 @@ export default function AdminDashboard() {
         <h1>Панель администратора</h1>
         <p>Общая статистика пользователей, сессий и активности платформы</p>
       </div>
+
+      {pendingCoaches !== null && pendingCoaches > 0 && (
+        <div
+          className="alert mb-20"
+          style={{
+            background: 'var(--warning-bg)',
+            border: '1px solid var(--warning)',
+            color: 'var(--text-primary)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span>
+            <strong>Заявки в тренеры на рассмотрении:</strong> {pendingCoaches}.{' '}
+            Подтвердите или отклоните, чтобы новые тренеры появились в каталоге.
+          </span>
+          <Link to="/admin/users" className="btn btn-primary btn-sm">
+            Открыть заявки
+          </Link>
+        </div>
+      )}
 
       <div className="grid-4 mb-30">
         <div className="stat-card">

@@ -6,6 +6,7 @@ from sqlalchemy import func as sqlfunc
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, require_role, log_action
 from app.config import settings
+from app.ml_client import ml_headers
 from app.models import (
     CoreUser, PlayerProfile, CoachProfile,
     TrainingRequest, TrainingSession, CoachReview,
@@ -68,6 +69,9 @@ def admin_profiles(
     players_rows = db.query(PlayerProfile).order_by(PlayerProfile.id.desc()).all()
     coaches_rows = db.query(CoachProfile).order_by(CoachProfile.id.desc()).all()
 
+    # Pre-index core_users → auth_user_id so we don't re-query per row.
+    core_user_map = {cu.id: cu.auth_user_id for cu in db.query(CoreUser).all()}
+
     players = []
     for p in players_rows:
         sessions_total = db.query(sqlfunc.count(TrainingSession.id)).join(
@@ -82,6 +86,7 @@ def admin_profiles(
         players.append(AdminProfileBrief(
             id=p.id,
             core_user_id=p.core_user_id,
+            auth_user_id=core_user_map.get(p.core_user_id),
             profile_type="PLAYER",
             rank_or_mmr=p.actual_rank_tier,
             roles=p.actual_roles,
@@ -102,12 +107,14 @@ def admin_profiles(
         coaches.append(AdminProfileBrief(
             id=c.id,
             core_user_id=c.core_user_id,
+            auth_user_id=core_user_map.get(c.core_user_id),
             profile_type="COACH",
             rank_or_mmr=str(c.mmr_estimate) if c.mmr_estimate is not None else c.rank_tier,
             roles=c.main_roles,
             about=c.about,
             sessions_total=sessions_total,
             sessions_completed=sessions_completed,
+            is_verified=bool(c.is_verified),
         ))
 
     log_action(db, current_user.user_id, current_user.role, "VIEW_ADMIN_PROFILES",
@@ -240,7 +247,10 @@ async def admin_ml_data_stats(
                ip_address=request.client.host if request.client else None)
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"{settings.ML_SERVICE_URL}/ml/data/stats")
+            resp = await client.get(
+                f"{settings.ML_SERVICE_URL}/ml/data/stats",
+                headers=ml_headers(),
+            )
         return resp.json()
     except Exception as e:
         return {"error": str(e)}
@@ -264,6 +274,7 @@ async def admin_ml_table(
             resp = await client.get(
                 f"{settings.ML_SERVICE_URL}/ml/data/table/{table_name}",
                 params={"limit": limit, "offset": offset},
+                headers=ml_headers(),
             )
         return resp.json()
     except Exception as e:
@@ -290,7 +301,11 @@ async def admin_ml_baselines(
         if hero_id:
             params["hero_id"] = hero_id
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"{settings.ML_SERVICE_URL}/ml/data/baselines", params=params)
+            resp = await client.get(
+                f"{settings.ML_SERVICE_URL}/ml/data/baselines",
+                params=params,
+                headers=ml_headers(),
+            )
         return resp.json()
     except Exception as e:
         return {"error": str(e)}
@@ -308,7 +323,11 @@ async def admin_ml_analyses(
                ip_address=request.client.host if request.client else None)
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"{settings.ML_SERVICE_URL}/ml/data/analyses", params={"limit": limit})
+            resp = await client.get(
+                f"{settings.ML_SERVICE_URL}/ml/data/analyses",
+                params={"limit": limit},
+                headers=ml_headers(),
+            )
         return resp.json()
     except Exception as e:
         return {"error": str(e)}
@@ -325,7 +344,10 @@ async def admin_player_accounts(
                ip_address=request.client.host if request.client else None)
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"{settings.ML_SERVICE_URL}/ml/data/player-accounts")
+            resp = await client.get(
+                f"{settings.ML_SERVICE_URL}/ml/data/player-accounts",
+                headers=ml_headers(),
+            )
         return resp.json()
     except Exception as e:
         return {"error": str(e)}
@@ -344,7 +366,10 @@ async def admin_player_account_detail(
                ip_address=request.client.host if request.client else None)
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"{settings.ML_SERVICE_URL}/ml/data/player-account-detail/{account_id}")
+            resp = await client.get(
+                f"{settings.ML_SERVICE_URL}/ml/data/player-account-detail/{account_id}",
+                headers=ml_headers(),
+            )
         return resp.json()
     except Exception as e:
         return {"error": str(e)}
@@ -366,6 +391,7 @@ async def admin_ml_import(
             resp = await client.post(
                 f"{settings.ML_SERVICE_URL}/ml/admin/load-kaggle-data",
                 json={"directory_path": directory_path},
+                headers=ml_headers(),
             )
         if resp.status_code == 200:
             return MessageResponse(message=f"Импорт завершён: {resp.json()}")
@@ -373,3 +399,128 @@ async def admin_ml_import(
             return MessageResponse(message=f"Ошибка импорта: {resp.text}")
     except Exception as e:
         return MessageResponse(message=f"Ошибка: {str(e)}")
+
+
+# =============== Coach applications & verification ===============
+
+@router.get("/coach-applications")
+async def list_coach_applications(
+    request: Request,
+    status: str | None = Query(None, description="PENDING/APPROVED/REJECTED filter"),
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Proxy of auth `/admin/coach-applications` with the admin JWT forwarded."""
+    token = request.headers.get("Authorization", "")
+    params = {"status": status} if status else {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{settings.AUTH_SERVICE_URL}/auth/admin/coach-applications",
+                headers={"Authorization": token},
+                params=params,
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Auth недоступен: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+
+@router.post("/coaches/{auth_user_id}/verify", response_model=MessageResponse)
+async def verify_coach(
+    auth_user_id: int,
+    request: Request,
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """One-button approval: flip role to COACH in auth and mark the core
+    CoachProfile as verified so the user appears in the catalog."""
+    token = request.headers.get("Authorization", "")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.AUTH_SERVICE_URL}/auth/admin/coach-applications/{auth_user_id}/approve",
+                headers={"Authorization": token},
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Auth недоступен: {exc}")
+    if resp.status_code not in (200, 400):
+        # 400 = no pending application; we still allow verifying the profile
+        # if one exists, so the admin can re-verify without re-applying.
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+    core_user = db.query(CoreUser).filter(CoreUser.auth_user_id == auth_user_id).first()
+    if not core_user:
+        core_user = CoreUser(auth_user_id=auth_user_id)
+        db.add(core_user)
+        db.flush()
+    profile = db.query(CoachProfile).filter(CoachProfile.core_user_id == core_user.id).first()
+    if not profile:
+        profile = CoachProfile(core_user_id=core_user.id, is_verified=True)
+        db.add(profile)
+    else:
+        profile.is_verified = True
+    db.commit()
+
+    log_action(
+        db, current_user.user_id, current_user.role, "VERIFY_COACH",
+        "COACH_PROFILE", profile.id, {"auth_user_id": auth_user_id},
+        ip_address=request.client.host if request.client else None,
+    )
+    return MessageResponse(message="Тренер подтверждён")
+
+
+@router.post("/coaches/{auth_user_id}/reject", response_model=MessageResponse)
+async def reject_coach(
+    auth_user_id: int,
+    request: Request,
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Reject a pending coach application (leaves role=PLAYER, no CoachProfile)."""
+    token = request.headers.get("Authorization", "")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.AUTH_SERVICE_URL}/auth/admin/coach-applications/{auth_user_id}/reject",
+                headers={"Authorization": token},
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Auth недоступен: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    log_action(
+        db, current_user.user_id, current_user.role, "REJECT_COACH",
+        "AUTH_USER", auth_user_id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return MessageResponse(message="Заявка на тренера отклонена")
+
+
+@router.post("/coaches/{auth_user_id}/unverify", response_model=MessageResponse)
+async def unverify_coach(
+    auth_user_id: int,
+    request: Request,
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Remove a coach from the public catalog without revoking the role.
+
+    Useful when a coach goes inactive or fails a quality check. They retain
+    access to their own dashboard but stop appearing in /coaches.
+    """
+    core_user = db.query(CoreUser).filter(CoreUser.auth_user_id == auth_user_id).first()
+    if not core_user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    profile = db.query(CoachProfile).filter(CoachProfile.core_user_id == core_user.id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Профиль тренера не найден")
+    profile.is_verified = False
+    db.commit()
+    log_action(
+        db, current_user.user_id, current_user.role, "UNVERIFY_COACH",
+        "COACH_PROFILE", profile.id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return MessageResponse(message="Тренер скрыт из каталога")

@@ -1,4 +1,4 @@
-import { mlApi } from './client';
+import { coreApi } from './client';
 
 export interface HeroInfo {
   hero_id: number;
@@ -15,7 +15,7 @@ let loaded = false;
 export async function loadHeroes(): Promise<Record<number, HeroInfo>> {
   if (loaded) return heroCache;
   try {
-    const res = await mlApi.get('/ml/heroes');
+    const res = await coreApi.get('/ml/heroes');
     for (const h of res.data) {
       heroCache[h.hero_id] = h;
     }

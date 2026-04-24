@@ -197,11 +197,18 @@ DATABASE_URL=postgresql://dota_coach:ВСТАВИТЬ_ТОТ_ЖЕ_ПАРОЛЬ@p
 # ===== Тестовые данные (true при первом запуске, потом false) =====
 SEED_TEST_DATA=true
 
-# ===== JWT =====
+# ===== JWT (обязательно задать секрет; дефолта больше нет) =====
 JWT_SECRET=ВСТАВИТЬ_СЕКРЕТ
 JWT_ALGORITHM=HS256
 JWT_ACCESS_EXPIRES_MIN=30
-JWT_REFRESH_EXPIRES_DAYS=7
+JWT_REFRESH_EXPIRES_DAYS=30
+
+# Force-logout всех пользователей один раз после обновления безопасности
+# (выставить true, поднять стек, потом вернуть false и перезапустить auth):
+FORCE_REVOKE_ALL_SESSIONS=false
+
+# ===== Внутренний ML токен (обязательно задать общий секрет) =====
+ML_INTERNAL_TOKEN=ВСТАВИТЬ_СЕКРЕТ_ДЛЯ_ML
 
 # ===== Внутренние URL (НЕ менять) =====
 AUTH_SERVICE_URL=http://auth:8001
@@ -211,16 +218,20 @@ LLM_SERVICE_URL=http://llm:8004
 
 # ===== Data =====
 KAGGLE_DATA_PATH=/data/archive-2
+
+# ===== CORS (указать домен фронтенда) =====
+CORS_ORIGINS=https://ru-prime.ru,https://www.ru-prime.ru
 ```
 
-**Сгенерировать пароль и секрет:**
+**Сгенерировать пароли и секреты:**
 ```bash
 # В другом терминале на сервере:
 openssl rand -base64 32    # для POSTGRES_PASSWORD
 openssl rand -base64 48    # для JWT_SECRET
+openssl rand -base64 48    # для ML_INTERNAL_TOKEN
 ```
 
-Скопируйте результаты в `.env`. Пароль PostgreSQL должен быть одинаковым в `POSTGRES_PASSWORD` и в `DATABASE_URL`.
+Скопируйте результаты в `.env`. Пароль PostgreSQL должен быть одинаковым в `POSTGRES_PASSWORD` и в `DATABASE_URL`. `ML_INTERNAL_TOKEN` должен быть одинаковым для контейнеров `core` и `ml` — они обмениваются им во внутренней сети.
 
 Сохраняем: `Ctrl+O`, Enter, `Ctrl+X`.
 
@@ -237,8 +248,9 @@ nano docker-compose.yml
     environment:
       VITE_AUTH_API_URL: https://ваш-домен.ru
       VITE_CORE_API_URL: https://ваш-домен.ru
-      VITE_ML_API_URL: https://ваш-домен.ru
 ```
+
+**Важно:** `VITE_ML_API_URL` больше не используется. `ml` живёт только во внутренней сети, фронтенд ходит в него через `core` (маршруты `/ml/heroes` и `/admin/ml/*`). Nginx тоже НЕ должен проксировать порт `8003` наружу.
 
 Сохраняем: `Ctrl+O`, Enter, `Ctrl+X`.
 

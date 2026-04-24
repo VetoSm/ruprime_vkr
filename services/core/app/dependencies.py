@@ -34,6 +34,14 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Current
     auth_user_id = int(payload.get("sub", 0))
     role = payload.get("role", "PLAYER")
 
+    # When the access token is older than the security baseline and does not
+    # include the `active` claim, treat it as invalid instead of silently
+    # defaulting to True. New tokens issued by auth always include this claim.
+    if "active" not in payload:
+        raise HTTPException(status_code=401, detail="Session expired, please sign in again")
+    if not bool(payload.get("active")):
+        raise HTTPException(status_code=403, detail="User is deactivated")
+
     # Find or create core_user
     core_user = db.query(CoreUser).filter(CoreUser.auth_user_id == auth_user_id).first()
     if not core_user:

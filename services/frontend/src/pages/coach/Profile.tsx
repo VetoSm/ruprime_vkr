@@ -13,6 +13,9 @@ export default function CoachProfilePage() {
   const [exp, setExp] = useState('');
   const [about, setAbout] = useState('');
   const [msg, setMsg] = useState('');
+  const [studentsCount, setStudentsCount] = useState<number | null>(null);
+  const [sessionsCount, setSessionsCount] = useState<number | null>(null);
+  const [avgRating, setAvgRating] = useState<number | null>(null);
 
   useEffect(() => {
     coreApi.get('/coach/profile').then((r) => {
@@ -24,6 +27,18 @@ export default function CoachProfilePage() {
       setRate(p.hourly_rate?.toString() || '');
       setExp(p.experience_years?.toString() || '');
       setAbout(p.about || '');
+    }).catch(() => {});
+
+    coreApi.get('/me/overview').then((r) => {
+      const stats = r.data?.stats || {};
+      if (typeof stats.avg_rating === 'number') setAvgRating(stats.avg_rating);
+      // Students: unique players with sessions — derived on a dedicated endpoint.
+    }).catch(() => {});
+
+    coreApi.get('/coach/students-overview').then((r) => {
+      const students = r.data?.students || [];
+      setStudentsCount(students.length);
+      setSessionsCount(students.reduce((acc: number, s: any) => acc + (s.sessions_total || 0), 0));
     }).catch(() => {});
   }, []);
 
@@ -57,15 +72,15 @@ export default function CoachProfilePage() {
       {/* Stats Row */}
       <div className="coach-stats-row">
         <div className="coach-stat">
-          <div className="coach-stat-value">0</div>
+          <div className="coach-stat-value">{studentsCount ?? '—'}</div>
           <div className="coach-stat-label">Ученики</div>
         </div>
         <div className="coach-stat">
-          <div className="coach-stat-value">0</div>
+          <div className="coach-stat-value">{sessionsCount ?? '—'}</div>
           <div className="coach-stat-label">Сессии</div>
         </div>
         <div className="coach-stat">
-          <div className="coach-stat-value">—</div>
+          <div className="coach-stat-value">{avgRating !== null ? avgRating.toFixed(1) : '—'}</div>
           <div className="coach-stat-label">Рейтинг</div>
         </div>
         <div className="coach-stat">

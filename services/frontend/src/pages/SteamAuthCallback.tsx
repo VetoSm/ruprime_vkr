@@ -37,6 +37,28 @@ export default function SteamAuthCallback() {
     const access = p.get('access_token');
     const refresh = p.get('refresh_token');
     const steamId = p.get('steam_id');
+    const linked = p.get('linked') === '1';
+
+    // Two distinct callback shapes:
+    //   1. Sign-in / sign-up — fragment has access_token + refresh_token.
+    //   2. OpenID link flow (user was already authed) — fragment has
+    //      steam_id + linked=1 and NO tokens; we just trigger the trusted
+    //      link-steam call and go back to /settings.
+    if (linked && steamId && !access) {
+      let cancelled = false;
+      (async () => {
+        try {
+          await coreApi.post('/player/link-steam', { steam_id: steamId, trusted: true });
+        } catch {
+          /* ignore; user will see empty stats and can retry from settings */
+        }
+        if (!cancelled) {
+          window.history.replaceState(null, '', '/settings');
+          navigate('/settings?linked=1', { replace: true });
+        }
+      })();
+      return () => { cancelled = true; };
+    }
 
     if (!access || !refresh) {
       setErr('Некорректный ответ авторизации.');
@@ -52,7 +74,7 @@ export default function SteamAuthCallback() {
         if (steamId) {
           localStorage.setItem(STEAM_PENDING_KEY, steamId);
           try {
-            await coreApi.post('/player/link-steam', { steam_id: steamId });
+            await coreApi.post('/player/link-steam', { steam_id: steamId, trusted: true });
             localStorage.removeItem(STEAM_PENDING_KEY);
           } catch {
             /* Привяжем автоматически на Dashboard/Settings повторно */

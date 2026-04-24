@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
+from app.ml_client import ml_headers
 from app.models import PlayerProfile
 from app.schemas import PlayerProfileUpdate, PlayerProfileResponse
 
@@ -15,6 +16,11 @@ router = APIRouter(prefix="/player", tags=["player"])
 
 class LinkSteamInput(BaseModel):
     steam_id: str
+    # `trusted=True` means this call is a continuation of a successful
+    # Steam OpenID link flow (cookie-signed; frontend received #linked=1).
+    # In that case we skip the separate /auth/link-steam stub and trust the
+    # AuthProvider row that was already written by the OpenID callback.
+    trusted: bool = False
 
 
 class SteamAccountData(BaseModel):
@@ -107,19 +113,56 @@ async def link_steam(
     if not steam_id or not steam_id.isdigit():
         raise HTTPException(status_code=400, detail="Некорректный Steam ID. Введите числовой SteamID64.")
 
-    # 1. Link in Auth service
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            token = request.headers.get("Authorization", "")
-            resp = await client.post(
-                f"{settings.AUTH_SERVICE_URL}/auth/link-steam",
-                json={"steam_token": steam_id},
-                headers={"Authorization": token},
-            )
-        if resp.status_code not in (200, 409):
-            raise HTTPException(status_code=resp.status_code, detail=f"Auth ошибка: {resp.text}")
-    except httpx.RequestError:
-        pass  # Auth may be unavailable, continue with ML
+    # Security policy for linking Steam:
+    #
+    #   * Preferred path — the user comes from the Steam OpenID callback which
+    #     already wrote the AuthProvider row. Frontend sets `trusted=True` in
+    #     this case. We verify by asking auth what Steam id is actually linked
+    #     to this user, and only proceed when they match.
+    #
+    #   * Fallback "manual" path — user pastes a SteamID64. We call the old
+    #     auth.link-steam stub which enforces uniqueness (no two users can
+    #     claim the same id). The binding is NOT cryptographically proven to
+    #     belong to the caller, so the manual UI must warn the user.
+    token = request.headers.get("Authorization", "")
+
+    if body.trusted:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{settings.AUTH_SERVICE_URL}/auth/providers/steam",
+                    headers={"Authorization": token},
+                )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=502, detail="Auth недоступен")
+            data = resp.json()
+            if not data.get("linked") or data.get("steam_id") != steam_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Привязка Steam не подтверждена. Запустите привязку заново "
+                        "через кнопку «Привязать Steam»."
+                    ),
+                )
+        except httpx.RequestError:
+            raise HTTPException(status_code=502, detail="Auth недоступен")
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{settings.AUTH_SERVICE_URL}/auth/link-steam",
+                    json={"steam_token": steam_id},
+                    headers={"Authorization": token},
+                )
+            if resp.status_code == 409:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Этот Steam ID уже привязан к другому аккаунту",
+                )
+            if resp.status_code not in (200, 409):
+                raise HTTPException(status_code=resp.status_code, detail=f"Auth ошибка: {resp.text}")
+        except httpx.RequestError:
+            raise HTTPException(status_code=502, detail="Auth недоступен")
 
     # 2. Fetch data from OpenDota via ML service
     try:
@@ -127,6 +170,7 @@ async def link_steam(
             resp = await client.post(
                 f"{settings.ML_SERVICE_URL}/ml/link-steam-account",
                 json={"steam_id": steam_id},
+                headers=ml_headers(),
             )
         if resp.status_code != 200:
             raise HTTPException(status_code=502, detail=f"ML сервис ошибка: {resp.text}")
@@ -169,6 +213,7 @@ async def link_steam(
                 resp = await client.get(
                     f"{settings.ML_SERVICE_URL}/ml/analyze-player/{data['account_id']}",
                     params={"player_profile_id": profile.id},
+                    headers=ml_headers(),
                 )
             if resp.status_code == 200:
                 analysis = resp.json()
@@ -178,10 +223,17 @@ async def link_steam(
         except Exception:
             pass
 
-    log_action(db, current_user.user_id, current_user.role, "LINK_STEAM",
-               "PLAYER_PROFILE", profile.id,
-               {"steam_id": steam_id, "account_id": data.get("account_id"), "personaname": data.get("personaname")},
-               ip_address=request.client.host if request.client else None)
+    log_action(
+        db, current_user.user_id, current_user.role, "LINK_STEAM",
+        "PLAYER_PROFILE", profile.id,
+        {
+            "steam_id": steam_id,
+            "account_id": data.get("account_id"),
+            "personaname": data.get("personaname"),
+            "method": "openid_trusted" if body.trusted else "manual",
+        },
+        ip_address=request.client.host if request.client else None,
+    )
 
     return SteamAccountData(**data)
 
@@ -215,6 +267,7 @@ async def sync_steam(
             resp = await client.post(
                 f"{settings.ML_SERVICE_URL}/ml/link-steam-account",
                 json={"steam_id": steam_id},
+                headers=ml_headers(),
             )
         if resp.status_code != 200:
             raise HTTPException(status_code=502, detail=f"ML сервис ошибка: {resp.text}")
@@ -243,6 +296,7 @@ async def sync_steam(
                 resp = await client.get(
                     f"{settings.ML_SERVICE_URL}/ml/analyze-player/{data['account_id']}",
                     params={"player_profile_id": profile.id},
+                    headers=ml_headers(),
                 )
             if resp.status_code == 200:
                 analysis = resp.json()
@@ -284,6 +338,7 @@ async def refresh_steam(
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{settings.ML_SERVICE_URL}/ml/refresh-player-data/{profile.dota_account_id}",
+                headers=ml_headers(),
             )
         if resp.status_code == 200:
             data = resp.json()
@@ -292,6 +347,38 @@ async def refresh_steam(
             return data
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/sync-status")
+async def player_sync_status(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the background deep-sync job state for the current player.
+
+    Used by the dashboard to render the "загружаем данные" progress card so
+    the user sees how many matches have been fetched since they linked
+    Steam. Returns ``{"scheduled": false}`` when there is no linked account.
+    """
+    profile = db.query(PlayerProfile).filter(
+        PlayerProfile.core_user_id == current_user.user_id
+    ).first()
+    if not profile or not profile.dota_account_id:
+        return {"scheduled": False}
+
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            resp = await client.get(
+                f"{settings.ML_SERVICE_URL}/ml/player-sync-status/{profile.dota_account_id}",
+                headers=ml_headers(),
+            )
+        if resp.status_code == 200:
+            data = resp.json() or {}
+            data["scheduled"] = True
+            return data
+    except httpx.RequestError:
+        pass
+    return {"scheduled": False}
 
 
 @router.get("/steam-data")
@@ -311,6 +398,7 @@ async def get_steam_data(
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 f"{settings.ML_SERVICE_URL}/ml/player-account/{profile.dota_account_id}",
+                headers=ml_headers(),
             )
         if resp.status_code == 200:
             data = resp.json()

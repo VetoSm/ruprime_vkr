@@ -23,13 +23,15 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
-      JWT_ACCESS_EXPIRES_MIN: ${JWT_ACCESS_EXPIRES_MIN}
-      JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS}
+      JWT_ACCESS_EXPIRES_MIN: ${JWT_ACCESS_EXPIRES_MIN:-30}
+      JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS:-30}
       SEED_TEST_DATA: ${SEED_TEST_DATA}
+      FORCE_REVOKE_ALL_SESSIONS: ${FORCE_REVOKE_ALL_SESSIONS:-false}
       STEAM_OPENID_ENABLED: ${STEAM_OPENID_ENABLED:-true}
       STEAM_RETURN_URL: ${STEAM_RETURN_URL:-http://localhost:8001/auth/steam/callback}
       STEAM_REALM: ${STEAM_REALM:-http://localhost:8001/}
       FRONTEND_STEAM_REDIRECT: ${FRONTEND_STEAM_REDIRECT:-http://localhost:3000/auth/steam-callback}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,10 +44,12 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: ${JWT_ALGORITHM}
-      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
-      ML_SERVICE_URL: ${ML_SERVICE_URL}
-      LLM_SERVICE_URL: ${LLM_SERVICE_URL}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth:8001}
+      ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml:8003}
+      LLM_SERVICE_URL: ${LLM_SERVICE_URL:-http://llm:8004}
+      ML_INTERNAL_TOKEN: ${ML_INTERNAL_TOKEN}
       SEED_TEST_DATA: ${SEED_TEST_DATA}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,11 +58,13 @@ services:
 
   ml:
     build: ./services/ml
-    ports:
-      - "8003:8003"
+    # Intentionally no public port: ML is internal-only and must be reached
+    # through core (which forwards X-Internal-Token).
     environment:
       DATABASE_URL: ${DATABASE_URL}
       KAGGLE_DATA_PATH: ${KAGGLE_DATA_PATH}
+      ML_INTERNAL_TOKEN: ${ML_INTERNAL_TOKEN}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     volumes:
       - ./archive-2:/data/archive-2:ro
     depends_on:
@@ -71,6 +77,7 @@ services:
       - "8004:8004"
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,9 +87,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      VITE_AUTH_API_URL: http://localhost:8001
-      VITE_CORE_API_URL: http://localhost:8002
-      VITE_ML_API_URL: http://localhost:8003
+      VITE_AUTH_API_URL: ${VITE_AUTH_API_URL:-http://localhost:8001}
+      VITE_CORE_API_URL: ${VITE_CORE_API_URL:-http://localhost:8002}
     depends_on:
       - auth
       - core

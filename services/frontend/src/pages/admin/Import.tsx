@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { mlApi } from '../../api/client';
+import { coreApi } from '../../api/client';
 
 interface ImportState {
   running: boolean;
@@ -15,8 +15,6 @@ interface ImportState {
   finished: boolean;
 }
 
-const ML_URL = import.meta.env.VITE_ML_API_URL || 'http://localhost:8003';
-
 export default function AdminImport() {
   const [dirPath, setDirPath] = useState('/data/archive-2/2024');
   const [state, setState] = useState<ImportState | null>(null);
@@ -24,88 +22,74 @@ export default function AdminImport() {
   const [constResult, setConstResult] = useState('');
   const [baselineResult, setBaselineResult] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const pollIntervalRef = useRef<number | null>(null);
 
-  // Auto-scroll log
   useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [state?.log]);
 
-  // Cleanup SSE on unmount
   useEffect(() => {
     return () => {
-      eventSourceRef.current?.close();
+      if (pollIntervalRef.current) {
+        window.clearInterval(pollIntervalRef.current);
+      }
     };
   }, []);
+
+  const stopPolling = () => {
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  };
+
+  const pollStatus = () => {
+    stopPolling();
+    pollIntervalRef.current = window.setInterval(async () => {
+      try {
+        const res = await coreApi.get('/admin/ml/import-status');
+        setState(res.data);
+        if (res.data.finished || (!res.data.running && res.data.files_done > 0)) {
+          stopPolling();
+          setLoading(false);
+        }
+      } catch {
+        stopPolling();
+        setLoading(false);
+      }
+    }, 1000);
+  };
 
   const startImport = async (path: string) => {
     setLoading(true);
     setState(null);
 
     try {
-      await mlApi.post('/ml/admin/start-import', { directory_path: path });
-
-      // Start SSE listening
-      const es = new EventSource(`${ML_URL}/ml/admin/import-progress`);
-      eventSourceRef.current = es;
-
-      es.onmessage = (event) => {
-        try {
-          const data: ImportState = JSON.parse(event.data);
-          setState(data);
-          if (data.finished || (!data.running && data.files_done > 0)) {
-            es.close();
-            setLoading(false);
-          }
-        } catch {}
-      };
-
-      es.onerror = () => {
-        es.close();
-        setLoading(false);
-        // Fallback: poll status
-        pollStatus();
-      };
-
+      await coreApi.post('/admin/ml/start-import', { directory_path: path });
+      pollStatus();
     } catch (err: any) {
       setLoading(false);
       setState({
         running: false, cancel_requested: false, current_file: '', current_dir: '',
         progress_pct: 0, rows_loaded: 0, total_files: 0, files_done: 0,
-        log: [`Ошибка: ${err.response?.data?.message || err.message}`],
+        log: [`Ошибка: ${err.response?.data?.detail || err.message}`],
         error: err.message, finished: true,
       });
     }
   };
 
-  const pollStatus = async () => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await mlApi.get('/ml/admin/import-status');
-        setState(res.data);
-        if (res.data.finished || (!res.data.running && res.data.files_done > 0)) {
-          clearInterval(interval);
-          setLoading(false);
-        }
-      } catch {
-        clearInterval(interval);
-        setLoading(false);
-      }
-    }, 1000);
-  };
-
   const cancelImport = async () => {
     try {
-      await mlApi.post('/ml/admin/cancel-import');
+      await coreApi.post('/admin/ml/cancel-import');
     } catch {}
   };
 
   const loadConstants = async () => {
     setConstResult('Загрузка...');
     try {
-      const res = await mlApi.post('/ml/admin/load-constants');
+      const res = await coreApi.post('/admin/ml/load-constants');
       setConstResult(`Загружено: ${res.data.heroes_loaded} героев, ${res.data.items_loaded} предметов, ${res.data.abilities_loaded} способностей`);
     } catch (err: any) {
       setConstResult(`Ошибка: ${err.response?.data?.detail || err.message}`);
@@ -115,7 +99,7 @@ export default function AdminImport() {
   const computeBaselines = async () => {
     setBaselineResult('Вычисление...');
     try {
-      const res = await mlApi.post('/ml/admin/compute-baselines');
+      const res = await coreApi.post('/admin/ml/compute-baselines');
       setBaselineResult(`Вычислено ${res.data.baselines_computed} эталонов`);
     } catch (err: any) {
       setBaselineResult(`Ошибка: ${err.response?.data?.detail || err.message}`);
@@ -125,7 +109,7 @@ export default function AdminImport() {
   const trainModel = async () => {
     setBaselineResult('Обучение модели...');
     try {
-      const res = await mlApi.post('/ml/admin/train-mmr-model');
+      const res = await coreApi.post('/admin/ml/train-mmr-model');
       setBaselineResult(`Результат: ${res.data.message}`);
     } catch (err: any) {
       setBaselineResult(`Ошибка: ${err.response?.data?.detail || err.message}`);
@@ -251,6 +235,9 @@ export default function AdminImport() {
         <h3 className="card-title">3. Вычисление эталонов</h3>
         <p className="text-muted mb-10">Запускайте после загрузки данных</p>
         <button className="btn btn-outline" onClick={computeBaselines}>Вычислить эталоны</button>
+        <button className="btn btn-outline" onClick={trainModel} style={{ marginLeft: 10 }}>
+          Обучить модель MMR
+        </button>
         {baselineResult && <p className="mt-10 text-accent">{baselineResult}</p>}
       </div>
 
@@ -265,6 +252,7 @@ function TrainingSection() {
   const [trainState, setTrainState] = useState<any>(null);
   const [training, setTraining] = useState(false);
   const trainLogRef = useRef<HTMLDivElement>(null);
+  const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (trainLogRef.current) {
@@ -272,22 +260,33 @@ function TrainingSection() {
     }
   }, [trainState?.log]);
 
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    };
+  }, []);
+
   const startTraining = async () => {
     setTraining(true);
     setTrainState(null);
     try {
-      await mlApi.post('/ml/admin/start-training');
-      // Poll status
-      const interval = setInterval(async () => {
+      await coreApi.post('/admin/ml/start-training');
+      pollRef.current = window.setInterval(async () => {
         try {
-          const res = await mlApi.get('/ml/admin/training-status');
+          const res = await coreApi.get('/admin/ml/training-status');
           setTrainState(res.data);
           if (res.data.finished || !res.data.running) {
-            clearInterval(interval);
+            if (pollRef.current) {
+              window.clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
             setTraining(false);
           }
         } catch {
-          clearInterval(interval);
+          if (pollRef.current) {
+            window.clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
           setTraining(false);
         }
       }, 1000);

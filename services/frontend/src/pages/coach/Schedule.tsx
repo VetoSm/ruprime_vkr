@@ -16,6 +16,12 @@ export default function CoachSchedule() {
     setSessions(sessions.map(s => s.id === id ? { ...s, status: 'COMPLETED' } : s));
   };
 
+  const cancel = async (id: number) => {
+    if (!window.confirm('Отменить эту сессию? Ученик увидит статус CANCELLED.')) return;
+    await coreApi.patch(`/training-sessions/${id}`, { action: 'CANCEL' });
+    setSessions(sessions.map(s => s.id === id ? { ...s, status: 'CANCELLED' } : s));
+  };
+
   const reschedule = async () => {
     if (!rescheduleId || !newDateTime) return;
     await coreApi.patch(`/training-sessions/${rescheduleId}`, {
@@ -78,11 +84,12 @@ export default function CoachSchedule() {
                     <td>{s.duration_minutes ? `${s.duration_minutes} мин` : '-'}</td>
                     <td><span className={`badge ${s.status === 'COMPLETED' ? 'badge-accent' : s.status === 'CANCELLED' ? 'badge-danger' : 'badge-warning'}`}>{s.status}</span></td>
                     <td>
-                      <div className="flex gap-10">
+                      <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
                         {s.status === 'PLANNED' && (
                           <>
                             <button className="btn btn-primary btn-sm" onClick={() => complete(s.id)}>Завершить</button>
                             <button className="btn btn-outline btn-sm" onClick={() => setRescheduleId(s.id)}>Перенести</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => cancel(s.id)}>Отменить</button>
                           </>
                         )}
                       </div>

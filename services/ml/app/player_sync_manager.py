@@ -199,7 +199,11 @@ def _save_player_account(db, data: dict, steam_id: str):
             pass
 
     totals = data.get("totals", {})
-    acc.total_games = totals.get("total_games") or data.get("total_games")
+    lifetime_games = int(data.get("lifetime_games") or 0)
+    parsed_games_n = int(data.get("parsed_games_n") or totals.get("parsed_games_n") or 0)
+    acc.lifetime_games = lifetime_games
+    acc.parsed_games_n = parsed_games_n
+    acc.total_games = lifetime_games  # back-compat alias; same value
     acc.avg_gpm = totals.get("avg_gpm")
     acc.avg_xpm = totals.get("avg_xpm")
     acc.avg_kills = totals.get("avg_kills")

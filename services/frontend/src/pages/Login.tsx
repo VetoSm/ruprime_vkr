@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
 import { IconEye, IconEyeOff } from '../ui/Icons';
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const coachPending = searchParams.get('coach_pending') === '1';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
@@ -30,6 +32,20 @@ export default function Login() {
     <div className="auth-page">
       <div className="auth-card">
         <h2><span>Вход</span></h2>
+        {coachPending && (
+          <div
+            className="alert"
+            style={{
+              background: 'var(--purple-bg)',
+              border: '1px solid var(--purple)',
+              color: 'var(--text-primary)',
+              fontSize: '0.85rem',
+              marginBottom: 14,
+            }}
+          >
+            Заявка на роль тренера отправлена. До подтверждения тех-аккаунтом вы пользуетесь сервисом как игрок и видите свою статистику.
+          </div>
+        )}
         {error && <div className="alert alert-error">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 import { RankBadge, RoleBadge } from '../../ui/GameComponents';
 import { IconFilter, IconSearch } from '../../ui/Icons';
@@ -8,14 +9,24 @@ export default function PlayerCoaches() {
   const [recommended, setRecommended] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [matchLoading, setMatchLoading] = useState(false);
+  const [steamLinked, setSteamLinked] = useState<boolean | null>(null);
 
   const [showFilters, setShowFilters] = useState(false);
   const [filterRole, setFilterRole] = useState('');
   const [filterFocus, setFilterFocus] = useState('');
   const [filterMaxRate, setFilterMaxRate] = useState('');
 
+  const [applyCoach, setApplyCoach] = useState<any | null>(null);
+  const [applyRole, setApplyRole] = useState('');
+  const [applyFocus, setApplyFocus] = useState('');
+  const [applyMessage, setApplyMessage] = useState('');
+  const [applyLoading, setApplyLoading] = useState(false);
+  const [applyResultMsg, setApplyResultMsg] = useState<string | null>(null);
+  const [applyResultErr, setApplyResultErr] = useState<string | null>(null);
+
   useEffect(() => {
     coreApi.get('/coaches').then((r) => setCoaches(r.data)).catch(() => {}).finally(() => setLoading(false));
+    coreApi.get('/player/steam-data').then((r) => setSteamLinked(Boolean(r.data?.linked))).catch(() => setSteamLinked(false));
     fetchRecommended();
   }, []);
 
@@ -34,6 +45,35 @@ export default function PlayerCoaches() {
 
   const applyFilters = () => {
     fetchRecommended(filterRole, filterFocus);
+  };
+
+  const openApply = (coach: any) => {
+    setApplyCoach(coach);
+    setApplyRole(filterRole || '');
+    setApplyFocus(filterFocus || '');
+    setApplyMessage('');
+    setApplyResultMsg(null);
+    setApplyResultErr(null);
+  };
+
+  const submitApply = async () => {
+    if (!applyCoach) return;
+    setApplyLoading(true);
+    setApplyResultMsg(null); setApplyResultErr(null);
+    try {
+      await coreApi.post('/matchmaking/requests', {
+        preferred_coach_profile_id: applyCoach.id,
+        desired_role: applyRole || undefined,
+        focus_area: applyFocus || undefined,
+        message: applyMessage || undefined,
+        use_ai_coach: false,
+      });
+      setApplyResultMsg('Заявка отправлена. Тренер увидит её в своём расписании и свяжется с вами.');
+    } catch (e: any) {
+      setApplyResultErr(e?.response?.data?.detail || 'Не удалось отправить заявку');
+    } finally {
+      setApplyLoading(false);
+    }
   };
 
   const filteredCoaches = coaches.filter((c) => {
@@ -134,6 +174,12 @@ export default function PlayerCoaches() {
           {coach.about.length > 140 ? coach.about.slice(0, 140) + '...' : coach.about}
         </p>
       )}
+
+      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary btn-sm" onClick={() => openApply(coach)}>
+          Записаться
+        </button>
+      </div>
     </div>
   );
 
@@ -143,6 +189,21 @@ export default function PlayerCoaches() {
         <h1>Тренеры</h1>
         <p>Лучшие тренеры, подобранные под ваш профиль</p>
       </div>
+
+      {steamLinked === false && (
+        <div
+          className="alert mb-20"
+          style={{
+            background: 'var(--warning-bg)',
+            border: '1px solid var(--warning)',
+            color: 'var(--text-primary)',
+            fontSize: '0.9rem',
+          }}
+        >
+          Steam не привязан — рекомендации формируются по общему профилю, без вашей реальной статистики.
+          Привяжите аккаунт в <Link to="/settings">настройках</Link>, и мы подберём тренеров под ваш ранг, роли и зоны роста.
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex-between mb-20">
@@ -230,6 +291,90 @@ export default function PlayerCoaches() {
             )}
           </div>
         </>
+      )}
+
+      {applyCoach && (
+        <div
+          onClick={() => (!applyLoading ? setApplyCoach(null) : null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(4, 10, 24, 0.75)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1000, padding: 16,
+          }}
+        >
+          <div
+            className="card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 480, border: '1px solid var(--border-color)' }}
+          >
+            <div className="section-header">
+              <h3 style={{ margin: 0 }}>Записаться на тренировку</h3>
+              <div className="section-line" />
+            </div>
+
+            <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: 14 }}>
+              Тренер <strong>{applyCoach.about?.split('\n')[0] || `#${applyCoach.id}`}</strong>.
+              Заявка появится у тренера в расписании. Вы сможете подтвердить дату и время после согласования.
+            </p>
+
+            {applyResultMsg && <div className="alert alert-success">{applyResultMsg}</div>}
+            {applyResultErr && <div className="alert alert-error">{applyResultErr}</div>}
+
+            {!applyResultMsg && (
+              <>
+                <div className="grid-2">
+                  <div className="form-group">
+                    <label>Позиция</label>
+                    <select className="form-select" value={applyRole} onChange={(e) => setApplyRole(e.target.value)}>
+                      <option value="">По умолчанию</option>
+                      <option value="POS1">POS1 · Керри</option>
+                      <option value="POS2">POS2 · Мид</option>
+                      <option value="POS3">POS3 · Оффлейн</option>
+                      <option value="POS4">POS4 · Софт саппорт</option>
+                      <option value="POS5">POS5 · Хард саппорт</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Область фокуса</label>
+                    <select className="form-select" value={applyFocus} onChange={(e) => setApplyFocus(e.target.value)}>
+                      <option value="">Общее</option>
+                      <option value="lane_control">Контроль линии</option>
+                      <option value="macro">Макро / карта</option>
+                      <option value="hero_pool">Пул героев</option>
+                      <option value="teamfight">Тимфайты</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>Сообщение тренеру (опционально)</label>
+                  <textarea
+                    className="form-input"
+                    value={applyMessage}
+                    onChange={(e) => setApplyMessage(e.target.value)}
+                    placeholder="Коротко опишите, что хотите подтянуть, какой у вас график, ожидания."
+                    rows={3}
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="flex gap-10" style={{ justifyContent: 'flex-end', marginTop: 8, flexWrap: 'wrap' }}>
+              {applyResultMsg ? (
+                <>
+                  <Link to="/requests" className="btn btn-outline">Мои заявки</Link>
+                  <button className="btn btn-primary" onClick={() => setApplyCoach(null)}>Закрыть</button>
+                </>
+              ) : (
+                <>
+                  <button className="btn btn-outline" disabled={applyLoading} onClick={() => setApplyCoach(null)}>Отмена</button>
+                  <button className="btn btn-primary" disabled={applyLoading} onClick={submitApply}>
+                    {applyLoading ? 'Отправляем...' : 'Отправить заявку'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

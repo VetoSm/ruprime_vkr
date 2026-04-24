@@ -18,11 +18,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(user_id: int, role: str) -> str:
+def create_access_token(user_id: int, role: str, is_active: bool = True) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_ACCESS_EXPIRES_MIN)
     payload = {
         "sub": str(user_id),
         "role": role,
+        "active": bool(is_active),
         "exp": expire,
         "type": "access",
     }

@@ -36,7 +36,10 @@ class PlayerAccountResponse(BaseModel):
     win: Optional[int] = None
     lose: Optional[int] = None
     estimated_hours: Optional[float] = None
+    # total_games is kept for legacy clients and equals lifetime_games.
     total_games: Optional[int] = None
+    lifetime_games: Optional[int] = None
+    parsed_games_n: Optional[int] = None
     totals: Optional[dict] = None
     last_match_time: Optional[str] = None
     profile_url: Optional[str] = None
@@ -64,24 +67,13 @@ def _normalize_mmr_estimate(raw_mmr) -> Optional[int]:
 
 
 def _estimate_mmr_from_rank_tier(rank_tier: Optional[int]) -> Optional[int]:
+    """Thin wrapper around ``feature_engine.estimate_mmr`` so we keep one
+    calibration table for the whole app (see ``_RANK_TIER_TO_MMR``)."""
     if not rank_tier:
         return None
-    medal = rank_tier // 10
-    stars = rank_tier % 10
-    base_by_medal = {
-        1: 500,
-        2: 1200,
-        3: 1900,
-        4: 2700,
-        5: 3500,
-        6: 4300,
-        7: 5200,
-        8: 6500,
-    }
-    base = base_by_medal.get(medal)
-    if base is None:
-        return None
-    return base + max(stars - 1, 0) * 150
+    from app.feature_engine import estimate_mmr
+
+    return estimate_mmr(rank_tier)
 
 
 def _build_roles_distribution(matches: list[dict]) -> dict:
@@ -158,6 +150,8 @@ def _should_background_refresh(acc: PlayerAccount) -> bool:
 def _build_totals_payload(acc: PlayerAccount) -> dict:
     return {
         "total_games": acc.total_games,
+        "lifetime_games": acc.lifetime_games,
+        "parsed_games_n": acc.parsed_games_n,
         "avg_gpm": acc.avg_gpm,
         "avg_xpm": acc.avg_xpm,
         "avg_kills": acc.avg_kills,
@@ -290,9 +284,15 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
         except Exception:
             pass
 
-    # Save lifetime totals
+    # Save lifetime totals. Source of truth for counts:
+    #   lifetime_games = wl.win + wl.lose
+    #   parsed_games_n = max n across /totals fields
     t = data.get("totals", {})
-    acc.total_games = t.get("total_games") or data.get("total_games")
+    lifetime_games = int(data.get("lifetime_games") or 0)
+    parsed_games_n = int(data.get("parsed_games_n") or t.get("parsed_games_n") or 0)
+    acc.lifetime_games = lifetime_games
+    acc.parsed_games_n = parsed_games_n
+    acc.total_games = lifetime_games  # back-compat alias
     acc.avg_gpm = t.get("avg_gpm")
     acc.avg_xpm = t.get("avg_xpm")
     acc.avg_kills = t.get("avg_kills")
@@ -389,7 +389,9 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
         win=acc.win,
         lose=acc.lose,
         estimated_hours=acc.estimated_hours,
-        total_games=acc.total_games,
+        total_games=acc.lifetime_games or acc.total_games,
+        lifetime_games=acc.lifetime_games,
+        parsed_games_n=acc.parsed_games_n,
         totals=t,
         last_match_time=data.get("last_match_time"),
         profile_url=acc.profile_url,
@@ -471,7 +473,9 @@ def get_player_account(account_id: int, db: Session = Depends(get_db)):
         win=acc.win,
         lose=acc.lose,
         estimated_hours=acc.estimated_hours,
-        total_games=acc.total_games,
+        total_games=acc.lifetime_games or acc.total_games,
+        lifetime_games=acc.lifetime_games,
+        parsed_games_n=acc.parsed_games_n,
         totals=totals,
         last_match_time=str(acc.last_match_time) if acc.last_match_time else None,
         profile_url=acc.profile_url,

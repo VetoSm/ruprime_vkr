@@ -1,10 +1,11 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.database import engine, Base
+from app.internal_auth import require_internal_token
 from app.models import (  # noqa: F401
     MlRawMatch, MlRawPlayer, MlRawTeam, MlRawPicksBans,
     MlConstantHero, MlConstantItem, MlConstantAbility,
@@ -31,10 +32,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(admin_router)
-app.include_router(analysis_router)
-app.include_router(matching_router)
-app.include_router(data_view_router)
+# Every application route on the ML service is considered internal-only.
+# Callers (core, llm) must provide X-Internal-Token. /health is the only
+# exception and is declared without this dependency below.
+_internal_deps = [Depends(require_internal_token)]
+
+app.include_router(admin_router, dependencies=_internal_deps)
+app.include_router(analysis_router, dependencies=_internal_deps)
+app.include_router(matching_router, dependencies=_internal_deps)
+app.include_router(data_view_router, dependencies=_internal_deps)
 
 
 @app.middleware("http")

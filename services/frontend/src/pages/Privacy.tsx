@@ -8,7 +8,7 @@ export default function Privacy() {
           для работы сервиса и улучшения качества рекомендаций.
         </p>
         <p className="text-muted mb-10">
-          Вы можете запросить удаление данных, написав на <a href="mailto:support@ruprime.gg">support@ruprime.gg</a>.
+          Вы можете запросить удаление данных, написав на <a href="mailto:support@ru-prime.ru">support@ru-prime.ru</a>.
         </p>
         <p className="text-muted">Дата обновления: 2026-04-15.</p>
       </div>
