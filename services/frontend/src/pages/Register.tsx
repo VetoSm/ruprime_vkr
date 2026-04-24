@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
 import { IconEye, IconEyeOff } from '../ui/Icons';
+import { TERMS_VERSION } from './Terms';
 
 type Persona = 'PLAYER' | 'COACH';
 
@@ -19,10 +20,15 @@ export default function Register() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [consent, setConsent] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (!consent) {
+      setError('Чтобы зарегистрироваться, нужно принять условия и политику конфиденциальности');
+      return;
+    }
     if (password !== confirmPassword) {
       setError('Пароли не совпадают');
       return;
@@ -32,7 +38,10 @@ export default function Register() {
       // Even when persona is COACH we send 'COACH' to the API; the backend
       // always creates the account as PLAYER and records a PENDING coach
       // application that the tech account must approve.
-      await register(loginVal, email, password, confirmPassword, persona);
+      await register(loginVal, email, password, confirmPassword, persona, {
+        consent_accepted: true,
+        consent_version: TERMS_VERSION,
+      });
       if (persona === 'COACH') {
         navigate('/login?coach_pending=1');
       } else {
@@ -45,10 +54,12 @@ export default function Register() {
     }
   };
 
-  const steamHref =
-    persona === 'COACH'
-      ? `${AUTH_URL}/auth/steam/login?signup=coach`
-      : `${AUTH_URL}/auth/steam/login`;
+  const consentQs = `consent=${encodeURIComponent(TERMS_VERSION)}`;
+  const steamHref = !consent
+    ? '#'
+    : persona === 'COACH'
+      ? `${AUTH_URL}/auth/steam/login?signup=coach&${consentQs}`
+      : `${AUTH_URL}/auth/steam/login?${consentQs}`;
 
   const steamLabel =
     persona === 'COACH' ? 'Тренер: войти через Steam' : 'Игрок: войти через Steam';
@@ -169,7 +180,42 @@ export default function Register() {
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              padding: '12px 14px',
+              border: '1px solid var(--border-color)',
+              borderRadius: 10,
+              background: 'rgba(5, 16, 36, 0.6)',
+              marginBottom: 14,
+              cursor: 'pointer',
+              fontSize: '0.82rem',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.55,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }}
+            />
+            <span>
+              Я принимаю <Link to="/terms" target="_blank" rel="noreferrer">пользовательское соглашение</Link>{' '}и{' '}
+              <Link to="/privacy" target="_blank" rel="noreferrer">политику конфиденциальности</Link>.
+              Соглашаюсь на обработку моих данных, получение через Steam Web API публичного профиля (SteamID, ник, аватар, часы в Dota 2)
+              и через OpenDota — матчевой статистики, если она открыта в настройках Dota 2.
+            </span>
+          </label>
+
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ width: '100%' }}
+            disabled={loading || !consent}
+          >
             {loading
               ? 'Создаём...'
               : persona === 'COACH'
@@ -184,7 +230,23 @@ export default function Register() {
         <a
           href={steamHref}
           className="btn btn-outline"
-          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          aria-disabled={!consent}
+          onClick={(e) => {
+            if (!consent) {
+              e.preventDefault();
+              setError('Чтобы войти через Steam, примите условия и политику конфиденциальности');
+            }
+          }}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            opacity: consent ? 1 : 0.5,
+            pointerEvents: 'auto',
+            cursor: consent ? 'pointer' : 'not-allowed',
+          }}
         >
           {steamLabel}
         </a>

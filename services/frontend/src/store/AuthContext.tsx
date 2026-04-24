@@ -20,7 +20,14 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (login: string, email: string, password: string, confirmPassword: string, role: string) => Promise<void>;
+  register: (
+    login: string,
+    email: string,
+    password: string,
+    confirmPassword: string,
+    role: string,
+    extras?: { consent_accepted?: boolean; consent_version?: string },
+  ) => Promise<void>;
   logout: () => void;
   applySteamSession: (accessToken: string, refreshToken: string) => Promise<void>;
 }
@@ -123,13 +130,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     scheduleSilentRefresh();
   };
 
-  const register = async (loginVal: string, email: string, password: string, confirmPassword: string, role: string) => {
+  const register = async (
+    loginVal: string,
+    email: string,
+    password: string,
+    confirmPassword: string,
+    role: string,
+    extras?: { consent_accepted?: boolean; consent_version?: string },
+  ) => {
     await authApi.post('/auth/register', {
       login: loginVal,
       email,
       password,
       confirm_password: confirmPassword,
       role,
+      consent_accepted: Boolean(extras?.consent_accepted),
+      consent_version: extras?.consent_version || '',
     });
   };
 

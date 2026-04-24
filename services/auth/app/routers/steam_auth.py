@@ -50,6 +50,9 @@ SIGNUP_COOKIE_TTL_SEC = 600  # 10 minutes is plenty for the Steam round trip.
 LINK_COOKIE = "steam_link_user_id"
 LINK_COOKIE_TTL_SEC = 600
 
+CONSENT_COOKIE = "steam_consent_version"
+CONSENT_COOKIE_TTL_SEC = 600
+
 
 def _sign_signup_value(role: str) -> str:
     """Return ``<role>.<expires_at>.<hex_hmac>``. Verifiable only by us."""
@@ -138,7 +141,10 @@ def _issue_tokens(request: Request, user: AuthUser, db: Session) -> tuple[str, s
 
 
 def _find_or_create_steam_user(
-    db: Session, steam_id: str, signup_role: str | None
+    db: Session,
+    steam_id: str,
+    signup_role: str | None,
+    consent_version: str | None = None,
 ) -> tuple[AuthUser, bool]:
     """Look up by provider; create a PLAYER account if not found.
 
@@ -194,6 +200,8 @@ def _find_or_create_steam_user(
         is_verified=True,
         coach_application_status=application_status,
         coach_application_requested_at=requested_at,
+        consent_version=consent_version or "steam_default",
+        consent_accepted_at=datetime.now(timezone.utc),
     )
     db.add(user)
     db.flush()
@@ -239,6 +247,7 @@ def steam_link_intent(
 def steam_login_begin(
     signup: str | None = Query(default=None, description="'coach' to flag as coach application"),
     mode: str | None = Query(default=None, description="'link' to attach Steam to authed user"),
+    consent: str | None = Query(default=None, description="Terms/Privacy version accepted by the user"),
 ):
     """Redirect to Steam.
 
@@ -265,6 +274,18 @@ def steam_login_begin(
             key=SIGNUP_COOKIE,
             value=_sign_signup_value("COACH"),
             max_age=SIGNUP_COOKIE_TTL_SEC,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
+    # Carry the accepted Terms/Privacy version over the Steam round trip
+    # so the callback can stamp it on the newly created user.
+    if consent:
+        response.set_cookie(
+            key=CONSENT_COOKIE,
+            value=str(consent)[:32],
+            max_age=CONSENT_COOKIE_TTL_SEC,
             httponly=True,
             secure=True,
             samesite="lax",
@@ -341,7 +362,8 @@ async def steam_login_callback(request: Request, db: Session = Depends(get_db)):
 
     # Branch 2: regular sign-in / sign-up.
     signup_role = _read_signup_value(request.cookies.get(SIGNUP_COOKIE))
-    user, _created = _find_or_create_steam_user(db, steam_id, signup_role)
+    consent_version = (request.cookies.get(CONSENT_COOKIE) or "").strip()[:32] or None
+    user, _created = _find_or_create_steam_user(db, steam_id, signup_role, consent_version)
     access_token, refresh_token = _issue_tokens(request, user, db)
 
     frag_parts = [
@@ -355,4 +377,5 @@ async def steam_login_callback(request: Request, db: Session = Depends(get_db)):
     target = f"{settings.FRONTEND_STEAM_REDIRECT}#{'&'.join(frag_parts)}"
     response = RedirectResponse(url=target, status_code=302)
     response.delete_cookie(SIGNUP_COOKIE, path="/")
+    response.delete_cookie(CONSENT_COOKIE, path="/")
     return response

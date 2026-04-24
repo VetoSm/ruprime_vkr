@@ -47,6 +47,11 @@ class AuthUser(Base):
     )
     coach_application_requested_at = Column(DateTime(timezone=True), nullable=True)
     coach_approved_at = Column(DateTime(timezone=True), nullable=True)
+    # Tracks acceptance of the Terms of Use + Privacy Policy. We store
+    # the version string (e.g. "2026-04-24") so we can prompt for a new
+    # consent if the document is updated later.
+    consent_version = Column(String(32), nullable=True)
+    consent_accepted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -55,6 +55,11 @@ def register(body: RegisterRequest, request: Request, db: Session = Depends(get_
     if body.password != body.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
+    # Refuse registration without explicit consent to the Terms of Use
+    # and Privacy Policy. Required for Steam Web API compliance.
+    if not body.consent_accepted:
+        raise HTTPException(status_code=400, detail="Необходимо принять условия использования и политику конфиденциальности")
+
     # Validate role. New policy (Iteration 2):
     #   - Users can choose PLAYER or COACH on the registration form.
     #   - We never grant the COACH role on registration. The account is
@@ -88,6 +93,8 @@ def register(body: RegisterRequest, request: Request, db: Session = Depends(get_
         is_verified=False,
         coach_application_status=application_status,
         coach_application_requested_at=requested_at,
+        consent_version=(body.consent_version or "unversioned")[:32],
+        consent_accepted_at=datetime.now(timezone.utc),
     )
     db.add(user)
     db.commit()

@@ -9,6 +9,10 @@ class RegisterRequest(BaseModel):
     password: str
     confirm_password: str
     role: str = "PLAYER"
+    # Explicit consent to the Terms of Use and Privacy Policy is mandatory
+    # for the Steam Web API terms to be respected.
+    consent_accepted: bool = False
+    consent_version: str = ""
 
     @field_validator("login")
     @classmethod
