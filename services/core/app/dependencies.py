@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import CoreUser
+from app.models import CoreUser, PlayerProfile
 
 
 class CurrentUser:
@@ -49,6 +49,21 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> Current
         db.add(core_user)
         db.commit()
         db.refresh(core_user)
+
+    # Auto-provision a PlayerProfile for every PLAYER so they are visible in
+    # admin listings (/admin/profiles) even before they open Settings or link
+    # Steam. This is idempotent — on the next call the profile already exists.
+    if role == "PLAYER":
+        profile = db.query(PlayerProfile).filter(
+            PlayerProfile.core_user_id == core_user.id
+        ).first()
+        if not profile:
+            profile = PlayerProfile(core_user_id=core_user.id)
+            db.add(profile)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
 
     return CurrentUser(
         user_id=core_user.id,

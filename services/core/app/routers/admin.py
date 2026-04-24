@@ -498,6 +498,52 @@ async def reject_coach(
     return MessageResponse(message="Заявка на тренера отклонена")
 
 
+@router.post("/backfill/players", response_model=MessageResponse)
+async def backfill_players(
+    request: Request,
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """One-shot backfill: for every PlayerProfile with a linked Steam account,
+    re-run the ML link pipeline so ``lifetime_games``, ``parsed_games_n``,
+    ranked-only summaries and percentile scores are all computed with the
+    latest code.
+
+    The actual heavy work is kicked into the ML deep-sync background queue,
+    so the endpoint returns immediately with a count of scheduled jobs.
+    """
+    profiles = db.query(PlayerProfile).filter(
+        PlayerProfile.dota_account_id.isnot(None),
+        PlayerProfile.steam_id.isnot(None),
+    ).all()
+
+    scheduled = 0
+    failures: list[str] = []
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for p in profiles:
+            try:
+                resp = await client.post(
+                    f"{settings.ML_SERVICE_URL}/ml/refresh-player-data/{p.dota_account_id}",
+                    headers=ml_headers(),
+                )
+                if resp.status_code == 200:
+                    scheduled += 1
+                else:
+                    failures.append(f"#{p.id}: HTTP {resp.status_code}")
+            except httpx.RequestError as exc:
+                failures.append(f"#{p.id}: {exc}")
+
+    log_action(
+        db, current_user.user_id, current_user.role, "BACKFILL_PLAYERS",
+        metadata={"scheduled": scheduled, "failures": len(failures)},
+        ip_address=request.client.host if request.client else None,
+    )
+    msg = f"Запущено повторная синхронизация: {scheduled} игроков"
+    if failures:
+        msg += f"; ошибки: {len(failures)} (первые 3: {failures[:3]})"
+    return MessageResponse(message=msg)
+
+
 @router.post("/coaches/{auth_user_id}/unverify", response_model=MessageResponse)
 async def unverify_coach(
     auth_user_id: int,

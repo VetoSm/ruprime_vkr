@@ -134,9 +134,9 @@ export default function PlayerDashboard() {
   // количество проанализированных / загруженных матчей и пользователю не
   // показываются, чтобы не было двух разных чисел на одном экране.
   const totalGames =
-    steamData?.lifetime_games ??
-    steamData?.total_games ??
-    ((steamData?.win || 0) + (steamData?.lose || 0)) || 0;
+    steamData?.lifetime_games
+    ?? steamData?.total_games
+    ?? ((steamData?.win || 0) + (steamData?.lose || 0));
   const winrate = summary.winrate || (totalGames > 0 ? (steamData?.win || 0) / totalGames : 0);
   const hours = summary.estimated_hours || steamData?.estimated_hours || 0;
   const desiredRankStr = playerProfile?.desired_rank_tier || 'IMMORTAL';
