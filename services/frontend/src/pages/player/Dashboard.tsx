@@ -5,6 +5,7 @@ import { useAuth } from '../../store/AuthContext';
 import { loadHeroes } from '../../api/heroes';
 import SkillRing, { ComponentBar } from '../../ui/SkillRing';
 import { RankBadge, InfoTooltip } from '../../ui/GameComponents';
+import DotaPrivacyBanner from '../../ui/DotaPrivacyBanner';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const MMR_BY_RANK: Record<string, number> = {
@@ -190,6 +191,12 @@ export default function PlayerDashboard() {
           Steam не привязан. <Link to="/settings">Привяжите аккаунт</Link> для получения статистики.
         </div>
       )}
+
+      <DotaPrivacyBanner
+        steamData={steamData}
+        onRefreshed={(data) => data && setSteamData((prev: any) => ({ ...(prev || {}), ...data, linked: true }))}
+      />
+
 
       {isLinked && syncStatus?.scheduled && (syncStatus.status === 'queued' || syncStatus.status === 'running') && (
         <div

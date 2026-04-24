@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { coreApi, authApi } from '../../api/client';
 import { loadHeroes, heroName, heroIcon } from '../../api/heroes';
 import { RankBadge, RoleBadge, InfoTooltip } from '../../ui/GameComponents';
+import DotaPrivacyBanner from '../../ui/DotaPrivacyBanner';
 import { IconEye, IconEyeOff, IconSettings } from '../../ui/Icons';
 const STEAM_PENDING_KEY = 'steam_pending_link_id';
 const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || 'http://localhost:8001';
@@ -421,6 +422,11 @@ export default function PlayerProfile() {
             Account: {steamData.account_id} | Steam: {steamData.steam_id}
             {steamData.profile_url && <> | <a href={steamData.profile_url} target="_blank" rel="noreferrer">Профиль Steam</a></>}
           </div>
+
+          <DotaPrivacyBanner
+            steamData={steamData}
+            onRefreshed={(data) => data && setSteamData((prev: any) => ({ ...(prev || {}), ...data, linked: true }))}
+          />
         </>
       ) : (
         /* === Link Steam === */
