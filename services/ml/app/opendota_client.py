@@ -28,27 +28,39 @@ def account_id_to_steam_id(account_id: int) -> str:
     return str(account_id + STEAM_ID_BASE)
 
 
-def _request(method: str, path: str, retry: bool = True):
+RETRY_DELAYS = (5, 15, 30)  # seconds between retries on 429
+
+
+def _request(method: str, path: str):
+    """GET/POST an OpenDota endpoint with graceful 429 back-off.
+
+    Free-tier OpenDota gives us 60 requests per minute. When we run a deep
+    sync we can easily blow past that, so instead of giving up after one
+    retry we wait progressively longer and try three times before failing.
+    """
     url = f"{OPENDOTA_BASE}{path}"
     logger.info(f"OpenDota {method} {path}")
-    try:
-        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-            resp = client.get(url) if method == "GET" else client.post(url)
+    for attempt, delay in enumerate((0,) + RETRY_DELAYS):
+        if delay:
+            logger.warning("OpenDota 429, waiting %ss before retry #%s...", delay, attempt)
+            time.sleep(delay)
+        try:
+            with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+                resp = client.get(url) if method == "GET" else client.post(url)
+        except Exception as exc:
+            logger.error("OpenDota network error: %s", exc)
+            return None
         if resp.status_code == 200:
             try:
                 return resp.json()
             except Exception:
                 return None
-        elif resp.status_code == 429 and retry:
-            logger.warning("Rate limit 429, waiting 5s...")
-            time.sleep(5)
-            return _request(method, path, retry=False)
-        else:
-            logger.warning(f"OpenDota {resp.status_code}: {path}")
-            return None
-    except Exception as e:
-        logger.error(f"OpenDota failed: {e}")
+        if resp.status_code == 429:
+            continue
+        logger.warning("OpenDota %s: %s", resp.status_code, path)
         return None
+    logger.warning("OpenDota gave up after retries: %s", path)
+    return None
 
 
 def _get(path): return _request("GET", path)
