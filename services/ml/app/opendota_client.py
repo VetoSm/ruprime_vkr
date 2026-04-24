@@ -252,18 +252,72 @@ def fetch_match_details(match_id: int) -> Optional[dict]:
 
 
 def fetch_full_player_data(steam_id: str, max_matches: int = 500) -> dict:
-    """Fetch everything: refresh -> profile -> wl -> totals -> recentMatches -> matches (paginated) -> heroes."""
+    """Fetch everything we legally can: Steam Web API for "who this is" +
+    OpenDota for actual match history.
+
+    Steam Web API is the first call because it always works for any valid
+    SteamID64 — even for players whose Dota 2 match history is closed. It
+    gives us name, avatar and total playtime. OpenDota is best-effort on
+    top: when the player has "Expose Public Match Data" on we get real
+    matches, otherwise we fall back gracefully to the Steam-only profile
+    instead of returning a hard error.
+    """
+    from app.steam_web_api import enrich_profile as _steam_enrich
+
     account_id = steam_id_to_account_id(steam_id)
     logger.info(f"=== Full fetch for steam_id={steam_id}, account_id={account_id} ===")
 
-    # 0. Refresh
+    # Always start with Steam Web API — it's reliable and independent of Dota
+    # visibility.
+    steam_info = _steam_enrich(steam_id)
+
+    # 0. Ask OpenDota to refresh then wait a couple of seconds.
     refresh_player(account_id)
     time.sleep(2)
 
     # 1. Profile
     profile = fetch_player_profile(account_id)
     if not profile:
-        return {"error": "Профиль не найден в OpenDota. Проверьте Steam ID и публичность профиля.", "account_id": account_id}
+        # OpenDota has nothing for us (404, 429 after retries, or malformed
+        # response). Return whatever Steam Web API gave us so the admin UI
+        # and dashboard can still show a real persona / avatar / hours.
+        if steam_info.get("steam_web_available"):
+            return {
+                "account_id": account_id,
+                "steam_id": steam_id,
+                "personaname": steam_info.get("personaname") or "Unknown",
+                "avatar_url": steam_info.get("avatar_url") or "",
+                "profile_url": steam_info.get("profile_url") or "",
+                "rank_tier": None,
+                "mmr_estimate": None,
+                "is_public": (steam_info.get("community_visibility") == 3),
+                "win": 0,
+                "lose": 0,
+                "estimated_hours": steam_info.get("steam_dota_hours") or 0,
+                "last_match_time": steam_info.get("steam_dota_last_played"),
+                "matches": [],
+                "heroes": [],
+                "rankings": [],
+                "matches_count": 0,
+                "lifetime_games": 0,
+                "parsed_games_n": 0,
+                "total_games": 0,
+                "warning": (
+                    "История матчей Dota 2 закрыта. Мы подтянули базовый профиль "
+                    "из Steam Web API, но для аналитики матчей нужно включить "
+                    "«Expose Public Match Data» в настройках Dota 2."
+                ),
+                "source": "steam_web_api_only",
+                "totals": {"lifetime_games": 0, "parsed_games_n": 0, "total_games": 0},
+            }
+        return {
+            "error": (
+                "Не удалось получить данные: OpenDota не знает этот SteamID64 и "
+                "Steam Web API тоже не ответил (возможно, не настроен STEAM_API_KEY "
+                "или сервер временно недоступен)."
+            ),
+            "account_id": account_id,
+        }
 
     # 2. Win/Loss
     wl = fetch_player_wl(account_id)
@@ -332,18 +386,30 @@ def fetch_full_player_data(steam_id: str, max_matches: int = 500) -> dict:
             "3. Подождите 5-10 минут и нажмите «Обновить данные»"
         )
 
+    # Steam Web API beats OpenDota for persona/avatar/hours when available:
+    # it's always fresh and ignores OpenDota cache staleness.
+    sw = steam_info if steam_info.get("steam_web_available") else {}
+    personaname = sw.get("personaname") or profile.get("personaname") or "Unknown"
+    avatar_url = sw.get("avatar_url") or profile.get("avatar_url") or ""
+    profile_url = sw.get("profile_url") or profile.get("profile_url") or ""
+    hours_from_steam = sw.get("steam_dota_hours")
+    effective_hours = hours_from_steam if hours_from_steam else estimated_hours
+
     result = {
         "account_id": account_id,
         "steam_id": profile.get("steam_id", steam_id),
-        "personaname": profile.get("personaname", "Unknown"),
-        "avatar_url": profile.get("avatar_url", ""),
+        "personaname": personaname,
+        "avatar_url": avatar_url,
         "rank_tier": profile.get("rank_tier"),
         "mmr_estimate": profile.get("mmr_estimate"),
-        "profile_url": profile.get("profile_url", ""),
+        "profile_url": profile_url,
         "is_public": profile.get("is_public", True),
         "win": wl.get("win", 0),
         "lose": wl.get("lose", 0),
-        "estimated_hours": estimated_hours,
+        "estimated_hours": effective_hours,
+        "steam_hours": hours_from_steam,
+        "steam_last_played": sw.get("steam_dota_last_played"),
+        "source": "opendota+steam_web" if sw else "opendota",
         "last_match_time": last_match_time,
         "matches": merged_matches,
         "heroes": heroes[:20],

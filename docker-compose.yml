@@ -64,6 +64,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       KAGGLE_DATA_PATH: ${KAGGLE_DATA_PATH}
       ML_INTERNAL_TOKEN: ${ML_INTERNAL_TOKEN}
+      STEAM_API_KEY: ${STEAM_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     volumes:
       - ./archive-2:/data/archive-2:ro
