@@ -14,6 +14,7 @@ interface User {
   is_active: boolean;
   is_verified?: boolean;
   coach_application_status?: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
+  consent_version?: string | null;
 }
 
 interface AuthState {
@@ -30,6 +31,7 @@ interface AuthState {
   ) => Promise<void>;
   logout: () => void;
   applySteamSession: (accessToken: string, refreshToken: string) => Promise<void>;
+  acceptConsent: (version: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -171,8 +173,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     scheduleSilentRefresh();
   }, [scheduleSilentRefresh]);
 
+  const acceptConsent = useCallback(async (version: string) => {
+    const res = await authApi.post('/auth/accept-consent', { version });
+    setUser(res.data);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, applySteamSession }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, applySteamSession, acceptConsent }}>
       {children}
     </AuthContext.Provider>
   );

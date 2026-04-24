@@ -77,6 +77,7 @@ class UserResponse(BaseModel):
     is_active: bool
     is_verified: bool
     coach_application_status: str = "NONE"
+    consent_version: Optional[str] = None
 
     class Config:
         from_attributes = True

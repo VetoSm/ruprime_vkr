@@ -212,6 +212,7 @@ def me(current_user: AuthUser = Depends(get_current_user)):
         is_active=current_user.is_active,
         is_verified=current_user.is_verified,
         coach_application_status=current_user.coach_application_status.value,
+        consent_version=current_user.consent_version,
     )
 
 
@@ -282,6 +283,7 @@ def admin_set_user_role(
         is_active=target.is_active,
         is_verified=target.is_verified,
         coach_application_status=target.coach_application_status.value,
+        consent_version=target.consent_version,
     )
 
 
@@ -375,6 +377,39 @@ def list_coach_applications(
     }
 
 
+# ---------- POST /auth/accept-consent ----------
+@router.post("/accept-consent", response_model=UserResponse)
+def accept_consent(
+    body: dict,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Record that the current user accepted a specific Terms/Privacy version.
+
+    Called by the frontend ConsentGate modal when a pre-existing user logs
+    in and their stored consent_version is empty or stale. Idempotent — if
+    the version is the same as what's already stored, we just refresh the
+    timestamp.
+    """
+    version = str(body.get("version") or "").strip()[:32]
+    if not version:
+        raise HTTPException(status_code=400, detail="version is required")
+    current_user.consent_version = version
+    current_user.consent_accepted_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(current_user)
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        login=current_user.login,
+        role=current_user.role.value,
+        is_active=current_user.is_active,
+        is_verified=current_user.is_verified,
+        coach_application_status=current_user.coach_application_status.value,
+        consent_version=current_user.consent_version,
+    )
+
+
 # ---------- POST /auth/apply-coach ----------
 @router.post("/apply-coach", response_model=UserResponse)
 def apply_for_coach(current_user: AuthUser = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -402,6 +437,7 @@ def apply_for_coach(current_user: AuthUser = Depends(get_current_user), db: Sess
         is_active=current_user.is_active,
         is_verified=current_user.is_verified,
         coach_application_status=current_user.coach_application_status.value,
+        consent_version=current_user.consent_version,
     )
 
 
@@ -441,6 +477,7 @@ def approve_coach_application(
         is_active=target.is_active,
         is_verified=target.is_verified,
         coach_application_status=target.coach_application_status.value,
+        consent_version=target.consent_version,
     )
 
 
@@ -469,6 +506,7 @@ def reject_coach_application(
         is_active=target.is_active,
         is_verified=target.is_verified,
         coach_application_status=target.coach_application_status.value,
+        consent_version=target.consent_version,
     )
 
 

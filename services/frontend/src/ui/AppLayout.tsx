@@ -9,6 +9,7 @@ import {
   IconChevronLeft, IconChevronRight, IconMessageCircle,
 } from './Icons';
 import SiteFooter from './SiteFooter';
+import ConsentGate from './ConsentGate';
 
 const NAV_CONFIG: Record<string, { icon: (p: any) => JSX.Element }> = {
   '/dashboard':       { icon: IconHome },
@@ -74,6 +75,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const showAiFab = user?.role === 'PLAYER';
 
   return (
+    <ConsentGate>
     <div className={`app-layout ${collapsed ? 'sidebar-collapsed' : ''}`}>
       <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-logo">
@@ -142,5 +144,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </button>
       )}
     </div>
+    </ConsentGate>
   );
 }
