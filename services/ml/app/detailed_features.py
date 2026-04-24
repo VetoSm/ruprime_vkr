@@ -278,7 +278,7 @@ def compute_detailed_features(account_id: int, desired_rank: str = None, db: Ses
         name="Стабильность",
         icon="S",
         components=[
-            _component("winrate", "Общий винрейт (%)", player.get("winrate", 0.5) * 100, 50, 55),
+            _component("winrate", "Общий винрейт (%)", (player.get("winrate") or 0.5) * 100, 50, 55),
             _component("hero_count", "Пул героев", player.get("hero_count", 0), 10, 20),
             _component("total_games", "Опыт (всего игр)", min(player.get("total_games", 0) / 100, 10) * 10, 50, 80),
         ],
