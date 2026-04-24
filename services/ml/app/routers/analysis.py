@@ -539,6 +539,39 @@ def detailed_features_endpoint(account_id: int, desired_rank: str = None, db: Se
     return result
 
 
+@router.get("/debug/steam-web/{steam_id}")
+def debug_steam_web(steam_id: str):
+    """Live probe of Steam Web API for one SteamID. Used by the admin
+    user-detail view to show 'key configured?', 'is this account visible
+    to Valve?', persona and playtime right now.
+
+    Internal-only; protected by the X-Internal-Token dependency on the
+    whole ml router.
+    """
+    from app.steam_web_api import is_configured, enrich_profile
+
+    if not is_configured():
+        return {"configured": False, "found": False}
+    enriched = enrich_profile(steam_id)
+    found = bool(enriched.get("steam_web_available"))
+    return {
+        "configured": True,
+        "found": found,
+        "profile": {
+            "personaname": enriched.get("personaname"),
+            "avatar_url": enriched.get("avatar_url"),
+            "profile_url": enriched.get("profile_url"),
+            "realname": enriched.get("realname"),
+            "country_code": enriched.get("country_code"),
+            "community_visibility": enriched.get("community_visibility"),
+        } if found else None,
+        "playtime": {
+            "dota_hours": enriched.get("steam_dota_hours"),
+            "last_played": enriched.get("steam_dota_last_played"),
+        } if found else None,
+    }
+
+
 @router.get("/heroes", response_model=list[HeroResponse])
 def list_heroes(db: Session = Depends(get_db)):
     """List all heroes from constants."""

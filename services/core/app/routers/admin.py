@@ -541,10 +541,28 @@ async def admin_users_full(
     # lightweight projection, so go through the ORM rather than a JOIN.
     from app.models import TrainingSession as _TS, TrainingRequest as _TR
     from sqlalchemy import text as _sql_text
-    dota_account_ids = [
-        int(pp.dota_account_id) for pp in player_profiles.values()
-        if pp.dota_account_id and str(pp.dota_account_id).isdigit()
-    ]
+
+    STEAM_ID_BASE_FOR_IDS = 76561197960265728
+
+    def _compute_account_id(steam_id_val):
+        try:
+            sid = int(str(steam_id_val))
+            return sid - STEAM_ID_BASE_FOR_IDS if sid > STEAM_ID_BASE_FOR_IDS else sid
+        except (TypeError, ValueError):
+            return None
+
+    dota_account_ids = set()
+    for pp in player_profiles.values():
+        if pp.dota_account_id and str(pp.dota_account_id).isdigit():
+            dota_account_ids.add(int(pp.dota_account_id))
+    # Also include account_ids derived from Steam providers (even if no
+    # PlayerProfile yet) so admins see all possible accounts in ml_map.
+    for u in auth_users:
+        if u.get("steam_id"):
+            aid = _compute_account_id(u["steam_id"])
+            if aid is not None:
+                dota_account_ids.add(aid)
+    dota_account_ids = list(dota_account_ids)
     ml_map: dict[int, dict] = {}
     if dota_account_ids:
         rows = db.execute(
@@ -583,14 +601,34 @@ async def admin_users_full(
     )):
         session_by_player[r[0]] = r[1]
 
+    STEAM_ID_BASE = 76561197960265728
+
+    def _acc_id_from_steam(steam_id_str):
+        try:
+            sid = int(str(steam_id_str))
+            return sid - STEAM_ID_BASE if sid > STEAM_ID_BASE else sid
+        except (TypeError, ValueError):
+            return None
+
     items = []
     for u in auth_users:
         core_user = core_user_map.get(u["id"])
         pp = player_profiles.get(core_user.id) if core_user else None
         cp = coach_profiles.get(core_user.id) if core_user else None
-        ml_row = None
+
+        # dota_account_id is often missing for profiles where OpenDota never
+        # returned a public profile. It is still mathematically derivable
+        # from the Steam link we hold in auth_providers. Compute on the fly
+        # so the admin "Догрузить" button always has a target.
+        effective_account_id = None
         if pp and pp.dota_account_id and str(pp.dota_account_id).isdigit():
-            ml_row = ml_map.get(int(pp.dota_account_id))
+            effective_account_id = int(pp.dota_account_id)
+        elif u.get("steam_id"):
+            effective_account_id = _acc_id_from_steam(u["steam_id"])
+
+        ml_row = None
+        if effective_account_id is not None:
+            ml_row = ml_map.get(effective_account_id)
 
         items.append({
             "auth_user_id": u["id"],
@@ -606,7 +644,9 @@ async def admin_users_full(
             "steam_id": u.get("steam_id"),
             "steam_id_in_profile": pp.steam_id if pp else None,
             "steam_linked": bool(u.get("steam_id")),
-            "dota_account_id": pp.dota_account_id if pp else None,
+            "dota_account_id": pp.dota_account_id if pp and pp.dota_account_id else (
+                str(effective_account_id) if effective_account_id is not None else None
+            ),
             # Pulled from ML player_accounts.
             "dota_personaname": (ml_row or {}).get("personaname"),
             "dota_rank_tier": (ml_row or {}).get("rank_tier"),
@@ -633,6 +673,221 @@ async def admin_users_full(
         ip_address=request.client.host if request.client else None,
     )
     return {"items": items}
+
+
+@router.get("/users/{auth_user_id}/detail")
+async def admin_user_detail(
+    auth_user_id: int,
+    request: Request,
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Full admin-side dossier for a single registered user.
+
+    Aggregates:
+    * auth side: login/email/role/active flag/consent version/Steam provider
+    * core profiles: PlayerProfile and CoachProfile (+ sessions history)
+    * Steam Web API: whether we were able to reach Valve for this SteamID,
+      persona/avatar/visibility, Dota 2 playtime
+    * OpenDota: did we get a public Dota profile, ``fh_unavailable`` flag
+      (i.e. "Expose Public Match Data" off), rank, lifetime/parsed games,
+      latest ML analysis summary
+
+    Everything is read from local DB where possible; a live Steam Web API
+    call is made only when the user has a Steam link, so refreshing the
+    page doesn't spam Valve.
+    """
+    STEAM_ID_BASE = 76561197960265728
+
+    token = request.headers.get("Authorization", "")
+    # auth user
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{settings.AUTH_SERVICE_URL}/auth/admin/users-lite",
+                headers={"Authorization": token},
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Auth недоступен: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    auth_user = next((u for u in resp.json().get("items", []) if u["id"] == auth_user_id), None)
+    if not auth_user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    core_user = db.query(CoreUser).filter(CoreUser.auth_user_id == auth_user_id).first()
+    player_profile = (
+        db.query(PlayerProfile).filter(PlayerProfile.core_user_id == core_user.id).first()
+        if core_user else None
+    )
+    coach_profile = (
+        db.query(CoachProfile).filter(CoachProfile.core_user_id == core_user.id).first()
+        if core_user else None
+    )
+
+    # Derive Dota account_id from Steam even if we never wrote it to
+    # player_profile (OpenDota may have refused).
+    account_id = None
+    if player_profile and player_profile.dota_account_id and str(player_profile.dota_account_id).isdigit():
+        account_id = int(player_profile.dota_account_id)
+    elif auth_user.get("steam_id"):
+        try:
+            sid = int(auth_user["steam_id"])
+            account_id = sid - STEAM_ID_BASE if sid > STEAM_ID_BASE else sid
+        except (TypeError, ValueError):
+            account_id = None
+
+    # ML row (persona, rank, lifetime_games, playtime, fetched_at)
+    ml_row = None
+    ml_analysis = None
+    if account_id is not None:
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                r = await client.get(
+                    f"{settings.ML_SERVICE_URL}/ml/player-account/{account_id}",
+                    headers=ml_headers(),
+                )
+            if r.status_code == 200:
+                ml_row = r.json()
+        except httpx.RequestError:
+            pass
+        if player_profile and player_profile.ml_analysis_id:
+            try:
+                async with httpx.AsyncClient(timeout=6.0) as client:
+                    r = await client.get(
+                        f"{settings.ML_SERVICE_URL}/ml/player-analysis/{player_profile.ml_analysis_id}",
+                        headers=ml_headers(),
+                    )
+                if r.status_code == 200:
+                    ml_analysis = r.json()
+            except httpx.RequestError:
+                pass
+
+    # Live Steam Web API probe — tells us whether Steam Web API key is
+    # configured and whether the user has visibility set up.
+    steam_web = None
+    if auth_user.get("steam_id"):
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                r = await client.get(
+                    f"{settings.ML_SERVICE_URL}/ml/debug/steam-web/{auth_user['steam_id']}",
+                    headers=ml_headers(),
+                )
+            if r.status_code == 200:
+                steam_web = r.json()
+        except httpx.RequestError:
+            pass
+
+    # Sessions: as player (through training_requests) and as coach.
+    from sqlalchemy import text as _sql_text
+    sessions_as_player = []
+    sessions_as_coach = []
+    if player_profile:
+        rows = db.execute(_sql_text(
+            "SELECT ts.id, ts.status::text AS status, ts.scheduled_at, ts.coach_profile_id "
+            "FROM training_sessions ts "
+            "JOIN training_requests tr ON tr.id = ts.training_request_id "
+            "WHERE tr.player_profile_id = :pid "
+            "ORDER BY ts.scheduled_at DESC NULLS LAST LIMIT 10"
+        ), {"pid": player_profile.id})
+        for r in rows.mappings():
+            sessions_as_player.append({
+                "id": r["id"],
+                "status": r["status"],
+                "scheduled_at": r["scheduled_at"].isoformat() if r["scheduled_at"] else None,
+                "coach_profile_id": r["coach_profile_id"],
+            })
+    if coach_profile:
+        rows = db.execute(_sql_text(
+            "SELECT id, status::text AS status, scheduled_at, training_request_id "
+            "FROM training_sessions WHERE coach_profile_id = :cid "
+            "ORDER BY scheduled_at DESC NULLS LAST LIMIT 10"
+        ), {"cid": coach_profile.id})
+        for r in rows.mappings():
+            sessions_as_coach.append({
+                "id": r["id"],
+                "status": r["status"],
+                "scheduled_at": r["scheduled_at"].isoformat() if r["scheduled_at"] else None,
+                "training_request_id": r["training_request_id"],
+            })
+
+    # Derive "status" of each source of data — what admin really wants to see.
+    steam_linked = bool(auth_user.get("steam_id"))
+    steam_web_available = bool(steam_web and steam_web.get("configured") and steam_web.get("found"))
+    opendota_available = bool(ml_row and (ml_row.get("personaname") or ml_row.get("rank_tier")))
+    # fh_unavailable is OpenDota's signal that Dota match history is closed.
+    match_history_open = bool(
+        opendota_available and not ml_row.get("error") and (
+            (ml_row.get("lifetime_games") or 0) > 0
+            or (ml_row.get("matches_loaded") or 0) > 0
+        )
+    )
+
+    log_action(
+        db, current_user.user_id, current_user.role, "VIEW_ADMIN_USER_DETAIL",
+        "AUTH_USER", auth_user_id,
+        ip_address=request.client.host if request.client else None,
+    )
+
+    return {
+        "auth": auth_user,
+        "core_user_id": core_user.id if core_user else None,
+        "account_id": account_id,
+        "player_profile": {
+            "id": player_profile.id,
+            "steam_id": player_profile.steam_id,
+            "dota_account_id": player_profile.dota_account_id,
+            "actual_rank_tier": player_profile.actual_rank_tier,
+            "desired_rank_tier": player_profile.desired_rank_tier,
+            "actual_roles": player_profile.actual_roles,
+            "desired_roles": player_profile.desired_roles,
+            "training_goals": player_profile.training_goals,
+            "ml_analysis_id": player_profile.ml_analysis_id,
+        } if player_profile else None,
+        "coach_profile": {
+            "id": coach_profile.id,
+            "is_verified": bool(coach_profile.is_verified),
+            "mmr_estimate": coach_profile.mmr_estimate,
+            "rank_tier": coach_profile.rank_tier,
+            "main_roles": coach_profile.main_roles,
+            "hero_pool": coach_profile.hero_pool,
+            "hourly_rate": coach_profile.hourly_rate,
+            "experience_years": coach_profile.experience_years,
+            "about": coach_profile.about,
+        } if coach_profile else None,
+        "steam": {
+            "linked": steam_linked,
+            "steam_id": auth_user.get("steam_id"),
+            "web_api_configured": bool(steam_web and steam_web.get("configured")),
+            "web_api_found": bool(steam_web and steam_web.get("found")),
+            "profile": (steam_web or {}).get("profile"),
+            "playtime": (steam_web or {}).get("playtime"),
+        },
+        "opendota": {
+            "available": opendota_available,
+            "match_history_open": match_history_open,
+            "warning": (ml_row or {}).get("warning"),
+            "personaname": (ml_row or {}).get("personaname"),
+            "avatar_url": (ml_row or {}).get("avatar_url"),
+            "rank_tier": (ml_row or {}).get("rank_tier"),
+            "mmr_estimate": (ml_row or {}).get("mmr_estimate"),
+            "win": (ml_row or {}).get("win"),
+            "lose": (ml_row or {}).get("lose"),
+            "lifetime_games": (ml_row or {}).get("lifetime_games"),
+            "parsed_games_n": (ml_row or {}).get("parsed_games_n"),
+            "estimated_hours": (ml_row or {}).get("estimated_hours"),
+            "last_match_time": (ml_row or {}).get("last_match_time"),
+            "matches_loaded": (ml_row or {}).get("matches_loaded"),
+        },
+        "analysis": {
+            "analysis_id": (ml_analysis or {}).get("ml_analysis_id"),
+            "summary": (ml_analysis or {}).get("summary"),
+            "weaknesses_ranked": (ml_analysis or {}).get("weaknesses_ranked"),
+            "strengths_ranked": (ml_analysis or {}).get("strengths_ranked"),
+        } if ml_analysis else None,
+        "sessions_as_player": sessions_as_player,
+        "sessions_as_coach": sessions_as_coach,
+    }
 
 
 @router.post("/users/{auth_user_id}/role", response_model=MessageResponse)

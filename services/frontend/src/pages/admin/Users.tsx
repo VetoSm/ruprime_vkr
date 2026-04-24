@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 
 type Tab = 'all' | 'players' | 'coaches' | 'applications';
@@ -215,9 +216,16 @@ export default function AdminUsers() {
                   const badge = ROLE_BADGE[u.role] || ROLE_BADGE.PLAYER;
                   return (
                     <tr key={u.auth_user_id}>
-                      <td>{u.auth_user_id}</td>
                       <td>
-                        <div style={{ fontWeight: 600 }}>{u.login}</div>
+                        <Link to={`/admin/users/${u.auth_user_id}`}>{u.auth_user_id}</Link>
+                      </td>
+                      <td>
+                        <Link
+                          to={`/admin/users/${u.auth_user_id}`}
+                          style={{ fontWeight: 600, color: 'var(--text-primary)' }}
+                        >
+                          {u.login}
+                        </Link>
                         <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{u.email}</div>
                       </td>
                       <td>

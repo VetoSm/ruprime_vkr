@@ -409,12 +409,19 @@ export default function MlData() {
                       <tbody>
                         {allLinks.map((u: any) => {
                           const loaded = Boolean(u.dota_personaname);
+                          // dota_account_id from backend is now always
+                          // populated when there's a Steam link — even if
+                          // no OpenDota profile was ever fetched. Fall
+                          // back to a client-side conversion just in case.
+                          const accId = Number(u.dota_account_id) || (
+                            u.steam_id ? Number(u.steam_id) - 76561197960265728 : null
+                          );
                           return (
                             <tr key={u.auth_user_id}>
                               <td>{u.login}</td>
                               <td><span className="badge badge-accent">{u.role}</span></td>
                               <td style={{ fontSize: '0.78rem' }}>{u.steam_id || '—'}</td>
-                              <td style={{ fontSize: '0.78rem' }}>{u.dota_account_id || '—'}</td>
+                              <td style={{ fontSize: '0.78rem' }}>{accId || '—'}</td>
                               <td>{u.dota_personaname || <span className="text-muted">—</span>}</td>
                               <td style={{ fontSize: '0.82rem' }}>{u.dota_rank_name || '—'}</td>
                               <td>{u.lifetime_games?.toLocaleString('ru-RU') ?? '—'}</td>
@@ -426,14 +433,16 @@ export default function MlData() {
                                 )}
                               </td>
                               <td>
-                                {u.dota_account_id && (
+                                {accId ? (
                                   <button
                                     className="btn btn-outline btn-sm"
-                                    disabled={busyRefreshAcc === Number(u.dota_account_id)}
-                                    onClick={() => refreshAccount(Number(u.dota_account_id))}
+                                    disabled={busyRefreshAcc === accId}
+                                    onClick={() => refreshAccount(accId)}
                                   >
-                                    {busyRefreshAcc === Number(u.dota_account_id) ? 'Запрашиваем…' : 'Догрузить'}
+                                    {busyRefreshAcc === accId ? 'Запрашиваем…' : 'Догрузить'}
                                   </button>
+                                ) : (
+                                  <span className="text-muted" style={{ fontSize: '0.78rem' }}>нет Steam ID</span>
                                 )}
                               </td>
                             </tr>

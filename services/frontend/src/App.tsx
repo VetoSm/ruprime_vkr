@@ -24,6 +24,7 @@ import CoachSchedule from './pages/coach/Schedule';
 import CoachReviews from './pages/coach/Reviews';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminUsers from './pages/admin/Users';
+import AdminUserDetail from './pages/admin/UserDetail';
 import AdminLogs from './pages/admin/Logs';
 import AdminImport from './pages/admin/Import';
 import AdminMlData from './pages/admin/MlData';
@@ -136,6 +137,7 @@ function AppRoutes() {
         {/* Admin routes */}
         <Route path="/admin/dashboard" element={<ProtectedRoute roles={['ADMIN']}><AppLayout><AdminDashboard /></AppLayout></ProtectedRoute>} />
         <Route path="/admin/users" element={<ProtectedRoute roles={['ADMIN']}><AppLayout><AdminUsers /></AppLayout></ProtectedRoute>} />
+        <Route path="/admin/users/:id" element={<ProtectedRoute roles={['ADMIN']}><AppLayout><AdminUserDetail /></AppLayout></ProtectedRoute>} />
         <Route path="/admin/sessions" element={<ProtectedRoute roles={['ADMIN']}><AppLayout><AdminSessions /></AppLayout></ProtectedRoute>} />
         <Route path="/admin/logs" element={<ProtectedRoute roles={['ADMIN']}><AppLayout><AdminLogs /></AppLayout></ProtectedRoute>} />
         <Route path="/admin/ml-import" element={<ProtectedRoute roles={['ADMIN']}><AppLayout><AdminImport /></AppLayout></ProtectedRoute>} />

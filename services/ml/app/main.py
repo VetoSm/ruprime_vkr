@@ -68,6 +68,10 @@ def startup():
         from app.match_collector import start_collector
         start_collector()
 
+    # Periodic background refresh of linked Steam accounts (24h by default).
+    from app.auto_refresh import start as _start_auto_refresh
+    _start_auto_refresh()
+
 
 @app.get("/health")
 def health():
