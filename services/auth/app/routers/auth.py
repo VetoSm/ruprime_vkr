@@ -208,6 +208,116 @@ def me(current_user: AuthUser = Depends(get_current_user)):
     )
 
 
+# ---------- POST /auth/admin/users/{id}/role ----------
+@router.post("/admin/users/{user_id}/role", response_model=UserResponse)
+def admin_set_user_role(
+    user_id: int,
+    body: dict,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Admin-only change of a user's role.
+
+    Allowed target values: ``PLAYER``, ``COACH``, ``ADMIN``. Sessions stay
+    valid — the existing access tokens keep working until they expire, and
+    the next silent refresh issues a token with the new role claim.
+
+    The call is idempotent (setting the same role returns 200). Demoting
+    the last ADMIN is refused so we can't lock ourselves out.
+    """
+    if current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    new_role_str = str(body.get("role", "")).upper()
+    if new_role_str not in ("PLAYER", "COACH", "ADMIN"):
+        raise HTTPException(status_code=400, detail="role must be PLAYER, COACH or ADMIN")
+    new_role = RoleEnum(new_role_str)
+
+    target = db.query(AuthUser).filter(AuthUser.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    # Safety: refuse to demote the last remaining ADMIN.
+    if target.role == RoleEnum.ADMIN and new_role != RoleEnum.ADMIN:
+        admin_count = db.query(AuthUser).filter(AuthUser.role == RoleEnum.ADMIN).count()
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Нельзя убрать роль у последнего администратора")
+
+    if target.role == new_role:
+        # nothing to do, but still keep the coach application bookkeeping
+        # consistent (e.g. APPROVED if already a coach).
+        return UserResponse(
+            id=target.id,
+            email=target.email,
+            login=target.login,
+            role=target.role.value,
+            is_active=target.is_active,
+            is_verified=target.is_verified,
+            coach_application_status=target.coach_application_status.value,
+        )
+
+    target.role = new_role
+    if new_role == RoleEnum.COACH:
+        target.coach_application_status = CoachApplicationStatus.APPROVED
+        if not target.coach_approved_at:
+            target.coach_approved_at = datetime.now(timezone.utc)
+    elif new_role == RoleEnum.PLAYER and target.coach_application_status == CoachApplicationStatus.APPROVED:
+        # Manual demotion: mark as rejected so the "approved" badge goes away.
+        target.coach_application_status = CoachApplicationStatus.REJECTED
+
+    db.commit()
+    db.refresh(target)
+    return UserResponse(
+        id=target.id,
+        email=target.email,
+        login=target.login,
+        role=target.role.value,
+        is_active=target.is_active,
+        is_verified=target.is_verified,
+        coach_application_status=target.coach_application_status.value,
+    )
+
+
+# ---------- GET /auth/admin/users-lite ----------
+@router.get("/admin/users-lite")
+def admin_list_users_lite(
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return every auth user with their Steam-provider link. Admin only.
+
+    Used by the core ``/admin/users-full`` endpoint which joins this against
+    core profiles and ML data. Kept separate from /admin/coach-applications
+    so admins can see users who never submitted a coach application.
+    """
+    if current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    providers = db.query(AuthProvider).filter(AuthProvider.provider == "STEAM").all()
+    provider_by_user = {p.user_id: p.provider_user_id for p in providers}
+    users = db.query(AuthUser).order_by(AuthUser.id.desc()).all()
+    return {
+        "items": [
+            {
+                "id": u.id,
+                "login": u.login,
+                "email": u.email,
+                "role": u.role.value,
+                "is_active": u.is_active,
+                "is_verified": u.is_verified,
+                "coach_application_status": u.coach_application_status.value,
+                "coach_application_requested_at": u.coach_application_requested_at.isoformat()
+                if u.coach_application_requested_at
+                else None,
+                "coach_approved_at": u.coach_approved_at.isoformat() if u.coach_approved_at else None,
+                "steam_id": provider_by_user.get(u.id),
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            }
+            for u in users
+        ]
+    }
+
+
 # ---------- GET /auth/admin/coach-applications ----------
 @router.get("/admin/coach-applications")
 def list_coach_applications(

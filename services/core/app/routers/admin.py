@@ -498,6 +498,197 @@ async def reject_coach(
     return MessageResponse(message="Заявка на тренера отклонена")
 
 
+@router.get("/users-full")
+async def admin_users_full(
+    request: Request,
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Return a single row per registered user, enriched with everything
+    admins need to see at a glance.
+
+    Columns joined:
+    * auth (login, email, role, coach_application_status, Steam provider)
+    * core (PlayerProfile.id, desired_rank_tier, dota_account_id)
+    * core (CoachProfile.id, is_verified, hourly_rate, mmr_estimate)
+    * ml   (personaname, rank_tier, lifetime_games from player_accounts)
+
+    One row per ``auth_user`` even if they never opened a protected core page.
+    """
+    token = request.headers.get("Authorization", "")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{settings.AUTH_SERVICE_URL}/auth/admin/users-lite",
+                headers={"Authorization": token},
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Auth недоступен: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    auth_users = resp.json().get("items", [])
+
+    # Index core-side profiles by auth_user_id for a single pass.
+    core_user_map = {cu.auth_user_id: cu for cu in db.query(CoreUser).all()}
+    player_profiles = {
+        pp.core_user_id: pp for pp in db.query(PlayerProfile).all()
+    }
+    coach_profiles = {
+        cp.core_user_id: cp for cp in db.query(CoachProfile).all()
+    }
+
+    # Pull ML personaname/rank/lifetime by account_id. We only need a
+    # lightweight projection, so go through the ORM rather than a JOIN.
+    from app.models import TrainingSession as _TS, TrainingRequest as _TR
+    from sqlalchemy import text as _sql_text
+    dota_account_ids = [
+        int(pp.dota_account_id) for pp in player_profiles.values()
+        if pp.dota_account_id and str(pp.dota_account_id).isdigit()
+    ]
+    ml_map: dict[int, dict] = {}
+    if dota_account_ids:
+        rows = db.execute(
+            _sql_text(
+                "SELECT account_id, personaname, rank_tier, "
+                "       COALESCE(lifetime_games, COALESCE(win,0) + COALESCE(lose,0)) AS lifetime_games, "
+                "       parsed_games_n "
+                "FROM player_accounts WHERE account_id = ANY(:ids)"
+            ),
+            {"ids": dota_account_ids},
+        )
+        for row in rows.mappings():
+            ml_map[int(row["account_id"])] = dict(row)
+
+    def rank_name(rt):
+        if not rt:
+            return None
+        medals = {1: "Herald", 2: "Guardian", 3: "Crusader", 4: "Archon",
+                  5: "Legend", 6: "Ancient", 7: "Divine", 8: "Immortal"}
+        medal = int(rt) // 10
+        stars = int(rt) % 10
+        base = medals.get(medal, "?")
+        return f"{base} [{stars}]" if stars else base
+
+    # Session counts per coach/player profile for quick stats.
+    session_by_coach = {
+        r[0]: r[1] for r in db.execute(_sql_text(
+            "SELECT coach_profile_id, COUNT(*) FROM training_sessions GROUP BY coach_profile_id"
+        ))
+    }
+    session_by_player = {}
+    for r in db.execute(_sql_text(
+        "SELECT tr.player_profile_id, COUNT(*) "
+        "FROM training_sessions ts JOIN training_requests tr ON tr.id = ts.training_request_id "
+        "GROUP BY tr.player_profile_id"
+    )):
+        session_by_player[r[0]] = r[1]
+
+    items = []
+    for u in auth_users:
+        core_user = core_user_map.get(u["id"])
+        pp = player_profiles.get(core_user.id) if core_user else None
+        cp = coach_profiles.get(core_user.id) if core_user else None
+        ml_row = None
+        if pp and pp.dota_account_id and str(pp.dota_account_id).isdigit():
+            ml_row = ml_map.get(int(pp.dota_account_id))
+
+        items.append({
+            "auth_user_id": u["id"],
+            "login": u["login"],
+            "email": u["email"],
+            "role": u["role"],
+            "is_active": u["is_active"],
+            "is_verified": u["is_verified"],
+            "coach_application_status": u["coach_application_status"],
+            "coach_application_requested_at": u["coach_application_requested_at"],
+            "created_at": u["created_at"],
+            # Steam / linking
+            "steam_id": u.get("steam_id"),
+            "steam_id_in_profile": pp.steam_id if pp else None,
+            "steam_linked": bool(u.get("steam_id")),
+            "dota_account_id": pp.dota_account_id if pp else None,
+            # Pulled from ML player_accounts.
+            "dota_personaname": (ml_row or {}).get("personaname"),
+            "dota_rank_tier": (ml_row or {}).get("rank_tier"),
+            "dota_rank_name": rank_name((ml_row or {}).get("rank_tier")),
+            "lifetime_games": (ml_row or {}).get("lifetime_games"),
+            "parsed_games_n": (ml_row or {}).get("parsed_games_n"),
+            # Core profile presence.
+            "core_user_id": core_user.id if core_user else None,
+            "player_profile_id": pp.id if pp else None,
+            "player_desired_rank": pp.desired_rank_tier if pp else None,
+            "player_actual_rank": pp.actual_rank_tier if pp else None,
+            "coach_profile_id": cp.id if cp else None,
+            "coach_is_verified": bool(cp.is_verified) if cp else None,
+            "coach_hourly_rate": cp.hourly_rate if cp else None,
+            "coach_mmr_estimate": cp.mmr_estimate if cp else None,
+            # Activity.
+            "sessions_as_player": session_by_player.get(pp.id, 0) if pp else 0,
+            "sessions_as_coach": session_by_coach.get(cp.id, 0) if cp else 0,
+        })
+
+    log_action(
+        db, current_user.user_id, current_user.role, "VIEW_ADMIN_USERS_FULL",
+        metadata={"count": len(items)},
+        ip_address=request.client.host if request.client else None,
+    )
+    return {"items": items}
+
+
+@router.post("/users/{auth_user_id}/role", response_model=MessageResponse)
+async def admin_change_role(
+    auth_user_id: int,
+    body: dict,
+    request: Request,
+    current_user: CurrentUser = Depends(require_role("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Change a user's role via auth, then keep core profiles consistent.
+
+    * Promoting to ``COACH`` → auto-create a ``CoachProfile`` with
+      ``is_verified=True`` so they appear in the catalog.
+    * Demoting from ``COACH`` → mark the coach profile as unverified so
+      they stop showing up, but keep the row for historical stats.
+    """
+    new_role = str(body.get("role", "")).upper()
+    if new_role not in ("PLAYER", "COACH", "ADMIN"):
+        raise HTTPException(status_code=400, detail="role must be PLAYER, COACH or ADMIN")
+
+    token = request.headers.get("Authorization", "")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.AUTH_SERVICE_URL}/auth/admin/users/{auth_user_id}/role",
+                json={"role": new_role},
+                headers={"Authorization": token},
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Auth недоступен: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+    core_user = db.query(CoreUser).filter(CoreUser.auth_user_id == auth_user_id).first()
+    if core_user:
+        coach = db.query(CoachProfile).filter(CoachProfile.core_user_id == core_user.id).first()
+        if new_role == "COACH":
+            if not coach:
+                coach = CoachProfile(core_user_id=core_user.id, is_verified=True)
+                db.add(coach)
+            else:
+                coach.is_verified = True
+            db.commit()
+        elif new_role in ("PLAYER", "ADMIN") and coach and coach.is_verified:
+            coach.is_verified = False
+            db.commit()
+
+    log_action(
+        db, current_user.user_id, current_user.role, "CHANGE_ROLE",
+        "AUTH_USER", auth_user_id, {"new_role": new_role},
+        ip_address=request.client.host if request.client else None,
+    )
+    return MessageResponse(message=f"Роль пользователя #{auth_user_id} → {new_role}")
+
+
 @router.post("/backfill/players", response_model=MessageResponse)
 async def backfill_players(
     request: Request,
