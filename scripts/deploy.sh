@@ -101,12 +101,25 @@ docker compose ps
 # ---------- 5. Smoke tests ----------
 log "Health checks..."
 
-# External (via nginx): /health should NOT be exposed on ml from the internet.
-# Internal checks run inside the docker network.
-docker compose exec -T auth  curl -fsS http://localhost:8001/health >/dev/null && log "auth OK"  || fail "auth /health failed"
-docker compose exec -T core  curl -fsS http://localhost:8002/health >/dev/null && log "core OK"  || fail "core /health failed"
-docker compose exec -T ml    curl -fsS http://localhost:8003/health >/dev/null && log "ml OK"    || fail "ml /health failed"
-docker compose exec -T llm   curl -fsS http://localhost:8004/health >/dev/null && log "llm OK"   || fail "llm /health failed"
+# The python:slim base images used by auth/core/ml/llm don't ship curl, so we
+# reach for the stdlib. The ``core`` container reaches ``ml`` over the private
+# docker network by service name.
+check_http() {
+  local label="$1" url="$2" container="$3"
+  docker compose exec -T "$container" python -c "
+import sys, urllib.request
+try:
+    r = urllib.request.urlopen('$url', timeout=5)
+    sys.exit(0 if r.status == 200 else 1)
+except Exception as exc:
+    print(exc, file=sys.stderr); sys.exit(1)
+" >/dev/null 2>&1 && log "$label OK" || fail "$label /health failed"
+}
+
+check_http auth http://localhost:8001/health auth
+check_http core http://localhost:8002/health core
+check_http ml   http://ml:8003/health        core   # via internal network
+check_http llm  http://localhost:8004/health llm
 
 # Confirm ml is no longer exposed externally.
 if nc -z -w2 "${SERVER_PUBLIC_IP:-127.0.0.1}" 8003 2>/dev/null; then
