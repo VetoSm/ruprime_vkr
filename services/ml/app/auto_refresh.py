@@ -13,6 +13,7 @@ Tunables:
 - ``AUTO_REFRESH_STALE_HOURS`` — how stale a row must be before we queue (24)
 - ``AUTO_REFRESH_INTERVAL_SEC`` — sleep between full passes (24 * 3600)
 - ``AUTO_REFRESH_ENQUEUE_DELAY_SEC`` — sleep between two enqueues (15)
+- ``AUTO_REFRESH_FORCE_ON_START`` — enqueue all accounts once after deploy (true)
 """
 from __future__ import annotations
 
@@ -39,9 +40,10 @@ def _env_flag(name: str, default: bool) -> bool:
 STALE_HOURS = max(1, int(os.getenv("AUTO_REFRESH_STALE_HOURS", "24")))
 INTERVAL_SEC = max(3600, int(os.getenv("AUTO_REFRESH_INTERVAL_SEC", str(24 * 3600))))
 ENQUEUE_DELAY_SEC = max(5, int(os.getenv("AUTO_REFRESH_ENQUEUE_DELAY_SEC", "15")))
+FORCE_ON_START = _env_flag("AUTO_REFRESH_FORCE_ON_START", True)
 
 
-def _run_once() -> int:
+def _run_once(force: bool = False) -> int:
     """Enqueue deep-sync for every account that's older than STALE_HOURS.
 
     Returns the number of accounts scheduled this pass.
@@ -56,7 +58,7 @@ def _run_once() -> int:
     scheduled = 0
     for acc in accounts:
         fetched = acc.fetched_at
-        if fetched is not None:
+        if fetched is not None and not force:
             if fetched.tzinfo is None:
                 fetched = fetched.replace(tzinfo=timezone.utc)
             if fetched.timestamp() > cutoff:
@@ -76,12 +78,15 @@ def _run_once() -> int:
 
 def _loop():
     logger.info(
-        "auto_refresh loop started: stale_hours=%s, interval_sec=%s, enqueue_delay=%s",
-        STALE_HOURS, INTERVAL_SEC, ENQUEUE_DELAY_SEC,
+        "auto_refresh loop started: stale_hours=%s, interval_sec=%s, enqueue_delay=%s, force_on_start=%s",
+        STALE_HOURS, INTERVAL_SEC, ENQUEUE_DELAY_SEC, FORCE_ON_START,
     )
+    first_pass = True
     while True:
         try:
-            n = _run_once()
+            force = first_pass and FORCE_ON_START
+            first_pass = False
+            n = _run_once(force=force)
             logger.info("auto_refresh: scheduled deep-sync for %s accounts", n)
         except Exception as exc:
             logger.warning("auto_refresh pass crashed: %s", exc)

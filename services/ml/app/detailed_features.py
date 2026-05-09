@@ -11,6 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.database import engine
 from app.models import PlayerAccount, MlKaggleBaseline
+from app.feature_engine import (
+    apply_stats_filters,
+    normalize_stats_filters,
+    _baseline_scope_conditions,
+    _read_baselines_for_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +37,7 @@ def rank_tier_to_name(rt: int) -> str:
     return RANK_NAMES.get(medal, "UNKNOWN")
 
 
-def get_baseline_percentiles(mmr_band: str) -> dict[str, dict]:
+def get_baseline_percentiles(mmr_band: str, role: int | None = None, hero_id: int | None = None) -> dict[str, dict]:
     """Aggregate the per-(hero,role) percentile JSON stored in
     ``ml_kaggle_baselines`` into a single mmr_band-level distribution per
     metric.
@@ -42,11 +48,15 @@ def get_baseline_percentiles(mmr_band: str) -> dict[str, dict]:
     without the raw samples and is an order of magnitude better than "value
     over average" scoring: Immortal cap no longer leaks into Crusader.
     """
-    query = f"""
-    SELECT percentiles FROM ml_kaggle_baselines
-    WHERE mmr_band = '{mmr_band}' AND percentiles IS NOT NULL
-    """
-    df = pd.read_sql(query, engine)
+    df = pd.DataFrame()
+    for _scope, where_clause in _baseline_scope_conditions(mmr_band, role, hero_id):
+        candidate = pd.read_sql(
+            f"SELECT percentiles FROM ml_kaggle_baselines WHERE {where_clause} AND percentiles IS NOT NULL",
+            engine,
+        )
+        if not candidate.empty:
+            df = candidate
+            break
     if df.empty:
         return {}
 
@@ -72,26 +82,43 @@ def get_baseline_percentiles(mmr_band: str) -> dict[str, dict]:
     return result
 
 
-def get_baseline_averages(mmr_band: str, db: Session) -> dict:
+def get_baseline_averages(mmr_band: str, db: Session, role: int | None = None, hero_id: int | None = None) -> dict:
     """Get average baselines for an MMR band."""
-    query = f"""
-    SELECT
-        AVG(avg_gpm) as gpm, AVG(avg_xpm) as xpm,
-        AVG(avg_kills) as kills, AVG(avg_deaths) as deaths, AVG(avg_assists) as assists,
-        AVG(avg_kda) as kda, AVG(avg_last_hits) as last_hits, AVG(avg_denies) as denies,
-        AVG(avg_hero_damage) as hero_damage, AVG(avg_tower_damage) as tower_damage,
-        AVG(winrate) as winrate, SUM(match_count) as total_matches
-    FROM ml_kaggle_baselines
-    WHERE mmr_band = '{mmr_band}'
-    """
-    df = pd.read_sql(query, engine)
-    if df.empty or df.iloc[0]["gpm"] is None:
+    df, _scope = _read_baselines_for_scope(
+        mmr_band,
+        role=role,
+        hero_id=hero_id,
+        columns=(
+            "avg_gpm, avg_xpm, avg_kills, avg_deaths, avg_assists, avg_kda, "
+            "avg_last_hits, avg_denies, avg_hero_damage, avg_tower_damage, winrate, match_count"
+        ),
+    )
+    if df.empty:
         return {}
-    row = df.iloc[0]
-    return {k: float(row[k]) if pd.notna(row[k]) else 0 for k in row.index}
+    mapping = {
+        "gpm": "avg_gpm",
+        "xpm": "avg_xpm",
+        "kills": "avg_kills",
+        "deaths": "avg_deaths",
+        "assists": "avg_assists",
+        "kda": "avg_kda",
+        "last_hits": "avg_last_hits",
+        "denies": "avg_denies",
+        "hero_damage": "avg_hero_damage",
+        "tower_damage": "avg_tower_damage",
+        "winrate": "winrate",
+    }
+    result = {out: float(df[col].dropna().mean()) if col in df and not df[col].dropna().empty else 0 for out, col in mapping.items()}
+    result["total_matches"] = float(df["match_count"].fillna(0).sum()) if "match_count" in df else 0
+    return result if result.get("gpm") else {}
 
 
-def compute_detailed_features(account_id: int, desired_rank: str = None, db: Session = None) -> dict:
+def compute_detailed_features(
+    account_id: int,
+    desired_rank: str = None,
+    db: Session = None,
+    filters: dict | None = None,
+) -> dict:
     """
     Compute 6 feature categories with sub-components.
     Each component: player value, baseline value, score (0-10), target, gap.
@@ -101,18 +128,32 @@ def compute_detailed_features(account_id: int, desired_rank: str = None, db: Ses
 
     # Get player matches for recent stats
     match_query = f"""
-    SELECT hero_id, kills, deaths, assists, gold_per_min, xp_per_min,
+    SELECT match_id, hero_id, kills, deaths, assists, gold_per_min, xp_per_min,
            last_hits, denies, hero_damage, tower_damage, hero_healing,
            duration, player_slot, radiant_win, lane_role, average_rank,
-           is_detailed
+           is_detailed, start_time, game_mode, obs_placed, sen_placed
     FROM player_matches
     WHERE account_id = {account_id}
     ORDER BY start_time DESC NULLS LAST
     """
     df = pd.read_sql(match_query, engine)
+    normalized_filters = normalize_stats_filters(**(filters or {}))
+    df, filters_applied = apply_stats_filters(df, normalized_filters)
 
     if df.empty and not acc:
         return {"categories": [], "overall_score": 0, "error": "Нет данных"}
+    if df.empty:
+        lifetime_games = getattr(acc, "lifetime_games", None) or (acc.total_games if acc else None) or 0
+        parsed_games_n = getattr(acc, "parsed_games_n", None) or 0
+        return {
+            "categories": [],
+            "overall_score": 0,
+            "error": "По выбранным фильтрам нет матчей",
+            "total_matches": 0,
+            "total_games_lifetime": int(lifetime_games),
+            "parsed_games_n": int(parsed_games_n),
+            "filters_applied": filters_applied,
+        }
 
     # Determine current MMR band
     current_rank = rank_tier_to_name(acc.rank_tier) if acc and acc.rank_tier else "ARCHON"
@@ -123,16 +164,34 @@ def compute_detailed_features(account_id: int, desired_rank: str = None, db: Ses
     target_band = RANK_TO_MMR_BAND.get(target_rank, "6000+")
 
     # Get baselines
-    current_baseline = get_baseline_averages(current_band, db)
-    target_baseline = get_baseline_averages(target_band, db)
-    current_pcts = get_baseline_percentiles(current_band)
+    current_baseline = get_baseline_averages(
+        current_band, db, role=normalized_filters.get("role"), hero_id=normalized_filters.get("hero_id")
+    )
+    target_baseline = get_baseline_averages(
+        target_band, db, role=normalized_filters.get("role"), hero_id=normalized_filters.get("hero_id")
+    )
+    current_pcts = get_baseline_percentiles(
+        current_band, role=normalized_filters.get("role"), hero_id=normalized_filters.get("hero_id")
+    )
 
     def _pct(metric: str) -> dict | None:
         """Shortcut: percentile dict for ``metric`` in the current band."""
         return current_pcts.get(metric)
 
     # Compute player averages from matches + account totals
-    player = _compute_player_averages(df, acc)
+    player = _compute_player_averages(df, acc, prefer_match_stats=True)
+    vision_rows = 0
+    if "obs_placed" in df.columns and "sen_placed" in df.columns:
+        vision_rows = int((df["obs_placed"].notna() | df["sen_placed"].notna()).sum())
+    vision_missing = int(max(len(df) - vision_rows, 0))
+    vision_sync_job = None
+    if vision_missing > 0 and db:
+        try:
+            from app.player_sync_manager import schedule_deep_sync
+
+            vision_sync_job = schedule_deep_sync(account_id, steam_id=getattr(acc, "steam_id", None), force=False)
+        except Exception:
+            vision_sync_job = None
 
     # Build 8 categories (no duplicates, honest about missing data)
     categories = []
@@ -337,10 +396,16 @@ def compute_detailed_features(account_id: int, desired_rank: str = None, db: Ses
         # Number of parsed matches OpenDota has detailed data for; intended for
         # the tech panel, not for user-facing labels.
         "parsed_games_n": int(parsed_games_n),
+        "filters_applied": filters_applied,
+        "vision_data": {
+            "parsed_matches_in_scope": vision_rows,
+            "missing_matches_in_scope": vision_missing,
+            "sync_status": (vision_sync_job or {}).get("status"),
+        },
     }
 
 
-def _compute_player_averages(df: pd.DataFrame, acc: PlayerAccount = None) -> dict:
+def _compute_player_averages(df: pd.DataFrame, acc: PlayerAccount = None, prefer_match_stats: bool = False) -> dict:
     """Compute player averages from matches + account totals."""
     result = {}
 
@@ -384,20 +449,24 @@ def _compute_player_averages(df: pd.DataFrame, acc: PlayerAccount = None) -> dic
         result["avg_level"] = getattr(acc, "avg_level", 0) or 0
         result["hero_count"] = 0  # Will be computed from matches
 
-    # From recent matches (override if available and more detailed)
+    # From filtered matches. For user-selected filters this is the source of
+    # truth; lifetime account totals would mix roles, modes and old patches.
     if not df.empty:
         detailed = df[df["is_detailed"] == True] if "is_detailed" in df.columns else pd.DataFrame()
+        source = detailed if not detailed.empty else df
 
-        if not detailed.empty:
-            result["gpm"] = result.get("gpm") or round(detailed["gold_per_min"].fillna(0).mean(), 1)
-            result["xpm"] = result.get("xpm") or round(detailed["xp_per_min"].fillna(0).mean(), 1)
-            result["hero_damage"] = result.get("hero_damage") or round(detailed["hero_damage"].fillna(0).mean(), 0)
-            result["tower_damage"] = result.get("tower_damage") or round(detailed["tower_damage"].fillna(0).mean(), 0)
-            result["hero_healing"] = result.get("hero_healing") or round(detailed["hero_healing"].fillna(0).mean(), 0)
-            result["last_hits"] = result.get("last_hits") or round(detailed["last_hits"].fillna(0).mean(), 1)
+        if prefer_match_stats or not detailed.empty:
+            result["gpm"] = round(source["gold_per_min"].fillna(0).mean(), 1)
+            result["xpm"] = round(source["xp_per_min"].fillna(0).mean(), 1)
+            result["hero_damage"] = round(source["hero_damage"].fillna(0).mean(), 0)
+            result["tower_damage"] = round(source["tower_damage"].fillna(0).mean(), 0)
+            result["hero_healing"] = round(source["hero_healing"].fillna(0).mean(), 0)
+            result["last_hits"] = round(source["last_hits"].fillna(0).mean(), 1)
+            result["denies"] = round(source["denies"].fillna(0).mean(), 1)
+            result["avg_duration_min"] = round(source["duration"].fillna(0).mean() / 60, 1)
 
-        # KDA from all matches
-        if not result.get("kills"):
+        # KDA from filtered matches
+        if prefer_match_stats or not result.get("kills"):
             result["kills"] = round(df["kills"].fillna(0).mean(), 1)
             result["deaths"] = round(df["deaths"].fillna(0).mean(), 1)
             result["assists"] = round(df["assists"].fillna(0).mean(), 1)
@@ -408,8 +477,20 @@ def _compute_player_averages(df: pd.DataFrame, acc: PlayerAccount = None) -> dic
                        else not r["radiant_win"]) if r["radiant_win"] is not None else False,
             axis=1,
         ).astype(int)
-        if not result.get("winrate"):
+        if prefer_match_stats or not result.get("winrate"):
             result["winrate"] = df["win"].mean()
+
+        if prefer_match_stats:
+            result["obs_per_game"] = 0
+            result["sen_per_game"] = 0
+
+        if "obs_placed" in df.columns and "sen_placed" in df.columns:
+            obs = df["obs_placed"].dropna()
+            sen = df["sen_placed"].dropna()
+            if len(obs) > 0:
+                result["obs_per_game"] = round(obs.mean(), 2)
+            if len(sen) > 0:
+                result["sen_per_game"] = round(sen.mean(), 2)
 
     # KDA
     deaths = max(result.get("deaths", 1), 1)

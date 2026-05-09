@@ -206,20 +206,22 @@ async def link_steam(
     db.commit()
     db.refresh(profile)
 
+    # Any sync changes the match window and parsed fields; invalidate the old
+    # cached analysis so dashboards/AI recompute with the latest feature logic.
+    profile.ml_analysis_id = None
+    db.commit()
+
     # Auto-trigger analysis if matches were loaded
-    if data.get("matches_count", 0) > 0:
+    if data.get("matches_loaded", data.get("matches_count", 0)) > 0:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     f"{settings.ML_SERVICE_URL}/ml/analyze-player/{data['account_id']}",
-                    params={"player_profile_id": profile.id},
+                    params={"player_profile_id": profile.id, "mode": "ranked", "period": "50"},
                     headers=ml_headers(),
                 )
             if resp.status_code == 200:
-                analysis = resp.json()
-                if analysis.get("ml_analysis_id"):
-                    profile.ml_analysis_id = analysis["ml_analysis_id"]
-                    db.commit()
+                resp.json()
         except Exception:
             pass
 
@@ -290,19 +292,19 @@ async def sync_steam(
     db.commit()
     db.refresh(profile)
 
-    if data.get("matches_count", 0) > 0:
+    profile.ml_analysis_id = None
+    db.commit()
+
+    if data.get("matches_loaded", data.get("matches_count", 0)) > 0:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     f"{settings.ML_SERVICE_URL}/ml/analyze-player/{data['account_id']}",
-                    params={"player_profile_id": profile.id},
+                    params={"player_profile_id": profile.id, "mode": "ranked", "period": "50"},
                     headers=ml_headers(),
                 )
             if resp.status_code == 200:
-                analysis = resp.json()
-                if analysis.get("ml_analysis_id"):
-                    profile.ml_analysis_id = analysis["ml_analysis_id"]
-                    db.commit()
+                resp.json()
         except Exception:
             pass
 
@@ -342,6 +344,8 @@ async def refresh_steam(
             )
         if resp.status_code == 200:
             data = resp.json()
+            profile.ml_analysis_id = None
+            db.commit()
             log_action(db, current_user.user_id, current_user.role, "REFRESH_STEAM",
                        "PLAYER_PROFILE", profile.id)
             return data

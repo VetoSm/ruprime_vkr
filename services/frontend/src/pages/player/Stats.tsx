@@ -7,6 +7,9 @@ import { RoleBadge, InfoTooltip } from '../../ui/GameComponents';
 
 const CHART_STYLE = { background: '#151c2e', border: '1px solid #1e2a45', color: '#e8edf5' };
 const COLORS = ['#00d4aa', '#7c5cfc', '#ffa502', '#ff4757', '#1e90ff', '#ff6b81'];
+const DEFAULT_FILTERS = { mode: 'ranked', period: '50', role: '', hero_id: '' };
+const MODE_LABELS: Record<string, string> = { ranked: 'Рейтинговые', turbo: 'Turbo', all: 'Все режимы' };
+const PERIOD_LABELS: Record<string, string> = { '20': '20 игр', '50': '50 игр', month: '30 дней', all: 'Вся история' };
 
 const FEATURE_TIPS: Record<string, string> = {
   farming: 'Эффективность фарма: золото в минуту, крипов в минуту.',
@@ -25,18 +28,33 @@ export default function PlayerStats() {
   const [tab, setTab] = useState('trends');
   const [pid, setPid] = useState<number | null>(null);
   const [retried, setRetried] = useState(false);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [heroOptions, setHeroOptions] = useState<any[]>([]);
+
+  const apiParams = {
+    mode: filters.mode,
+    period: filters.period,
+    ...(filters.role ? { role: Number(filters.role) } : {}),
+    ...(filters.hero_id ? { hero_id: Number(filters.hero_id) } : {}),
+  };
 
   useEffect(() => {
-    loadHeroes();
+    loadHeroes().then((heroes) => {
+      setHeroOptions(Object.values(heroes).sort((a: any, b: any) => a.localized_name.localeCompare(b.localized_name)));
+    });
     coreApi.get('/me/overview').then((r) => {
       const profileId = r.data?.profile?.id;
       if (profileId) {
         setPid(profileId);
-        coreApi.get(`/player/${profileId}/stats/overview`).then((r2) => setStats(r2.data)).catch(() => {});
-        coreApi.get(`/player/${profileId}/detailed-features`).then((r2) => setFeatures(r2.data)).catch(() => {});
       }
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!pid) return;
+    coreApi.get(`/player/${pid}/stats/overview`, { params: apiParams }).then((r2) => setStats(r2.data)).catch(() => {});
+    coreApi.get(`/player/${pid}/detailed-features`, { params: apiParams }).then((r2) => setFeatures(r2.data)).catch(() => {});
+  }, [pid, filters.mode, filters.period, filters.role, filters.hero_id]);
 
   useEffect(() => {
     if (retried || !pid) return;
@@ -46,7 +64,7 @@ export default function PlayerStats() {
     if (hasNoRoles && !hasNoStats) {
       setRetried(true);
       coreApi.post('/player/sync-steam').then(() => {
-        coreApi.get(`/player/${pid}/stats/overview`).then((r2) => setStats(r2.data)).catch(() => {});
+        coreApi.get(`/player/${pid}/stats/overview`, { params: apiParams }).then((r2) => setStats(r2.data)).catch(() => {});
       }).catch(() => {});
     }
   }, [stats, pid, retried]);
@@ -57,6 +75,9 @@ export default function PlayerStats() {
   const comparisons = stats?.comparisons?.vs_same_tier || {};
   const roles = stats?.roles?.actual_roles_distribution || {};
   const categories = features?.categories || [];
+  const applied = summary.filters_applied || features?.filters_applied || {};
+  const scopeLabel = applied.label || `${PERIOD_LABELS[filters.period]}, ${MODE_LABELS[filters.mode]}`;
+  const matchesCount = applied.matches_count ?? summary.games_analyzed ?? 0;
 
   const rolesData = Object.entries(roles)
     .map(([k, v]: [string, any]) => ({ name: roleName(k.replace('POS', '')), key: k, value: Math.round(v * 100) }))
@@ -67,16 +88,68 @@ export default function PlayerStats() {
     <div>
       <div className="page-header">
         <h1>Статистика</h1>
-        <p>Обзор вашей игры и динамика показателей</p>
+        <p>Обзор вашей игры и динамика показателей: {scopeLabel}</p>
+      </div>
+
+      <div className="card mb-20">
+        <div className="flex-between" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Фильтры статистики</h3>
+            <p className="text-muted" style={{ margin: '4px 0 0' }}>
+              Найдено матчей: {matchesCount}. Сравнение строится с игроками того же ранга
+              {filters.role ? ` и позиции ${filters.role}` : ''}{filters.hero_id ? ` на герое ${heroName(Number(filters.hero_id))}` : ''}.
+            </p>
+          </div>
+          <button className="btn btn-outline btn-sm" onClick={() => setFilters(DEFAULT_FILTERS)}>Сбросить</button>
+        </div>
+        <div className="grid-4 mt-20">
+          <label>
+            <div className="form-label">Режим</div>
+            <select className="input" value={filters.mode} onChange={(e) => setFilters((f) => ({ ...f, mode: e.target.value }))}>
+              <option value="ranked">Рейтинговые</option>
+              <option value="turbo">Turbo</option>
+              <option value="all">Все режимы</option>
+            </select>
+          </label>
+          <label>
+            <div className="form-label">Период</div>
+            <select className="input" value={filters.period} onChange={(e) => setFilters((f) => ({ ...f, period: e.target.value }))}>
+              <option value="20">Последние 20</option>
+              <option value="50">Последние 50</option>
+              <option value="month">Последние 30 дней</option>
+              <option value="all">Вся загруженная история</option>
+            </select>
+          </label>
+          <label>
+            <div className="form-label">Позиция</div>
+            <select className="input" value={filters.role} onChange={(e) => setFilters((f) => ({ ...f, role: e.target.value }))}>
+              <option value="">Все позиции</option>
+              <option value="1">Позиция 1</option>
+              <option value="2">Позиция 2</option>
+              <option value="3">Позиция 3</option>
+              <option value="4">Позиция 4</option>
+              <option value="5">Позиция 5</option>
+            </select>
+          </label>
+          <label>
+            <div className="form-label">Герой</div>
+            <select className="input" value={filters.hero_id} onChange={(e) => setFilters((f) => ({ ...f, hero_id: e.target.value }))}>
+              <option value="">Все герои</option>
+              {heroOptions.map((h: any) => (
+                <option key={h.hero_id} value={h.hero_id}>{h.localized_name || h.name}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       <div className="grid-4 mb-20">
         <div className="stat-card">
-          <div className="stat-card-label">Всего игр <InfoTooltip text="Количество сыгранных матчей по данным Steam/OpenDota." /></div>
-          <div className="stat-card-value">{summary.total_games || features?.total_games_lifetime || 0}</div>
+          <div className="stat-card-label">Матчей в выборке <InfoTooltip text="Количество матчей после выбранных фильтров." /></div>
+          <div className="stat-card-value">{matchesCount}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">Винрейт <InfoTooltip text="Доля побед за всё время." /></div>
+          <div className="stat-card-label">Винрейт <InfoTooltip text={`Доля побед в выборке: ${scopeLabel}.`} /></div>
           <div className="stat-card-value">{summary.winrate !== null && summary.winrate !== undefined ? `${(summary.winrate * 100).toFixed(1)}%` : '—'}</div>
         </div>
         <div className="stat-card">

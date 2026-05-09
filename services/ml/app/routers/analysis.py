@@ -329,6 +329,8 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
             hero_damage=m.get("hero_damage"),
             tower_damage=m.get("tower_damage"),
             hero_healing=m.get("hero_healing"),
+            obs_placed=m.get("obs_placed"),
+            sen_placed=m.get("sen_placed"),
             duration=m.get("duration"),
             player_slot=m.get("player_slot"),
             radiant_win=m.get("radiant_win"),
@@ -514,10 +516,23 @@ def get_player_analysis(analysis_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/analyze-player/{account_id}", response_model=PlayerAnalysisResponse)
-def analyze_player_endpoint(account_id: int, player_profile_id: int = None, db: Session = Depends(get_db)):
+def analyze_player_endpoint(
+    account_id: int,
+    player_profile_id: int = None,
+    mode: str = "ranked",
+    period: str = "50",
+    role: int | None = None,
+    hero_id: int | None = None,
+    db: Session = Depends(get_db),
+):
     """Run analysis for a specific player from player_matches data."""
     from app.feature_engine import analyze_player_from_account
-    result = analyze_player_from_account(account_id, player_profile_id, db)
+    result = analyze_player_from_account(
+        account_id,
+        player_profile_id,
+        db,
+        filters={"mode": mode, "period": period, "role": role, "hero_id": hero_id},
+    )
     return PlayerAnalysisResponse(
         ml_analysis_id=result["ml_analysis_id"],
         summary=result.get("summary"),
@@ -532,10 +547,23 @@ def analyze_player_endpoint(account_id: int, player_profile_id: int = None, db: 
 
 
 @router.get("/detailed-features/{account_id}")
-def detailed_features_endpoint(account_id: int, desired_rank: str = None, db: Session = Depends(get_db)):
+def detailed_features_endpoint(
+    account_id: int,
+    desired_rank: str = None,
+    mode: str = "ranked",
+    period: str = "50",
+    role: int | None = None,
+    hero_id: int | None = None,
+    db: Session = Depends(get_db),
+):
     """Get detailed 6-category features with drill-down, score/target/gap."""
     from app.detailed_features import compute_detailed_features
-    result = compute_detailed_features(account_id, desired_rank, db)
+    result = compute_detailed_features(
+        account_id,
+        desired_rank,
+        db,
+        filters={"mode": mode, "period": period, "role": role, "hero_id": hero_id},
+    )
     return result
 
 

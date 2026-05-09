@@ -26,6 +26,7 @@ const FEATURE_TIPS: Record<string, string> = {
 
 const CHART_STYLE = { background: '#151c2e', border: '1px solid #1e2a45', color: '#e8edf5' };
 const STEAM_PENDING_KEY = 'steam_pending_link_id';
+const DEFAULT_STATS_PARAMS = { mode: 'ranked', period: '50' };
 
 export default function PlayerDashboard() {
   const { user } = useAuth();
@@ -73,8 +74,8 @@ export default function PlayerDashboard() {
   useEffect(() => {
     if (overview?.profile?.id) {
       const pid = overview.profile.id;
-      coreApi.get(`/player/${pid}/stats/overview`).then((r) => setPlayerStats(r.data)).catch(() => {});
-      coreApi.get(`/player/${pid}/detailed-features`).then((r) => setDetailedFeatures(r.data)).catch(() => {});
+      coreApi.get(`/player/${pid}/stats/overview`, { params: DEFAULT_STATS_PARAMS }).then((r) => setPlayerStats(r.data)).catch(() => {});
+      coreApi.get(`/player/${pid}/detailed-features`, { params: DEFAULT_STATS_PARAMS }).then((r) => setDetailedFeatures(r.data)).catch(() => {});
     }
   }, [overview]);
 
@@ -101,8 +102,8 @@ export default function PlayerDashboard() {
         localStorage.removeItem(STEAM_PENDING_KEY);
         coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
         coreApi.get('/player/profile').then((r) => setPlayerProfile(r.data)).catch(() => {});
-        coreApi.get(`/player/${pid}/stats/overview`).then((r) => setPlayerStats(r.data)).catch(() => {});
-        coreApi.get(`/player/${pid}/detailed-features`).then((r) => setDetailedFeatures(r.data)).catch(() => {});
+        coreApi.get(`/player/${pid}/stats/overview`, { params: DEFAULT_STATS_PARAMS }).then((r) => setPlayerStats(r.data)).catch(() => {});
+        coreApi.get(`/player/${pid}/detailed-features`, { params: DEFAULT_STATS_PARAMS }).then((r) => setDetailedFeatures(r.data)).catch(() => {});
       } catch {
         /* останется ручная кнопка в настройках, но без потери pending steam id */
       }
@@ -117,8 +118,8 @@ export default function PlayerDashboard() {
       setRetried(true);
       coreApi.post('/player/sync-steam').then(() => {
         const pid = overview.profile.id;
-        coreApi.get(`/player/${pid}/stats/overview`).then((r) => setPlayerStats(r.data)).catch(() => {});
-        coreApi.get(`/player/${pid}/detailed-features`).then((r) => setDetailedFeatures(r.data)).catch(() => {});
+        coreApi.get(`/player/${pid}/stats/overview`, { params: DEFAULT_STATS_PARAMS }).then((r) => setPlayerStats(r.data)).catch(() => {});
+        coreApi.get(`/player/${pid}/detailed-features`, { params: DEFAULT_STATS_PARAMS }).then((r) => setDetailedFeatures(r.data)).catch(() => {});
         coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
       }).catch(() => {});
     }
@@ -138,7 +139,10 @@ export default function PlayerDashboard() {
     steamData?.lifetime_games
     ?? steamData?.total_games
     ?? ((steamData?.win || 0) + (steamData?.lose || 0));
-  const winrate = summary.winrate || (totalGames > 0 ? (steamData?.win || 0) / totalGames : 0);
+  const lifetimeWinrate = totalGames > 0 ? (steamData?.win || 0) / totalGames : 0;
+  const winrate = summary.winrate ?? lifetimeWinrate;
+  const statsScopeLabel = summary.stats_scope_label || summary.filters_applied?.label || 'последние 50, рейтинговые матчи';
+  const scopeMatches = summary.filters_applied?.matches_count ?? summary.games_analyzed ?? 0;
   const hours = summary.estimated_hours || steamData?.estimated_hours || 0;
   const desiredRankStr = playerProfile?.desired_rank_tier || 'IMMORTAL';
   const desired_mmr = MMR_BY_RANK[desiredRankStr.toUpperCase()] || 5700;
@@ -251,7 +255,7 @@ export default function PlayerDashboard() {
             )}
             <div className="stat-pill" style={{ minWidth: 80, padding: '10px 14px' }}>
               <span className="stat-pill-label" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                Винрейт <InfoTooltip text="Доля побед среди всех доступных матчей." />
+                Винрейт <InfoTooltip text={`Доля побед в выборке: ${statsScopeLabel}.`} />
               </span>
               <span className="stat-pill-value">{winrate > 0 ? `${(winrate * 100).toFixed(0)}%` : '—'}</span>
             </div>
@@ -270,6 +274,15 @@ export default function PlayerDashboard() {
             </div>
           )}
 
+          {scopeMatches > 0 && (
+            <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              Статистика: {statsScopeLabel} ({scopeMatches} матчей)
+              {lifetimeWinrate > 0 && (
+                <div>Винрейт за всё время: {(lifetimeWinrate * 100).toFixed(1)}%</div>
+              )}
+            </div>
+          )}
+
           {estimated_mmr > 0 && (
             <div style={{ width: '100%', marginTop: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
@@ -285,10 +298,13 @@ export default function PlayerDashboard() {
             </div>
           )}
 
-          <Link to="/settings" className="btn btn-outline btn-sm" style={{ marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <Link to="/stats" className="btn btn-outline btn-sm">Фильтры статистики</Link>
+          <Link to="/settings" className="btn btn-outline btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
             Настройки
           </Link>
+          </div>
         </div>
 
         {/* Right: Skills Grid */}
@@ -300,7 +316,7 @@ export default function PlayerDashboard() {
             </h3>
             {detailedFeatures?.target_rank && (
               <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                {detailedFeatures.current_band} → {detailedFeatures.target_band}
+                {detailedFeatures.current_band} → {detailedFeatures.target_band} · {statsScopeLabel}
               </span>
             )}
           </div>
@@ -392,7 +408,7 @@ export default function PlayerDashboard() {
       {trends.gpm_over_time && trends.gpm_over_time.length > 0 && (
         <div className="card mb-20">
           <div className="section-header">
-            <h3>GPM тренд <InfoTooltip text="Как менялось ваше золото в минуту по последним матчам." /></h3>
+            <h3>GPM тренд <InfoTooltip text={`Как менялось ваше золото в минуту в выборке: ${statsScopeLabel}.`} /></h3>
             <div className="section-line" />
           </div>
           <ResponsiveContainer width="100%" height={240}>
@@ -411,7 +427,7 @@ export default function PlayerDashboard() {
       {/* === Quick Stats === */}
       <div className="grid-4">
         <div className="stat-card">
-          <div className="stat-card-label">Винрейт <InfoTooltip text="Доля побед среди всех ваших игр." /></div>
+          <div className="stat-card-label">Винрейт <InfoTooltip text={`Доля побед в выборке: ${statsScopeLabel}.`} /></div>
           <div className="stat-card-value">{winrate > 0 ? `${(winrate * 100).toFixed(1)}%` : '—'}</div>
         </div>
         <div className="stat-card">

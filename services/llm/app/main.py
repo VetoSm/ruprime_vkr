@@ -1,12 +1,14 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import engine, Base, LlmRequest, LlmResponse  # noqa: F401
+from app.internal_auth import require_internal_token
 from app.routers.chat import router as chat_router
+from app.routers.chat import llm_mode
 
-app = FastAPI(title="Dota2 Coach - LLM Service (Stub)", version="1.0.0")
+app = FastAPI(title="Dota2 Coach - LLM Service", version="1.0.0")
 
 cors_origins = [
     o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
@@ -21,7 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(chat_router)
+app.include_router(chat_router, dependencies=[Depends(require_internal_token)])
 
 
 @app.middleware("http")
@@ -41,4 +43,4 @@ def startup():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "llm", "mode": "stub"}
+    return {"status": "ok", "service": "llm", "mode": llm_mode()}

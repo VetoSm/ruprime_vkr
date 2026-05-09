@@ -34,12 +34,30 @@ export default function PlayerAiChat() {
 
     try {
       const res = await coreApi.post('/ai/chat', { message: userMsg, context_mode: 'AUTO' });
+      const meta: string[] = [];
+      if (typeof res.data.requests_remaining_today === 'number') {
+        meta.push(`Осталось запросов сегодня: ${res.data.requests_remaining_today}/${res.data.requests_limit_daily}`);
+      }
+      if (res.data.llm_status && res.data.llm_status !== 'generated') {
+        const statusText: Record<string, string> = {
+          fallback: 'Модель не ответила, показан локальный fallback',
+          refused: 'Вопрос вне игровой темы',
+          unavailable: 'LLM-сервис недоступен',
+          rate_limited: 'Дневной лимит исчерпан',
+        };
+        meta.push(statusText[res.data.llm_status] || `Статус LLM: ${res.data.llm_status}`);
+      }
+      if (res.data.llm_error && res.data.llm_status !== 'generated') {
+        meta.push(`Причина: ${res.data.llm_error}`);
+      }
+      const metaText = meta.length ? `\n\n---\n${meta.join('\n')}` : '';
       setMessages((prev) => [...prev, {
         type: 'ai',
-        text: res.data.advice_full || res.data.advice_summary || 'Нет ответа',
+        text: `${res.data.advice_full || res.data.advice_summary || 'Нет ответа'}${metaText}`,
       }]);
-    } catch {
-      setMessages((prev) => [...prev, { type: 'ai', text: 'ИИ-коуч временно недоступен.' }]);
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      setMessages((prev) => [...prev, { type: 'ai', text: detail || 'ИИ-коуч временно недоступен.' }]);
     } finally {
       setLoading(false);
     }

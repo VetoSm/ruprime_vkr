@@ -2,6 +2,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session as DBSession
 
 from app.database import engine, Base
 from app.models import (  # noqa: F401
@@ -61,9 +62,17 @@ async def security_headers_middleware(request, call_next):
 def startup():
     Base.metadata.create_all(bind=engine)
 
+    invalidate_stats = os.getenv("INVALIDATE_ML_ANALYSES_ON_START", "true").lower()
+    if invalidate_stats in ("true", "1", "yes"):
+        with DBSession(engine) as db:
+            db.query(PlayerProfile).filter(PlayerProfile.ml_analysis_id.isnot(None)).update(
+                {PlayerProfile.ml_analysis_id: None},
+                synchronize_session=False,
+            )
+            db.commit()
+
     seed = os.getenv("SEED_TEST_DATA", "false").lower()
     if seed in ("true", "1", "yes"):
-        from sqlalchemy.orm import Session as DBSession
         from app.seed_test_data import seed_test_profiles
         with DBSession(engine) as db:
             seed_test_profiles(db)

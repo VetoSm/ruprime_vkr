@@ -235,6 +235,8 @@ class PlayerMatch(Base):
     game_mode = Column(Integer, nullable=True)
     average_rank = Column(Integer, nullable=True)
     hero_healing = Column(Float, nullable=True)
+    obs_placed = Column(Integer, nullable=True)
+    sen_placed = Column(Integer, nullable=True)
     is_detailed = Column(Boolean, default=False)  # True if from /recentMatches
 
 

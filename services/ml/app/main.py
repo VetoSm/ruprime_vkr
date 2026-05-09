@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.database import engine, Base
+from sqlalchemy import text
 from app.internal_auth import require_internal_token
 from app.models import (  # noqa: F401
     MlRawMatch, MlRawPlayer, MlRawTeam, MlRawPicksBans,
@@ -56,6 +57,9 @@ async def security_headers_middleware(request, call_next):
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE player_matches ADD COLUMN IF NOT EXISTS obs_placed INTEGER"))
+        conn.execute(text("ALTER TABLE player_matches ADD COLUMN IF NOT EXISTS sen_placed INTEGER"))
 
     # Mount images if available
     images_path = os.path.join(os.getenv("KAGGLE_DATA_PATH", "/data/archive-2"), "Images")

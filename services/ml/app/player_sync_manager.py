@@ -270,6 +270,8 @@ def _extract_players_from_match(match_data: dict) -> list[dict]:
             "hero_damage": p.get("hero_damage"),
             "tower_damage": p.get("tower_damage"),
             "hero_healing": p.get("hero_healing"),
+            "obs_placed": p.get("obs_placed"),
+            "sen_placed": p.get("sen_placed"),
             "duration": match_data.get("duration"),
             "player_slot": p.get("player_slot"),
             "radiant_win": match_data.get("radiant_win"),
@@ -306,6 +308,8 @@ def _upsert_player_match(db, row: dict) -> bool:
         existing.hero_damage = row.get("hero_damage")
         existing.tower_damage = row.get("tower_damage")
         existing.hero_healing = row.get("hero_healing")
+        existing.obs_placed = row.get("obs_placed")
+        existing.sen_placed = row.get("sen_placed")
         existing.duration = row.get("duration")
         existing.player_slot = row.get("player_slot")
         existing.radiant_win = row.get("radiant_win")
@@ -336,6 +340,8 @@ def _build_player_match(account_id: int, row: dict, is_detailed: bool) -> Player
         hero_damage=row.get("hero_damage"),
         tower_damage=row.get("tower_damage"),
         hero_healing=row.get("hero_healing"),
+        obs_placed=row.get("obs_placed"),
+        sen_placed=row.get("sen_placed"),
         duration=row.get("duration"),
         player_slot=row.get("player_slot"),
         radiant_win=row.get("radiant_win"),

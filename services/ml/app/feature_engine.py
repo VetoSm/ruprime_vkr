@@ -4,6 +4,7 @@ Feature Engineering: computes baselines, player features, comparisons with bench
 
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -364,17 +365,40 @@ def _estimate_mmr_from_stats(df: pd.DataFrame, mmr_band: str) -> int:
     return min(max(estimated, 1000), 9000)
 
 
-def _compute_comparisons(df: pd.DataFrame, mmr_band: str) -> dict:
+def _baseline_scope_conditions(mmr_band: str, role: int | None = None, hero_id: int | None = None) -> list[tuple[str, str]]:
+    """Return baseline WHERE clauses from most specific to broadest."""
+    safe_band = str(mmr_band).replace("'", "''")
+    scopes = []
+    if role and hero_id:
+        scopes.append(("same_rank_role_hero", f"mmr_band = '{safe_band}' AND role = {int(role)} AND hero_id = {int(hero_id)}"))
+    if role:
+        scopes.append(("same_rank_role", f"mmr_band = '{safe_band}' AND role = {int(role)}"))
+    if hero_id:
+        scopes.append(("same_rank_hero", f"mmr_band = '{safe_band}' AND hero_id = {int(hero_id)}"))
+    scopes.append(("same_rank", f"mmr_band = '{safe_band}'"))
+    return scopes
+
+
+def _read_baselines_for_scope(mmr_band: str, role: int | None = None, hero_id: int | None = None, columns: str = "*") -> tuple[pd.DataFrame, str]:
+    for scope, where_clause in _baseline_scope_conditions(mmr_band, role, hero_id):
+        df = pd.read_sql(f"SELECT {columns} FROM ml_kaggle_baselines WHERE {where_clause}", engine)
+        if not df.empty:
+            return df, scope
+    return pd.DataFrame(), "none"
+
+
+def _compute_comparisons(df: pd.DataFrame, mmr_band: str, filters: dict | None = None) -> dict:
     """Compare player stats with baselines for the same MMR band."""
-    baseline_query = f"""
-    SELECT avg_gpm, avg_xpm, avg_kda, avg_deaths, avg_last_hits, avg_hero_damage, avg_tower_damage
-    FROM ml_kaggle_baselines
-    WHERE mmr_band = '{mmr_band}'
-    """
-    baselines = pd.read_sql(baseline_query, engine)
+    filters = filters or {}
+    baselines, scope = _read_baselines_for_scope(
+        mmr_band,
+        role=filters.get("role"),
+        hero_id=filters.get("hero_id"),
+        columns="avg_gpm, avg_xpm, avg_kda, avg_deaths, avg_last_hits, avg_hero_damage, avg_tower_damage",
+    )
 
     if baselines.empty:
-        return {"vs_same_tier": {}}
+        return {"vs_same_tier": {}, "baseline_scope": "none"}
 
     avg_baseline = baselines.mean(numeric_only=True)
     player_gpm = df["gold_per_min"].fillna(0).mean() if "gold_per_min" in df.columns else 0
@@ -387,6 +411,7 @@ def _compute_comparisons(df: pd.DataFrame, mmr_band: str) -> dict:
         return round(float(np.clip(a / max(b, 0.01), 0, 2)), 3)
 
     return {
+        "baseline_scope": scope,
         "vs_same_tier": {
             "gpm_percentile": safe_ratio(player_gpm, avg_baseline.get("avg_gpm", 1)),
             "xpm_percentile": safe_ratio(player_xpm, avg_baseline.get("avg_xpm", 1)),
@@ -395,7 +420,7 @@ def _compute_comparisons(df: pd.DataFrame, mmr_band: str) -> dict:
     }
 
 
-def _compute_strengths_weaknesses(df: pd.DataFrame, mmr_band: str) -> tuple[list, list]:
+def _compute_strengths_weaknesses(df: pd.DataFrame, mmr_band: str, filters: dict | None = None) -> tuple[list, list]:
     """Determine player's strengths and weaknesses based on baselines."""
     metrics = {
         "gpm": ("gold_per_min", "Farm and Economy"),
@@ -408,12 +433,16 @@ def _compute_strengths_weaknesses(df: pd.DataFrame, mmr_band: str) -> tuple[list
         "vision": (None, "Vision (Wards)"),
     }
 
-    baseline_query = f"""
-    SELECT avg_gpm, avg_xpm, avg_kda, avg_kills, avg_deaths, avg_assists,
-           avg_last_hits, avg_hero_damage, avg_tower_damage
-    FROM ml_kaggle_baselines WHERE mmr_band = '{mmr_band}'
-    """
-    baselines = pd.read_sql(baseline_query, engine)
+    filters = filters or {}
+    baselines, _scope = _read_baselines_for_scope(
+        mmr_band,
+        role=filters.get("role"),
+        hero_id=filters.get("hero_id"),
+        columns=(
+            "avg_gpm, avg_xpm, avg_kda, avg_kills, avg_deaths, avg_assists, "
+            "avg_last_hits, avg_hero_damage, avg_tower_damage"
+        ),
+    )
 
     strengths = []
     weaknesses = []
@@ -457,6 +486,9 @@ def _compute_strengths_weaknesses(df: pd.DataFrame, mmr_band: str) -> tuple[list
 # Turbo (23) and 1v1 Mid (21) are excluded by default because their economy,
 # duration and damage numbers skew averages vs. kaggle baselines.
 RANKED_GAME_MODES = {2, 3, 4, 22}
+TURBO_GAME_MODE = 23
+DEFAULT_STATS_MODE = "ranked"
+DEFAULT_STATS_PERIOD = "50"
 
 
 def _filter_ranked(df: pd.DataFrame) -> pd.DataFrame:
@@ -472,7 +504,108 @@ def _filter_ranked(df: pd.DataFrame) -> pd.DataFrame:
     return df[mask].copy()
 
 
-def analyze_player_from_account(account_id: int, player_profile_id: int = None, db: Session = None) -> dict:
+def normalize_stats_filters(
+    mode: str | None = None,
+    period: str | None = None,
+    role: int | str | None = None,
+    hero_id: int | str | None = None,
+) -> dict:
+    """Normalize user-facing stats filters into a small trusted dict."""
+    mode_val = (mode or DEFAULT_STATS_MODE).lower()
+    if mode_val not in {"ranked", "turbo", "all"}:
+        mode_val = DEFAULT_STATS_MODE
+
+    period_val = str(period or DEFAULT_STATS_PERIOD).lower()
+    if period_val not in {"20", "50", "month", "all"}:
+        period_val = DEFAULT_STATS_PERIOD
+
+    def _to_int(value, min_value=None, max_value=None):
+        if value in (None, "", "all"):
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        if min_value is not None and parsed < min_value:
+            return None
+        if max_value is not None and parsed > max_value:
+            return None
+        return parsed
+
+    return {
+        "mode": mode_val,
+        "period": period_val,
+        "role": _to_int(role, 1, 5),
+        "hero_id": _to_int(hero_id, 1, None),
+    }
+
+
+def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[pd.DataFrame, dict]:
+    """Apply mode/period/role/hero filters to newest-first match rows."""
+    filters = normalize_stats_filters(**(filters or {}))
+    result = df.copy()
+    total_available = int(len(result))
+
+    if "start_time" in result.columns:
+        result = result.sort_values("start_time", ascending=False, na_position="last").reset_index(drop=True)
+
+    if filters["mode"] == "ranked" and "game_mode" in result.columns:
+        result = result[result["game_mode"].notna() & result["game_mode"].isin(RANKED_GAME_MODES)]
+    elif filters["mode"] == "turbo" and "game_mode" in result.columns:
+        result = result[result["game_mode"] == TURBO_GAME_MODE]
+
+    after_mode = int(len(result))
+
+    if filters["role"] and "lane_role" in result.columns:
+        result = result[result["lane_role"] == filters["role"]]
+
+    if filters["hero_id"] and "hero_id" in result.columns:
+        result = result[result["hero_id"] == filters["hero_id"]]
+
+    before_period = int(len(result))
+    date_from = None
+    limit = None
+    if filters["period"] in {"20", "50"}:
+        limit = int(filters["period"])
+        result = result.head(limit)
+    elif filters["period"] == "month" and "start_time" in result.columns:
+        date_from = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())
+        result = result[result["start_time"].fillna(0) >= date_from]
+
+    filtered_count = int(len(result))
+    labels = {
+        "mode": {
+            "ranked": "рейтинговые матчи",
+            "turbo": "turbo-матчи",
+            "all": "все режимы",
+        }[filters["mode"]],
+        "period": {
+            "20": "последние 20",
+            "50": "последние 50",
+            "month": "последние 30 дней",
+            "all": "вся загруженная история",
+        }[filters["period"]],
+    }
+
+    meta = {
+        **filters,
+        "label": f"{labels['period']}, {labels['mode']}",
+        "total_available": total_available,
+        "after_mode_count": after_mode,
+        "before_period_count": before_period,
+        "matches_count": filtered_count,
+        "limit": limit,
+        "date_from": date_from,
+    }
+    return result.copy(), meta
+
+
+def analyze_player_from_account(
+    account_id: int,
+    player_profile_id: int = None,
+    db: Session = None,
+    filters: dict | None = None,
+) -> dict:
     """
     Analyze a player based on their data in player_matches table (from OpenDota).
     This is separate from Kaggle data in ml_raw_players.
@@ -480,9 +613,8 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
     Notes on data accuracy:
     * Input is every match we managed to load for this account (no LIMIT).
       Deep-sync fills this table up to PLAYER_DEEP_SYNC_MAX_MATCHES in the
-      background; summary will stabilise as more matches arrive.
-    * Turbo / 1v1 modes are removed — their economy breaks comparability
-      with kaggle baselines.
+      background; summary will stabilise as more matches arrive. The default
+      product view then narrows that history to the latest ranked matches.
     * Per-match CS/min and damage/min are computed on each match and then
       averaged, which is mathematically different from (mean last_hits) /
       (mean duration) and gives the correct expected value.
@@ -496,7 +628,8 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
         gold_per_min, xp_per_min,
         last_hits, denies,
         hero_damage, tower_damage,
-        duration, player_slot, radiant_win, start_time
+        duration, player_slot, radiant_win, start_time,
+        obs_placed, sen_placed
     FROM player_matches
     WHERE account_id = {account_id}
     ORDER BY start_time DESC NULLS LAST
@@ -508,12 +641,10 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
         analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
         return _minimal_analysis(analysis_id, player_profile_id)
 
-    df = _filter_ranked(df_all)
+    normalized_filters = normalize_stats_filters(**(filters or {}))
+    df, filters_applied = apply_stats_filters(df_all, normalized_filters)
     if df.empty:
-        # All loaded matches were turbo/1v1 — fall back to all modes so we
-        # don't show an empty analysis, but flag it.
-        df = df_all.copy()
-        ranked_only_notice = "Не найдено рейтинговых матчей, метрики посчитаны по всем режимам."
+        ranked_only_notice = "По выбранным фильтрам нет матчей. Измените фильтр режима, роли, героя или периода."
     else:
         ranked_only_notice = None
 
@@ -571,6 +702,35 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
     except Exception:
         pass
 
+    if df.empty:
+        analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
+        summary = {
+            "estimated_rank_tier": mmr_band,
+            "estimated_mmr": estimated_mmr,
+            "total_games": lifetime_games,
+            "games_analyzed": 0,
+            "games_analyzed_ranked": 0 if normalized_filters["mode"] == "ranked" else None,
+            "filters_applied": filters_applied,
+            "stats_scope_label": filters_applied["label"],
+            "parsed_games_n": parsed_games_n,
+            "winrate": None,
+            "gpm_avg": 0,
+            "xpm_avg": 0,
+            "kda_avg": 0,
+            "notice": ranked_only_notice,
+        }
+        return {
+            "ml_analysis_id": analysis_id,
+            "summary": summary,
+            "trends": {},
+            "roles": {"actual_roles_distribution": {}},
+            "heroes": {"top_heroes": []},
+            "comparisons": {"vs_same_tier": {}, "baseline_scope": "none"},
+            "features": {},
+            "weaknesses_ranked": [],
+            "strengths_ranked": [],
+        }
+
     summary = {
         "estimated_rank_tier": mmr_band,
         "estimated_mmr": estimated_mmr,
@@ -578,7 +738,9 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
         "total_games": lifetime_games,
         # Analytics-only counts — kept for tech panel / debugging.
         "games_analyzed": int(len(df)),
-        "games_analyzed_ranked": int(len(df)) if ranked_only_notice is None else None,
+        "games_analyzed_ranked": int(len(df)) if normalized_filters["mode"] == "ranked" else None,
+        "filters_applied": filters_applied,
+        "stats_scope_label": filters_applied["label"],
         "parsed_games_n": parsed_games_n,
         "winrate": winrate_val,
         "gpm_avg": round(df["gold_per_min"].fillna(0).mean(), 1),
@@ -626,11 +788,13 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
     }
 
     # Top heroes
-    hero_stats = df.groupby("hero_id").agg(
-        games=("win", "count"),
-        winrate=("win", "mean"),
-        avg_kda=("kda", "mean"),
-    ).reset_index().sort_values("games", ascending=False).head(10)
+    hero_stats = pd.DataFrame(columns=["hero_id", "games", "winrate", "avg_kda"])
+    if not df.empty and "hero_id" in df.columns:
+        hero_stats = df.dropna(subset=["hero_id"]).groupby("hero_id").agg(
+            games=("match_id", "count"),
+            winrate=("win", "mean"),
+            avg_kda=("kda", "mean"),
+        ).reset_index().sort_values("games", ascending=False).head(10)
     def _safe_round(v, digits):
         try:
             if v is None or pd.isna(v):
@@ -649,7 +813,7 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
     }
 
     # Comparisons with baselines
-    comparisons = _compute_comparisons(df, mmr_band)
+    comparisons = _compute_comparisons(df, mmr_band, normalized_filters)
 
     # Features. All "per minute" fields use the per-match series computed above,
     # not a ratio of means, which would bias towards long/short games.
@@ -663,7 +827,7 @@ def analyze_player_from_account(account_id: int, player_profile_id: int = None, 
     }
 
     # Strengths / Weaknesses
-    strengths, weaknesses = _compute_strengths_weaknesses(df, mmr_band)
+    strengths, weaknesses = _compute_strengths_weaknesses(df, mmr_band, normalized_filters)
 
     analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
 

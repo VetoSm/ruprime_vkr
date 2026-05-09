@@ -216,6 +216,16 @@ CORE_SERVICE_URL=http://core:8002
 ML_SERVICE_URL=http://ml:8003
 LLM_SERVICE_URL=http://llm:8004
 
+# ===== LLM coach generation =====
+# Без LLM_API_KEY чат работает в fallback-шаблонах. Для настоящих ответов
+# укажите OpenAI-compatible провайдера.
+LLM_PROVIDER=openai
+LLM_API_KEY=ВСТАВИТЬ_API_KEY
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+LLM_TIMEOUT_SEC=25
+AI_CHAT_DAILY_LIMIT=20
+
 # ===== Data =====
 KAGGLE_DATA_PATH=/data/archive-2
 
@@ -231,7 +241,7 @@ openssl rand -base64 48    # для JWT_SECRET
 openssl rand -base64 48    # для ML_INTERNAL_TOKEN
 ```
 
-Скопируйте результаты в `.env`. Пароль PostgreSQL должен быть одинаковым в `POSTGRES_PASSWORD` и в `DATABASE_URL`. `ML_INTERNAL_TOKEN` должен быть одинаковым для контейнеров `core` и `ml` — они обмениваются им во внутренней сети.
+Скопируйте результаты в `.env`. Пароль PostgreSQL должен быть одинаковым в `POSTGRES_PASSWORD` и в `DATABASE_URL`. `ML_INTERNAL_TOKEN` должен быть одинаковым для контейнеров `core`, `ml` и `llm` — они обмениваются им во внутренней сети.
 
 Сохраняем: `Ctrl+O`, Enter, `Ctrl+X`.
 

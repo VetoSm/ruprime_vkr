@@ -11,10 +11,24 @@ from app.models import PlayerProfile
 router = APIRouter(tags=["stats"])
 
 
-async def _get_or_create_analysis(profile: PlayerProfile, db: Session) -> dict | None:
+def _stats_filter_params(
+    mode: str = "ranked",
+    period: str = "50",
+    role: int | None = None,
+    hero_id: int | None = None,
+) -> dict:
+    params = {"mode": mode, "period": period}
+    if role is not None:
+        params["role"] = role
+    if hero_id is not None:
+        params["hero_id"] = hero_id
+    return params
+
+
+async def _get_or_create_analysis(profile: PlayerProfile, db: Session, filters: dict | None = None) -> dict | None:
     """Try to get existing analysis or create a new one from player_matches."""
     # 1. If we have a cached analysis, fetch it
-    if profile.ml_analysis_id:
+    if profile.ml_analysis_id and not filters:
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(
@@ -32,13 +46,13 @@ async def _get_or_create_analysis(profile: PlayerProfile, db: Session) -> dict |
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     f"{settings.ML_SERVICE_URL}/ml/analyze-player/{profile.dota_account_id}",
-                    params={"player_profile_id": profile.id},
+                    params={"player_profile_id": profile.id, **(filters or {})},
                     headers=ml_headers(),
                 )
             if resp.status_code == 200:
                 data = resp.json()
                 # Cache the analysis_id
-                if data.get("ml_analysis_id"):
+                if data.get("ml_analysis_id") and not filters:
                     profile.ml_analysis_id = data["ml_analysis_id"]
                     db.commit()
                 return data
@@ -109,6 +123,10 @@ async def _get_or_create_analysis(profile: PlayerProfile, db: Session) -> dict |
 @router.get("/player/{player_id}/stats/overview")
 async def player_stats_overview(
     player_id: int,
+    mode: str = "ranked",
+    period: str = "50",
+    role: int | None = None,
+    hero_id: int | None = None,
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -120,7 +138,8 @@ async def player_stats_overview(
     if current_user.role == "PLAYER" and profile.core_user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Нет доступа")
 
-    data = await _get_or_create_analysis(profile, db)
+    filters = _stats_filter_params(mode, period, role, hero_id)
+    data = await _get_or_create_analysis(profile, db, filters)
 
     if data:
         log_action(db, current_user.user_id, current_user.role, "VIEW_STATS",
@@ -146,6 +165,10 @@ async def player_stats_overview(
 @router.get("/player/{player_id}/features")
 async def player_features(
     player_id: int,
+    mode: str = "ranked",
+    period: str = "50",
+    role: int | None = None,
+    hero_id: int | None = None,
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -157,7 +180,8 @@ async def player_features(
     if current_user.role == "PLAYER" and profile.core_user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Нет доступа")
 
-    data = await _get_or_create_analysis(profile, db)
+    filters = _stats_filter_params(mode, period, role, hero_id)
+    data = await _get_or_create_analysis(profile, db, filters)
 
     if data:
         log_action(db, current_user.user_id, current_user.role, "VIEW_FEATURES",
@@ -180,6 +204,10 @@ async def player_features(
 @router.get("/player/{player_id}/detailed-features")
 async def player_detailed_features(
     player_id: int,
+    mode: str = "ranked",
+    period: str = "50",
+    role: int | None = None,
+    hero_id: int | None = None,
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -195,7 +223,7 @@ async def player_detailed_features(
         return {"categories": [], "overall_score": 0, "error": "Аккаунт не привязан"}
 
     try:
-        params = {}
+        params = _stats_filter_params(mode, period, role, hero_id)
         if profile.desired_rank_tier:
             params["desired_rank"] = profile.desired_rank_tier
         async with httpx.AsyncClient(timeout=15.0) as client:

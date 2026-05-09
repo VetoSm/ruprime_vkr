@@ -146,6 +146,11 @@ class AiChatResponse(BaseModel):
     advice_summary: str
     advice_full: str
     llm_request_id: Optional[str] = None
+    llm_status: Optional[str] = None
+    llm_error: Optional[str] = None
+    requests_used_today: Optional[int] = None
+    requests_limit_daily: Optional[int] = None
+    requests_remaining_today: Optional[int] = None
 
 
 class AiHistoryEntry(BaseModel):
