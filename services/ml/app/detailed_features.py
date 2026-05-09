@@ -13,6 +13,7 @@ from app.database import engine
 from app.models import PlayerAccount, MlKaggleBaseline
 from app.feature_engine import (
     apply_stats_filters,
+    infer_rank_tier_from_matches,
     normalize_stats_filters,
     _baseline_scope_conditions,
     _read_baselines_for_scope,
@@ -155,8 +156,13 @@ def compute_detailed_features(
             "filters_applied": filters_applied,
         }
 
-    # Determine current MMR band
-    current_rank = rank_tier_to_name(acc.rank_tier) if acc and acc.rank_tier else "ARCHON"
+    # Determine current MMR band. Prefer account rank_tier, then the median
+    # average_rank from the same recent ranked window used for skill scoring.
+    rank_source = "account_rank_tier" if acc and acc.rank_tier else "unknown"
+    effective_rank_tier = acc.rank_tier if acc and acc.rank_tier else None
+    if not effective_rank_tier:
+        effective_rank_tier, rank_source = infer_rank_tier_from_matches(df)
+    current_rank = rank_tier_to_name(effective_rank_tier) if effective_rank_tier else "UNKNOWN"
     current_band = RANK_TO_MMR_BAND.get(current_rank, "2000-4000")
 
     # Determine target MMR band
@@ -386,6 +392,8 @@ def compute_detailed_features(
         "overall_score": round(overall, 1),
         "current_rank": current_rank,
         "current_band": current_band,
+        "rank_source": rank_source,
+        "rank_tier": int(effective_rank_tier) if effective_rank_tier else None,
         "target_rank": target_rank,
         "target_band": target_band,
         "top_gaps": all_gaps[:10],

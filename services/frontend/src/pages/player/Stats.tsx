@@ -78,6 +78,9 @@ export default function PlayerStats() {
   const applied = summary.filters_applied || features?.filters_applied || {};
   const scopeLabel = applied.label || `${PERIOD_LABELS[filters.period]}, ${MODE_LABELS[filters.mode]}`;
   const matchesCount = applied.matches_count ?? summary.games_analyzed ?? 0;
+  const roleContext = applied.role
+    ? `${applied.role_source === 'auto' ? 'основная роль' : 'роль'} POS${applied.role}`
+    : 'все позиции';
 
   const rolesData = Object.entries(roles)
     .map(([k, v]: [string, any]) => ({ name: roleName(k.replace('POS', '')), key: k, value: Math.round(v * 100) }))
@@ -97,7 +100,7 @@ export default function PlayerStats() {
             <h3 style={{ margin: 0 }}>Фильтры статистики</h3>
             <p className="text-muted" style={{ margin: '4px 0 0' }}>
               Найдено матчей: {matchesCount}. Сравнение строится с игроками того же ранга
-              {filters.role ? ` и позиции ${filters.role}` : ''}{filters.hero_id ? ` на герое ${heroName(Number(filters.hero_id))}` : ''}.
+              {applied.role ? ` и ${roleContext}` : ''}{filters.hero_id ? ` на герое ${heroName(Number(filters.hero_id))}` : ''}.
             </p>
           </div>
           <button className="btn btn-outline btn-sm" onClick={() => setFilters(DEFAULT_FILTERS)}>Сбросить</button>

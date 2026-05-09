@@ -340,6 +340,24 @@ def estimate_mmr(rank_tier: int | float | None, df: pd.DataFrame | None = None, 
     return _estimate_mmr_from_stats(df, mmr_band or "crusader")
 
 
+def infer_rank_tier_from_matches(df: pd.DataFrame | None) -> tuple[int | None, str]:
+    """Infer the most current rank_tier from recent filtered matches.
+
+    Priority:
+    1. Player account profile rank_tier is handled by callers before this.
+    2. Median average_rank from the already-filtered recent ranked window.
+       Median is more robust than mean when one match has a noisy rank.
+    3. None, so callers can decide whether to show unknown or use a heuristic.
+    """
+    if df is None or df.empty or "average_rank" not in df.columns:
+        return None, "unknown"
+    ranks = pd.to_numeric(df["average_rank"], errors="coerce").dropna()
+    ranks = ranks[(ranks > 0) & (ranks < 100)]
+    if ranks.empty:
+        return None, "unknown"
+    return int(round(float(ranks.median()))), "recent_matches_average_rank"
+
+
 def _estimate_mmr_from_stats(df: pd.DataFrame, mmr_band: str) -> int:
     """Simple heuristic MMR estimation based on GPM/XPM/KDA percentiles."""
     avg_gpm = df["gold_per_min"].fillna(0).mean()
@@ -556,8 +574,19 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
 
     after_mode = int(len(result))
 
-    if filters["role"] and "lane_role" in result.columns:
-        result = result[result["lane_role"] == filters["role"]]
+    explicit_role = filters["role"]
+    role_source = "explicit" if explicit_role else "auto"
+    auto_role = None
+    role_pool = result.copy()
+    if explicit_role and "lane_role" in result.columns:
+        result = result[result["lane_role"] == explicit_role]
+    elif not explicit_role and "lane_role" in result.columns:
+        valid_roles = result["lane_role"].dropna()
+        valid_roles = valid_roles[(valid_roles >= 1) & (valid_roles <= 5)]
+        if not valid_roles.empty:
+            auto_role = int(valid_roles.mode().iloc[0])
+            filters["role"] = auto_role
+            result = result[result["lane_role"] == auto_role]
 
     if filters["hero_id"] and "hero_id" in result.columns:
         result = result[result["hero_id"] == filters["hero_id"]]
@@ -592,11 +621,20 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
         "label": f"{labels['period']}, {labels['mode']}",
         "total_available": total_available,
         "after_mode_count": after_mode,
+        "role_source": role_source if filters["role"] else "none",
+        "auto_role": auto_role,
+        "role_pool_count": int(len(role_pool)),
         "before_period_count": before_period,
         "matches_count": filtered_count,
         "limit": limit,
         "date_from": date_from,
     }
+    if filters["role"]:
+        role_label = f"POS{filters['role']}"
+        if meta["role_source"] == "auto":
+            meta["label"] = f"{meta['label']}, основная роль {role_label}"
+        else:
+            meta["label"] = f"{meta['label']}, роль {role_label}"
     return result.copy(), meta
 
 
@@ -628,7 +666,7 @@ def analyze_player_from_account(
         gold_per_min, xp_per_min,
         last_hits, denies,
         hero_damage, tower_damage,
-        duration, player_slot, radiant_win, start_time,
+        duration, player_slot, radiant_win, start_time, average_rank,
         obs_placed, sen_placed
     FROM player_matches
     WHERE account_id = {account_id}
@@ -674,8 +712,14 @@ def analyze_player_from_account(
     except Exception:
         rank_tier = 0
 
-    mmr_band = rank_tier_to_mmr_band(rank_tier or 0)
-    estimated_mmr = estimate_mmr(rank_tier, df, mmr_band)
+    rank_source = "account_rank_tier" if rank_tier else "unknown"
+    effective_rank_tier = rank_tier
+    if not effective_rank_tier:
+        effective_rank_tier, rank_source = infer_rank_tier_from_matches(df)
+    mmr_band = rank_tier_to_mmr_band(effective_rank_tier or 0)
+    estimated_mmr = estimate_mmr(effective_rank_tier, df, mmr_band)
+    if rank_source == "unknown" and estimated_mmr:
+        rank_source = "stats_heuristic"
 
     # Winrate: mean of win column where it is known. If all values are null
     # (no decidable matches), fall back to None so the UI can hide the number
@@ -707,6 +751,8 @@ def analyze_player_from_account(
         summary = {
             "estimated_rank_tier": mmr_band,
             "estimated_mmr": estimated_mmr,
+            "rank_source": rank_source,
+            "rank_tier": int(effective_rank_tier) if effective_rank_tier else None,
             "total_games": lifetime_games,
             "games_analyzed": 0,
             "games_analyzed_ranked": 0 if normalized_filters["mode"] == "ranked" else None,
@@ -734,6 +780,8 @@ def analyze_player_from_account(
     summary = {
         "estimated_rank_tier": mmr_band,
         "estimated_mmr": estimated_mmr,
+        "rank_source": rank_source,
+        "rank_tier": int(effective_rank_tier) if effective_rank_tier else None,
         # User-visible "всего игр" is always lifetime.
         "total_games": lifetime_games,
         # Analytics-only counts — kept for tech panel / debugging.
