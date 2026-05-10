@@ -176,22 +176,48 @@ def _run_sync_job(account_id: int, steam_id: str | None) -> dict:
 
 
 def _save_player_account(db, data: dict, steam_id: str):
+    """Persist OpenDota response into ``player_accounts``.
+
+    If the response is a partial fallback (``is_partial`` flag) – e.g. OpenDota
+    returned 429 after retries and we only have Steam Web API data – we still
+    refresh persona / avatar / hours, but we never overwrite already cached
+    real data with empty zeros. That used to make the dashboard pretend the
+    profile was closed even though the player's match history is public.
+    """
     account_id = int(data["account_id"])
     acc = db.query(PlayerAccount).filter(PlayerAccount.account_id == account_id).first()
+    is_new_record = acc is None
     if not acc:
         acc = PlayerAccount(account_id=account_id)
         db.add(acc)
 
-    acc.steam_id = data.get("steam_id", steam_id)
-    acc.personaname = data.get("personaname")
-    acc.avatar_url = data.get("avatar_url")
-    acc.rank_tier = data.get("rank_tier")
-    acc.win = data.get("win", 0)
-    acc.lose = data.get("lose", 0)
-    acc.estimated_hours = data.get("estimated_hours", 0)
-    acc.profile_url = data.get("profile_url")
-    acc.is_public = data.get("is_public", True)
+    is_partial = bool(data.get("is_partial"))
+    had_real_data = bool(
+        not is_new_record
+        and ((acc.win or 0) + (acc.lose or 0) > 0 or (acc.lifetime_games or 0) > 0)
+    )
+    skip_overwrite = is_partial and had_real_data
+
+    if data.get("steam_id"):
+        acc.steam_id = data.get("steam_id", steam_id)
+    if data.get("personaname"):
+        acc.personaname = data.get("personaname")
+    if data.get("avatar_url"):
+        acc.avatar_url = data.get("avatar_url")
+    if data.get("profile_url"):
+        acc.profile_url = data.get("profile_url")
+    if data.get("estimated_hours"):
+        acc.estimated_hours = data.get("estimated_hours")
     acc.fetched_at = datetime.now(timezone.utc)
+
+    if data.get("is_public") is not None and not skip_overwrite:
+        acc.is_public = data.get("is_public", True)
+    if data.get("rank_tier") is not None or not skip_overwrite:
+        acc.rank_tier = data.get("rank_tier") if data.get("rank_tier") is not None else acc.rank_tier
+
+    if not skip_overwrite:
+        acc.win = data.get("win", 0)
+        acc.lose = data.get("lose", 0)
 
     if data.get("last_match_time"):
         try:
@@ -199,32 +225,41 @@ def _save_player_account(db, data: dict, steam_id: str):
         except Exception:
             pass
 
-    totals = data.get("totals", {})
-    lifetime_games = int(data.get("lifetime_games") or 0)
-    parsed_games_n = int(data.get("parsed_games_n") or totals.get("parsed_games_n") or 0)
-    acc.lifetime_games = lifetime_games
-    acc.parsed_games_n = parsed_games_n
-    acc.total_games = lifetime_games  # back-compat alias; same value
-    acc.avg_gpm = totals.get("avg_gpm")
-    acc.avg_xpm = totals.get("avg_xpm")
-    acc.avg_kills = totals.get("avg_kills")
-    acc.avg_deaths = totals.get("avg_deaths")
-    acc.avg_assists = totals.get("avg_assists")
-    acc.avg_last_hits = totals.get("avg_last_hits")
-    acc.avg_denies = totals.get("avg_denies")
-    acc.avg_hero_damage = totals.get("avg_hero_damage")
-    acc.avg_tower_damage = totals.get("avg_tower_damage")
-    acc.avg_duration = totals.get("avg_duration")
-    acc.avg_hero_healing = totals.get("avg_hero_healing")
-    acc.total_stuns = totals.get("total_stuns")
-    acc.total_obs_placed = totals.get("total_obs")
-    acc.total_sen_placed = totals.get("total_sen")
-    acc.total_tower_kills = totals.get("total_tower_kills")
+    totals = data.get("totals", {}) or {}
+    if not skip_overwrite:
+        lifetime_games = int(data.get("lifetime_games") or 0)
+        parsed_games_n = int(data.get("parsed_games_n") or totals.get("parsed_games_n") or 0)
+        acc.lifetime_games = lifetime_games
+        acc.parsed_games_n = parsed_games_n
+        acc.total_games = lifetime_games
+        acc.avg_gpm = totals.get("avg_gpm")
+        acc.avg_xpm = totals.get("avg_xpm")
+        acc.avg_kills = totals.get("avg_kills")
+        acc.avg_deaths = totals.get("avg_deaths")
+        acc.avg_assists = totals.get("avg_assists")
+        acc.avg_last_hits = totals.get("avg_last_hits")
+        acc.avg_denies = totals.get("avg_denies")
+        acc.avg_hero_damage = totals.get("avg_hero_damage")
+        acc.avg_tower_damage = totals.get("avg_tower_damage")
+        acc.avg_duration = totals.get("avg_duration")
+        acc.avg_hero_healing = totals.get("avg_hero_healing")
+        acc.total_stuns = totals.get("total_stuns")
+        acc.total_obs_placed = totals.get("total_obs")
+        acc.total_sen_placed = totals.get("total_sen")
+        acc.total_tower_kills = totals.get("total_tower_kills")
 
 
 def _replace_account_matches(db, account_id: int, matches: list[dict]):
+    """Replace account matches, but never wipe existing data with an empty list.
+
+    A 429 / partial response from OpenDota would otherwise destroy a perfectly
+    good cached match history.
+    """
+    deduped = _dedupe_matches(matches)
+    if not deduped:
+        return
     db.query(PlayerMatch).filter(PlayerMatch.account_id == account_id).delete()
-    for m in _dedupe_matches(matches):
+    for m in deduped:
         db.add(_build_player_match(account_id, m, is_detailed=bool(m.get("is_detailed"))))
 
 

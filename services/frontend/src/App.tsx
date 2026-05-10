@@ -117,12 +117,12 @@ function AppRoutes() {
 
         {/* Player routes */}
         <Route path="/dashboard" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerDashboard /></AppLayout></ProtectedRoute>} />
-        <Route path="/settings" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerSettings /></AppLayout></ProtectedRoute>} />
-        <Route path="/stats" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerStats /></AppLayout></ProtectedRoute>} />
+        <Route path="/settings" element={<ProtectedRoute roles={['PLAYER', 'COACH']}><AppLayout><PlayerSettings /></AppLayout></ProtectedRoute>} />
+        <Route path="/stats" element={<ProtectedRoute roles={['PLAYER', 'COACH']}><AppLayout><PlayerStats /></AppLayout></ProtectedRoute>} />
         <Route path="/coaches" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerCoaches /></AppLayout></ProtectedRoute>} />
         <Route path="/requests" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerRequests /></AppLayout></ProtectedRoute>} />
         <Route path="/schedule" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerSchedule /></AppLayout></ProtectedRoute>} />
-        <Route path="/ai-chat" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerAiChat /></AppLayout></ProtectedRoute>} />
+        <Route path="/ai-chat" element={<ProtectedRoute roles={['PLAYER', 'COACH']}><AppLayout><PlayerAiChat /></AppLayout></ProtectedRoute>} />
 
         {/* Legacy redirects */}
         <Route path="/profile/player" element={<Navigate to="/settings" />} />

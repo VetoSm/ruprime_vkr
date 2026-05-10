@@ -108,6 +108,34 @@ export default function CoachDashboard() {
         </div>
       </div>
 
+      <div className="card mb-20">
+        <h3 className="card-title">
+          Моя игра <InfoTooltip text="Здесь — ваша собственная статистика как игрока: ранг, любимые роли, фитчи и AI-разбор. Используется для самооценки и подготовки к разборам с учениками." />
+        </h3>
+        {profile.player_profile_id ? (
+          <>
+            <p className="text-muted" style={{ fontSize: '0.92rem', marginTop: 0 }}>
+              Steam привязан{profile.actual_rank_tier ? `, ваш текущий ранг: ${profile.actual_rank_tier}` : ''}.
+              Те же инструменты, которыми пользуются ваши ученики, доступны и вам.
+            </p>
+            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+              <Link to="/stats" className="btn btn-primary">Мой разбор игры</Link>
+              <Link to="/ai-chat" className="btn btn-outline">Спросить Оракула</Link>
+              <Link to="/settings" className="btn btn-outline">Steam и настройки</Link>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-muted" style={{ fontSize: '0.92rem', marginTop: 0 }}>
+              Привяжите свой Steam, чтобы видеть собственный разбор игры (фитчи, динамику, рекомендации Оракула) — то же, что вы получаете для своих учеников.
+            </p>
+            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+              <Link to="/settings" className="btn btn-primary">Привязать Steam</Link>
+            </div>
+          </>
+        )}
+      </div>
+
       <div className="card">
         <h3 className="card-title">
           Мои ученики <InfoTooltip text="Игроки, с которыми у вас запланированы или проведены занятия." />

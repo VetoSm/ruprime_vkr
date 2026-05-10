@@ -52,6 +52,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     { to: '/coach/profile', label: 'Профиль тренера' },
     { to: '/coach/schedule', label: 'Расписание' },
     { to: '/coach/reviews', label: 'Отзывы' },
+    { to: '/stats', label: 'Мой разбор' },
+    { to: '/ai-chat', label: 'Оракул' },
   ];
 
   const adminLinks = [
@@ -72,7 +74,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     : user?.role === 'ADMIN'
       ? '/admin/users'
       : '/settings';
-  const showAiFab = user?.role === 'PLAYER';
+  const showAiFab = user?.role === 'PLAYER' || user?.role === 'COACH';
 
   return (
     <ConsentGate>

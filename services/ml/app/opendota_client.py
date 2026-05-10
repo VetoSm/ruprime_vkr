@@ -4,6 +4,7 @@ Fetches player profile, totals, matches (with pagination), recent matches, heroe
 Free tier: 60 req/min. We use ~1.2s delay between requests.
 """
 
+import os
 import time
 import logging
 from datetime import datetime, timezone
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 OPENDOTA_BASE = "https://api.opendota.com/api"
 STEAM_ID_BASE = 76561197960265728
 REQUEST_TIMEOUT = 20.0
-RATE_LIMIT_DELAY = 1.2
+RATE_LIMIT_DELAY = float(os.getenv("OPENDOTA_REQUEST_DELAY_SEC", "1.4"))
+OPENDOTA_API_KEY = os.getenv("OPENDOTA_API_KEY", "").strip()
 
 
 def steam_id_to_account_id(steam_id: str) -> int:
@@ -28,17 +30,26 @@ def account_id_to_steam_id(account_id: int) -> str:
     return str(account_id + STEAM_ID_BASE)
 
 
-RETRY_DELAYS = (5, 15, 30)  # seconds between retries on 429
+RETRY_DELAYS = (5, 15, 30, 60, 120)
+
+
+def _append_api_key(path: str) -> str:
+    if not OPENDOTA_API_KEY:
+        return path
+    sep = "&" if "?" in path else "?"
+    return f"{path}{sep}api_key={OPENDOTA_API_KEY}"
 
 
 def _request(method: str, path: str):
     """GET/POST an OpenDota endpoint with graceful 429 back-off.
 
-    Free-tier OpenDota gives us 60 requests per minute. When we run a deep
-    sync we can easily blow past that, so instead of giving up after one
-    retry we wait progressively longer and try three times before failing.
+    Free-tier OpenDota gives us 60 requests per minute. With ``OPENDOTA_API_KEY``
+    set we get the premium 1200 req/min limit. We retry with exponential
+    back-off on 429 so a temporary burst of requests doesn't poison the
+    cached player data with empty values.
     """
-    url = f"{OPENDOTA_BASE}{path}"
+    actual_path = _append_api_key(path)
+    url = f"{OPENDOTA_BASE}{actual_path}"
     logger.info(f"OpenDota {method} {path}")
     for attempt, delay in enumerate((0,) + RETRY_DELAYS):
         if delay:
@@ -313,6 +324,7 @@ def fetch_full_player_data(steam_id: str, max_matches: int = 500) -> dict:
                 ),
                 "source": "steam_web_api_only",
                 "totals": {"lifetime_games": 0, "parsed_games_n": 0, "total_games": 0},
+                "is_partial": True,
             }
         return {
             "error": (
@@ -399,6 +411,12 @@ def fetch_full_player_data(steam_id: str, max_matches: int = 500) -> dict:
     hours_from_steam = sw.get("steam_dota_hours")
     effective_hours = hours_from_steam if hours_from_steam else estimated_hours
 
+    is_partial = (
+        lifetime_games == 0
+        and len(merged_matches) == 0
+        and not totals
+    )
+
     result = {
         "account_id": account_id,
         "steam_id": profile.get("steam_id", steam_id),
@@ -419,11 +437,9 @@ def fetch_full_player_data(steam_id: str, max_matches: int = 500) -> dict:
         "heroes": heroes[:20],
         "rankings": rankings[:20],
         "matches_count": len(merged_matches),
-        # Canonical counts (use these, not /totals.n):
+        "is_partial": is_partial,
         "lifetime_games": lifetime_games,
         "parsed_games_n": parsed_games_n,
-        # Back-compat alias: external callers sometimes read `total_games`.
-        # Point it at the lifetime value so nothing silently reads parsed-only.
         "total_games": lifetime_games,
         "warning": warning,
         # Lifetime averages from /totals

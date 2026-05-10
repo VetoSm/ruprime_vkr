@@ -43,7 +43,10 @@ export default function PlayerStats() {
       setHeroOptions(Object.values(heroes).sort((a: any, b: any) => a.localized_name.localeCompare(b.localized_name)));
     });
     coreApi.get('/me/overview').then((r) => {
-      const profileId = r.data?.profile?.id;
+      // For COACH role overview.profile.id is coach_profile_id, while
+      // overview.profile.player_profile_id holds the linked player profile.
+      // Use whichever is present so this page works for both roles.
+      const profileId = r.data?.profile?.player_profile_id ?? r.data?.profile?.id;
       if (profileId) {
         setPid(profileId);
       }

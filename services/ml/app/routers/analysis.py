@@ -263,31 +263,40 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Steam ID не указан")
     account_id = steam_id_to_account_id(steam_id)
 
-    # Reuse cached account data if we already have this OpenDota account in DB.
+    # Reuse cached account data only if it actually has something useful in
+    # it. If we previously failed to load (rate limit, hiccup) the cache is
+    # zeros and we must re-fetch synchronously, otherwise the user will see
+    # "match history hidden" forever even when their profile is public.
     existing_acc = db.query(PlayerAccount).filter(PlayerAccount.account_id == account_id).first()
     if existing_acc:
         cached_matches_count = db.query(sqlfunc.count(PlayerMatch.id)).filter(
             PlayerMatch.account_id == account_id
         ).scalar() or 0
-
-        sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=False)
-        cached_response = get_player_account(account_id, db)
-        cached_response.parse_message = (
-            f"Найдены сохранённые данные ({cached_matches_count} матчей). "
-            "Запущена фоновая догрузка: обновим профиль, подтянем больше матчей и расширенные данные."
+        cache_has_data = (
+            cached_matches_count > 0
+            or (existing_acc.win or 0) + (existing_acc.lose or 0) > 0
+            or (existing_acc.lifetime_games or 0) > 0
         )
-        if sync_job.get("status") == "already_scheduled":
+
+        if cache_has_data:
+            sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=False)
+            cached_response = get_player_account(account_id, db)
             cached_response.parse_message = (
                 f"Найдены сохранённые данные ({cached_matches_count} матчей). "
-                "Фоновая догрузка уже выполняется."
+                "Запущена фоновая догрузка: обновим профиль, подтянем больше матчей и расширенные данные."
             )
-        if not cached_response.warning:
-            cached_response.warning = _closed_stats_warning(
-                cached_matches_count,
-                existing_acc.win,
-                existing_acc.lose,
-            )
-        return cached_response
+            if sync_job.get("status") == "already_scheduled":
+                cached_response.parse_message = (
+                    f"Найдены сохранённые данные ({cached_matches_count} матчей). "
+                    "Фоновая догрузка уже выполняется."
+                )
+            if not cached_response.warning:
+                cached_response.warning = _closed_stats_warning(
+                    cached_matches_count,
+                    existing_acc.win,
+                    existing_acc.lose,
+                )
+            return cached_response
 
     # Fetch from OpenDota
     data = fetch_full_player_data(steam_id)
@@ -306,16 +315,34 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
         acc = PlayerAccount(account_id=account_id)
         db.add(acc)
 
-    acc.steam_id = data.get("steam_id", steam_id)
-    acc.personaname = data.get("personaname")
-    acc.avatar_url = data.get("avatar_url")
-    acc.rank_tier = data.get("rank_tier")
-    acc.win = data.get("win", 0)
-    acc.lose = data.get("lose", 0)
-    acc.estimated_hours = data.get("estimated_hours", 0)
-    acc.profile_url = data.get("profile_url")
-    acc.is_public = data.get("is_public", True)
+    is_partial = bool(data.get("is_partial"))
+    had_real_data = (
+        existing_acc is not None
+        and ((existing_acc.win or 0) + (existing_acc.lose or 0) > 0
+             or (existing_acc.lifetime_games or 0) > 0)
+    )
+    skip_overwrite = is_partial and had_real_data
+
+    if data.get("steam_id"):
+        acc.steam_id = data.get("steam_id", steam_id)
+    if data.get("personaname"):
+        acc.personaname = data.get("personaname")
+    if data.get("avatar_url"):
+        acc.avatar_url = data.get("avatar_url")
+    if data.get("profile_url"):
+        acc.profile_url = data.get("profile_url")
+    if data.get("estimated_hours"):
+        acc.estimated_hours = data.get("estimated_hours")
     acc.fetched_at = datetime.now(timezone.utc)
+
+    if data.get("is_public") is not None and not skip_overwrite:
+        acc.is_public = data.get("is_public", True)
+    if data.get("rank_tier") is not None or not skip_overwrite:
+        acc.rank_tier = data.get("rank_tier") if data.get("rank_tier") is not None else acc.rank_tier
+
+    if not skip_overwrite:
+        acc.win = data.get("win", 0)
+        acc.lose = data.get("lose", 0)
 
     if data.get("last_match_time"):
         try:
@@ -323,36 +350,34 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
         except Exception:
             pass
 
-    # Save lifetime totals. Source of truth for counts:
-    #   lifetime_games = wl.win + wl.lose
-    #   parsed_games_n = max n across /totals fields
-    t = data.get("totals", {})
-    lifetime_games = int(data.get("lifetime_games") or 0)
-    parsed_games_n = int(data.get("parsed_games_n") or t.get("parsed_games_n") or 0)
-    acc.lifetime_games = lifetime_games
-    acc.parsed_games_n = parsed_games_n
-    acc.total_games = lifetime_games  # back-compat alias
-    acc.avg_gpm = t.get("avg_gpm")
-    acc.avg_xpm = t.get("avg_xpm")
-    acc.avg_kills = t.get("avg_kills")
-    acc.avg_deaths = t.get("avg_deaths")
-    acc.avg_assists = t.get("avg_assists")
-    acc.avg_last_hits = t.get("avg_last_hits")
-    acc.avg_denies = t.get("avg_denies")
-    acc.avg_hero_damage = t.get("avg_hero_damage")
-    acc.avg_tower_damage = t.get("avg_tower_damage")
-    acc.avg_duration = t.get("avg_duration")
-    acc.avg_hero_healing = t.get("avg_hero_healing")
-    acc.total_stuns = t.get("total_stuns")
-    acc.total_obs_placed = t.get("total_obs")
-    acc.total_sen_placed = t.get("total_sen")
-    acc.total_tower_kills = t.get("total_tower_kills")
+    t = data.get("totals", {}) or {}
+    if not skip_overwrite:
+        lifetime_games = int(data.get("lifetime_games") or 0)
+        parsed_games_n = int(data.get("parsed_games_n") or t.get("parsed_games_n") or 0)
+        acc.lifetime_games = lifetime_games
+        acc.parsed_games_n = parsed_games_n
+        acc.total_games = lifetime_games
+        acc.avg_gpm = t.get("avg_gpm")
+        acc.avg_xpm = t.get("avg_xpm")
+        acc.avg_kills = t.get("avg_kills")
+        acc.avg_deaths = t.get("avg_deaths")
+        acc.avg_assists = t.get("avg_assists")
+        acc.avg_last_hits = t.get("avg_last_hits")
+        acc.avg_denies = t.get("avg_denies")
+        acc.avg_hero_damage = t.get("avg_hero_damage")
+        acc.avg_tower_damage = t.get("avg_tower_damage")
+        acc.avg_duration = t.get("avg_duration")
+        acc.avg_hero_healing = t.get("avg_hero_healing")
+        acc.total_stuns = t.get("total_stuns")
+        acc.total_obs_placed = t.get("total_obs")
+        acc.total_sen_placed = t.get("total_sen")
+        acc.total_tower_kills = t.get("total_tower_kills")
 
     db.flush()
 
-    # Save matches (clear old, insert new)
-    db.query(PlayerMatch).filter(PlayerMatch.account_id == account_id).delete()
     matches = _dedupe_match_dicts(data.get("matches", []))
+    if matches:
+        db.query(PlayerMatch).filter(PlayerMatch.account_id == account_id).delete()
     for m in matches:
         pm = PlayerMatch(
             account_id=account_id,
@@ -449,11 +474,48 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh-player-data/{account_id}", response_model=PlayerAccountResponse)
-def refresh_player_data(account_id: int, db: Session = Depends(get_db)):
-    """Обновить данные игрока из OpenDota."""
-    from app.opendota_client import account_id_to_steam_id
-    steam_id = account_id_to_steam_id(account_id)
-    return link_steam_account(LinkSteamRequest(steam_id=steam_id), db)
+def refresh_player_data(
+    account_id: int,
+    background: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Force-refresh player data from OpenDota.
+
+    Unlike ``link-steam-account`` this never returns the cached payload — it
+    always re-fetches from OpenDota and merges the result. ``background=True``
+    just schedules a deep sync without doing the synchronous fetch (used for
+    bulk operations).
+    """
+    from app.opendota_client import account_id_to_steam_id, fetch_full_player_data
+    from app.player_sync_manager import _save_player_account, _replace_account_matches
+
+    acc = db.query(PlayerAccount).filter(PlayerAccount.account_id == account_id).first()
+    steam_id = (acc.steam_id if acc and acc.steam_id else account_id_to_steam_id(account_id))
+
+    if background:
+        sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=True)
+        return get_player_account(account_id, db)
+
+    data = fetch_full_player_data(steam_id)
+    if data.get("error") and not acc:
+        return PlayerAccountResponse(account_id=data.get("account_id", 0), error=data["error"])
+
+    if not data.get("error"):
+        _save_player_account(db, data, steam_id)
+        _replace_account_matches(db, account_id, data.get("matches") or [])
+        db.commit()
+
+    sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=True)
+    response = get_player_account(account_id, db)
+    if data.get("warning") and not response.warning:
+        response.warning = data.get("warning")
+    if sync_job.get("status") == "queued":
+        response.parse_message = (
+            "Запущена фоновая глубокая синхронизация: догружаем больше матчей и расширенные данные."
+        )
+    elif sync_job.get("status") == "already_scheduled":
+        response.parse_message = "Фоновая синхронизация уже выполняется."
+    return response
 
 
 @router.get("/player-sync-status/{account_id}")

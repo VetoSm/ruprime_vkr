@@ -64,6 +64,14 @@ def me_overview(current_user: CurrentUser = Depends(get_current_user), db: Sessi
             ).scalar()
             avg_rating = round(float(avg), 2) if avg else None
 
+        # A coach can also have a PlayerProfile attached (we create one when
+        # they link their Steam, so that the AI / dashboard can analyse their
+        # own matches the same way they analyse their students). Surface its
+        # id here so the coach UI can deep-link into the player views.
+        player_profile = db.query(PlayerProfile).filter(
+            PlayerProfile.core_user_id == current_user.user_id
+        ).first()
+
         return MeOverviewResponse(
             role="COACH",
             profile={
@@ -71,6 +79,10 @@ def me_overview(current_user: CurrentUser = Depends(get_current_user), db: Sessi
                 "mmr_estimate": profile.mmr_estimate if profile else None,
                 "rank_tier": profile.rank_tier if profile else None,
                 "is_verified": profile.is_verified if profile else False,
+                "player_profile_id": player_profile.id if player_profile else None,
+                "steam_id": player_profile.steam_id if player_profile else None,
+                "dota_account_id": player_profile.dota_account_id if player_profile else None,
+                "actual_rank_tier": player_profile.actual_rank_tier if player_profile else None,
             },
             stats={
                 "upcoming_sessions": upcoming_sessions,
