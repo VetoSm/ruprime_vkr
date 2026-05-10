@@ -583,10 +583,19 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
     elif not explicit_role and "lane_role" in result.columns:
         valid_roles = result["lane_role"].dropna()
         valid_roles = valid_roles[(valid_roles >= 1) & (valid_roles <= 5)]
-        if not valid_roles.empty:
-            auto_role = int(valid_roles.mode().iloc[0])
-            filters["role"] = auto_role
-            result = result[result["lane_role"] == auto_role]
+        # OpenDota only fills lane_role for parsed matches (recentMatches +
+        # explicit /request). For unparsed history the column is NULL. If we
+        # blindly auto-filter by the most common role we'd discard 95 % of the
+        # history just because we know the role for 5 % of it. So only apply
+        # auto-role when at least ~30 % of the available matches have a
+        # detected role and we'll keep at least 10 of them after filtering.
+        if not valid_roles.empty and len(valid_roles) >= 10 and len(valid_roles) >= 0.3 * max(len(result), 1):
+            candidate = int(valid_roles.mode().iloc[0])
+            kept = int((result["lane_role"] == candidate).sum())
+            if kept >= 10:
+                auto_role = candidate
+                filters["role"] = auto_role
+                result = result[result["lane_role"] == auto_role]
 
     if filters["hero_id"] and "hero_id" in result.columns:
         result = result[result["hero_id"] == filters["hero_id"]]

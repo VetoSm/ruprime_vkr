@@ -610,7 +610,7 @@ export default function MlData() {
                             <td>{m.xpm}</td>
                             <td>{m.last_hits}</td>
                             <td>{m.hero_damage}</td>
-                            <td>{m.lane_role ? `POS${m.lane_role}` : '—'}</td>
+                            <td>{m.lane_role ? ({1:'Carry',2:'Mid',3:'Offlane',4:'Soft Support',5:'Hard Support'}[m.lane_role as 1|2|3|4|5] || `POS${m.lane_role}`) : '—'}</td>
                             <td>{m.duration_min ? `${m.duration_min}м` : '—'}</td>
                             <td>
                               <span className={`badge ${m.win ? 'badge-accent' : 'badge-danger'}`}>

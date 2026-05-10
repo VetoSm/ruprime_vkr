@@ -82,7 +82,7 @@ export default function PlayerStats() {
   const scopeLabel = applied.label || `${PERIOD_LABELS[filters.period]}, ${MODE_LABELS[filters.mode]}`;
   const matchesCount = applied.matches_count ?? summary.games_analyzed ?? 0;
   const roleContext = applied.role
-    ? `${applied.role_source === 'auto' ? 'основная роль' : 'роль'} POS${applied.role}`
+    ? `${applied.role_source === 'auto' ? 'основная роль' : 'роль'} ${roleName(applied.role)}`
     : 'все позиции';
 
   const rolesData = Object.entries(roles)

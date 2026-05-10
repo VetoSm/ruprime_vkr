@@ -76,11 +76,11 @@ export default function PlayerRequests() {
               <label>Желаемая позиция</label>
               <select className="form-select" value={role} onChange={(e) => setRole(e.target.value)}>
                 <option value="">Любая</option>
-                <option value="POS1">POS1 · Керри</option>
-                <option value="POS2">POS2 · Мид</option>
-                <option value="POS3">POS3 · Оффлейн</option>
-                <option value="POS4">POS4 · Софт саппорт</option>
-                <option value="POS5">POS5 · Хард саппорт</option>
+                <option value="POS1">Carry</option>
+                <option value="POS2">Mid</option>
+                <option value="POS3">Offlane</option>
+                <option value="POS4">Soft Support</option>
+                <option value="POS5">Hard Support</option>
               </select>
             </div>
             <div className="form-group">

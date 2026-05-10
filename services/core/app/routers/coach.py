@@ -3,12 +3,15 @@ import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
 from app.ml_client import ml_headers
+from collections import Counter
+
 from app.models import (
     CoachProfile,
     CoreUser,
@@ -18,6 +21,17 @@ from app.models import (
     SessionStatus,
 )
 from app.schemas import CoachProfileUpdate, CoachProfileResponse
+
+
+RANK_NAMES = {
+    1: "HERALD", 2: "GUARDIAN", 3: "CRUSADER", 4: "ARCHON",
+    5: "LEGEND", 6: "ANCIENT", 7: "DIVINE", 8: "IMMORTAL",
+}
+RANK_MMR = {
+    "HERALD": 700, "GUARDIAN": 1500, "CRUSADER": 2200, "ARCHON": 2900,
+    "LEGEND": 3600, "ANCIENT": 4300, "DIVINE": 5000, "IMMORTAL": 5700,
+}
+ROLE_TO_POS = {1: "POS1", 2: "POS2", 3: "POS3", 4: "POS4", 5: "POS5"}
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +110,11 @@ def list_coaches(
 ):
     """List coaches visible in the catalog.
 
-    Players and coaches only see coaches that the tech account has verified
-    (``CoachProfile.is_verified=True``). Admins can pass
-    ``include_unverified=1`` to inspect self-registered applications.
+    Every verified coach shows up — even ones with empty manual profiles.
+    For empty fields we fall back to data we can compute automatically from
+    their linked Steam history (top roles, hero pool, rank, MMR estimate)
+    so the catalog never feels empty just because a coach hasn't filled
+    everything in yet.
     """
     query = db.query(CoachProfile).join(
         CoreUser, CoreUser.id == CoachProfile.core_user_id
@@ -112,23 +128,102 @@ def list_coaches(
     if HIDE_TEST_COACHES and TEST_COACH_AUTH_IDS:
         query = query.filter(~CoreUser.auth_user_id.in_(TEST_COACH_AUTH_IDS))
 
-    query = query.filter(
-        CoachProfile.about.isnot(None),
-        CoachProfile.hourly_rate.isnot(None),
-        CoachProfile.mmr_estimate.isnot(None),
-    )
-
-    # Verification gate. Admin can override for debugging.
     if not (current_user.role == "ADMIN" and include_unverified):
         query = query.filter(CoachProfile.is_verified == True)  # noqa: E712
 
     coaches = query.order_by(CoachProfile.id.desc()).all()
 
-    # Filter by role in Python (JSON field)
-    if role:
-        coaches = [c for c in coaches if c.main_roles and role in c.main_roles]
+    enriched: list[dict] = []
+    for c in coaches:
+        auto = _coach_autofill(c, db)
+        manual_roles = c.main_roles if c.main_roles else None
+        effective_roles = manual_roles or auto.get("main_roles") or []
+        if role and role not in effective_roles:
+            continue
+        enriched.append({
+            "id": c.id,
+            "core_user_id": c.core_user_id,
+            "mmr_estimate": c.mmr_estimate,
+            "rank_tier": c.rank_tier,
+            "main_roles": c.main_roles,
+            "hero_pool": c.hero_pool,
+            "hourly_rate": c.hourly_rate,
+            "experience_years": c.experience_years,
+            "about": c.about,
+            "is_verified": bool(c.is_verified),
+            "auto_main_roles": auto.get("main_roles"),
+            "auto_hero_pool": auto.get("hero_pool"),
+            "auto_rank_tier": auto.get("rank_tier"),
+            "auto_mmr_estimate": auto.get("mmr_estimate"),
+            "profile_complete": bool(c.about and c.hourly_rate and (c.mmr_estimate or c.rank_tier)),
+        })
+    return enriched
 
-    return coaches
+
+def _coach_autofill(c: CoachProfile, db: Session) -> dict:
+    """Derive sensible defaults for a coach profile from their linked Steam.
+
+    Looks for a ``PlayerProfile`` belonging to the same ``core_user_id``.
+    From the cached OpenDota data we compute:
+      * rank_tier label (medal + stars)
+      * MMR estimate from rank_tier
+      * top 3 roles from the most recent ranked matches
+      * top 5 most-played heroes
+    """
+    profile = db.query(PlayerProfile).filter(
+        PlayerProfile.core_user_id == c.core_user_id
+    ).first()
+    if not profile or not profile.dota_account_id or not profile.dota_account_id.isdigit():
+        return {}
+
+    account_id = int(profile.dota_account_id)
+    out: dict = {}
+
+    pa_row = db.execute(
+        sql_text("SELECT rank_tier FROM player_accounts WHERE account_id = :aid"),
+        {"aid": account_id},
+    ).fetchone()
+    rank_tier = int(pa_row[0]) if pa_row and pa_row[0] else None
+
+    if rank_tier:
+        medal = rank_tier // 10
+        stars = rank_tier % 10
+        rank_label = f"{RANK_NAMES.get(medal, 'UNKNOWN')} [{stars}]"
+        out["rank_tier"] = rank_label
+        out["mmr_estimate"] = RANK_MMR.get(RANK_NAMES.get(medal, ""))
+    elif profile.actual_rank_tier:
+        out["rank_tier"] = profile.actual_rank_tier
+
+    role_rows = db.execute(
+        sql_text(
+            """
+            SELECT lane_role, hero_id
+            FROM player_matches
+            WHERE account_id = :aid
+              AND game_mode IN (2,3,4,22)
+            ORDER BY start_time DESC NULLS LAST
+            LIMIT 200
+            """
+        ),
+        {"aid": account_id},
+    ).fetchall()
+    if role_rows:
+        roles_counter: Counter[int] = Counter()
+        heroes_counter: Counter[int] = Counter()
+        for lane_role, hero_id in role_rows:
+            if lane_role and 1 <= int(lane_role) <= 5:
+                roles_counter[int(lane_role)] += 1
+            if hero_id:
+                heroes_counter[int(hero_id)] += 1
+        if roles_counter:
+            out["main_roles"] = [
+                ROLE_TO_POS[r]
+                for r, _ in roles_counter.most_common(3)
+                if r in ROLE_TO_POS
+            ]
+        if heroes_counter:
+            out["hero_pool"] = [str(h) for h, _ in heroes_counter.most_common(5)]
+    return out
 
 
 @router.get("/coach/students-overview")

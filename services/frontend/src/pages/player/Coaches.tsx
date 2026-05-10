@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 import { RankBadge, RoleBadge } from '../../ui/GameComponents';
 import { IconFilter, IconSearch } from '../../ui/Icons';
+import { loadHeroes, heroName } from '../../api/heroes';
 
 export default function PlayerCoaches() {
   const [coaches, setCoaches] = useState<any[]>([]);
@@ -25,6 +26,7 @@ export default function PlayerCoaches() {
   const [applyResultErr, setApplyResultErr] = useState<string | null>(null);
 
   useEffect(() => {
+    loadHeroes();
     coreApi.get('/coaches').then((r) => setCoaches(r.data)).catch(() => {}).finally(() => setLoading(false));
     coreApi.get('/player/steam-data').then((r) => setSteamLinked(Boolean(r.data?.linked))).catch(() => setSteamLinked(false));
     fetchRecommended();
@@ -77,10 +79,22 @@ export default function PlayerCoaches() {
   };
 
   const filteredCoaches = coaches.filter((c) => {
-    if (filterRole && Array.isArray(c.main_roles) && !c.main_roles.includes(filterRole)) return false;
-    if (filterMaxRate && c.hourly_rate > Number(filterMaxRate)) return false;
+    const effectiveRoles: string[] = (c.main_roles && c.main_roles.length > 0)
+      ? c.main_roles
+      : (c.auto_main_roles || []);
+    if (filterRole && !effectiveRoles.includes(filterRole)) return false;
+    if (filterMaxRate && c.hourly_rate && c.hourly_rate > Number(filterMaxRate)) return false;
     return true;
   });
+
+  const heroLabel = (raw: any): string => {
+    const num = Number(raw);
+    if (Number.isFinite(num) && num > 0) {
+      const name = heroName(num);
+      return name === String(num) ? `Hero #${num}` : name;
+    }
+    return String(raw);
+  };
 
   const recommendedScore = new Map<number, any>();
   for (const r of recommended) {
@@ -95,7 +109,22 @@ export default function PlayerCoaches() {
   const bestIds = new Set(bestMatches.map((c) => c.id));
   const otherCoaches = filteredCoaches.filter((c) => !bestIds.has(c.id));
 
-  const renderCoachCard = (coach: any, rec?: any) => (
+  const renderCoachCard = (coach: any, rec?: any) => {
+    const effectiveRoles: string[] = (coach.main_roles && coach.main_roles.length > 0)
+      ? coach.main_roles
+      : (coach.auto_main_roles || []);
+    const effectiveHeroes: any[] = (coach.hero_pool && coach.hero_pool.length > 0)
+      ? coach.hero_pool
+      : (coach.auto_hero_pool || []);
+    const effectiveRank = coach.rank_tier || coach.auto_rank_tier;
+    const effectiveMmr = coach.mmr_estimate || coach.auto_mmr_estimate;
+    const usingAutoData = (
+      (!coach.main_roles?.length && coach.auto_main_roles?.length) ||
+      (!coach.hero_pool?.length && coach.auto_hero_pool?.length) ||
+      (!coach.about)
+    );
+
+    return (
     <div key={coach.id} className="card" style={{
       position: 'relative',
       borderColor: rec ? 'var(--accent)' : undefined,
@@ -117,28 +146,43 @@ export default function PlayerCoaches() {
             {coach.about?.split('\n')[0] || `Тренер #${coach.id}`}
           </h3>
           <div className="flex gap-10" style={{ alignItems: 'center' }}>
-            {coach.rank_tier && <RankBadge rankName={coach.rank_tier} size="sm" />}
+            {effectiveRank && <RankBadge rankName={effectiveRank} size="sm" />}
             {coach.is_verified && <span className="badge badge-accent">Verified coach</span>}
+            {!coach.profile_complete && (
+              <span className="badge" style={{
+                background: 'rgba(255,165,2,0.12)', color: 'var(--warning)',
+                border: '1px solid rgba(255,165,2,0.35)', fontSize: '0.7rem',
+              }} title="Тренер пока не дозаполнил профиль. Данные подтянуты автоматически из Steam.">
+                Профиль не дозаполнен
+              </span>
+            )}
           </div>
         </div>
-        {coach.hourly_rate && (
-          <div style={{
-            textAlign: 'right', padding: '8px 14px',
-            background: 'rgba(0,212,170,0.06)', borderRadius: 12,
-            border: '1px solid rgba(0,212,170,0.15)',
-          }}>
-            <div style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--accent)' }}>
-              {coach.hourly_rate.toLocaleString()} ₽
-            </div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>разбор / час</div>
-          </div>
-        )}
+        <div style={{
+          textAlign: 'right', padding: '8px 14px',
+          background: 'rgba(0,212,170,0.06)', borderRadius: 12,
+          border: '1px solid rgba(0,212,170,0.15)',
+        }}>
+          {coach.hourly_rate ? (
+            <>
+              <div style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--accent)' }}>
+                {coach.hourly_rate.toLocaleString()} ₽
+              </div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>разбор / час</div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Договорная</div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>цена</div>
+            </>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
         <div>
           <span className="text-muted" style={{ fontSize: '0.78rem' }}>Coach MMR: </span>
-          <strong>{coach.mmr_estimate ? coach.mmr_estimate.toLocaleString() : '—'}</strong>
+          <strong>{effectiveMmr ? effectiveMmr.toLocaleString() : '—'}</strong>
         </div>
         <div>
           <span className="text-muted" style={{ fontSize: '0.78rem' }}>Опыт тренера: </span>
@@ -146,15 +190,15 @@ export default function PlayerCoaches() {
         </div>
       </div>
 
-      {Array.isArray(coach.main_roles) && coach.main_roles.length > 0 && (
+      {effectiveRoles.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-          {coach.main_roles.map((r: string) => <RoleBadge key={r} role={r} compact />)}
+          {effectiveRoles.map((r: string) => <RoleBadge key={r} role={r} compact />)}
         </div>
       )}
 
-      {Array.isArray(coach.hero_pool) && coach.hero_pool.length > 0 && (
+      {effectiveHeroes.length > 0 && (
         <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: 10 }}>
-          Hero pool: {coach.hero_pool.join(', ')}
+          Hero pool: {effectiveHeroes.map(heroLabel).join(', ')}
         </div>
       )}
 
@@ -178,13 +222,20 @@ export default function PlayerCoaches() {
         </p>
       )}
 
+      {usingAutoData && (
+        <div className="text-muted" style={{ fontSize: '0.72rem', marginTop: 8, fontStyle: 'italic' }}>
+          Часть данных подтянута автоматически из истории матчей тренера.
+        </div>
+      )}
+
       <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn btn-primary btn-sm" onClick={() => openApply(coach)}>
           Записаться на разбор
         </button>
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <div>
@@ -226,11 +277,11 @@ export default function PlayerCoaches() {
               <label>Позиция</label>
               <select className="form-select" value={filterRole} onChange={(e) => setFilterRole(e.target.value)}>
                 <option value="">Любая</option>
-                <option value="POS1">Керри (POS1)</option>
-                <option value="POS2">Мид (POS2)</option>
-                <option value="POS3">Оффлейн (POS3)</option>
-                <option value="POS4">Софт саппорт (POS4)</option>
-                <option value="POS5">Хард саппорт (POS5)</option>
+                <option value="POS1">Carry</option>
+                <option value="POS2">Mid</option>
+                <option value="POS3">Offlane</option>
+                <option value="POS4">Soft Support</option>
+                <option value="POS5">Hard Support</option>
               </select>
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
@@ -330,11 +381,11 @@ export default function PlayerCoaches() {
                     <label>Позиция</label>
                     <select className="form-select" value={applyRole} onChange={(e) => setApplyRole(e.target.value)}>
                       <option value="">По умолчанию</option>
-                      <option value="POS1">POS1 · Керри</option>
-                      <option value="POS2">POS2 · Мид</option>
-                      <option value="POS3">POS3 · Оффлейн</option>
-                      <option value="POS4">POS4 · Софт саппорт</option>
-                      <option value="POS5">POS5 · Хард саппорт</option>
+                      <option value="POS1">Carry</option>
+                      <option value="POS2">Mid</option>
+                      <option value="POS3">Offlane</option>
+                      <option value="POS4">Soft Support</option>
+                      <option value="POS5">Hard Support</option>
                     </select>
                   </div>
                   <div className="form-group">

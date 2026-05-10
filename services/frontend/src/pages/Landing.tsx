@@ -45,7 +45,7 @@ const PERSONA_CONTENT: Record<Persona, PersonaContent> = {
     mockTiles: [
       { label: 'Rank source', value: 'OpenDota' },
       { label: 'Winrate', value: '52%' },
-      { label: 'Main role', value: 'POS4' },
+      { label: 'Main role', value: 'Soft Support' },
       { label: 'Skill score', value: '7.4' },
     ],
     rings: [

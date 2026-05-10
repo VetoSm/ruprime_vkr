@@ -50,6 +50,14 @@ class CoachProfileResponse(BaseModel):
     experience_years: Optional[int] = None
     about: Optional[str] = None
     is_verified: bool = False
+    # Auto-derived fallbacks: filled from the coach's own linked Steam history
+    # when their profile is empty. Frontend uses these when the manual field
+    # is null so a fresh coach still shows a meaningful card.
+    auto_main_roles: Optional[list[str]] = None
+    auto_hero_pool: Optional[list[str]] = None
+    auto_rank_tier: Optional[str] = None
+    auto_mmr_estimate: Optional[int] = None
+    profile_complete: bool = True
 
     class Config:
         from_attributes = True

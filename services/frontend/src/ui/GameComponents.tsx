@@ -131,13 +131,14 @@ function RoleIconSvg({ type, color, size = 12 }: { type: string; color: string; 
 const ROLE_INFO: Record<string, { name: string; short: string; svgType: string; color: string }> = {
   POS1: { name: 'Carry', short: 'Carry', svgType: 'carry', color: '#ff8c00' },
   POS2: { name: 'Mid', short: 'Mid', svgType: 'mid', color: '#ffd700' },
-  POS3: { name: 'Offlane', short: 'Off', svgType: 'off', color: '#ff4757' },
-  POS4: { name: 'Soft Support', short: 'Sup4', svgType: 'sup4', color: '#7c5cfc' },
-  POS5: { name: 'Hard Support', short: 'Sup5', svgType: 'sup5', color: '#00d4aa' },
+  POS3: { name: 'Offlane', short: 'Offlane', svgType: 'off', color: '#ff4757' },
+  POS4: { name: 'Soft Support', short: 'Soft Sup', svgType: 'sup4', color: '#7c5cfc' },
+  POS5: { name: 'Hard Support', short: 'Hard Sup', svgType: 'sup5', color: '#00d4aa' },
   '1': { name: 'Carry', short: 'Carry', svgType: 'carry', color: '#ff8c00' },
   '2': { name: 'Mid', short: 'Mid', svgType: 'mid', color: '#ffd700' },
-  '3': { name: 'Offlane', short: 'Off', svgType: 'off', color: '#ff4757' },
-  '4': { name: 'Soft Support', short: 'Sup4', svgType: 'sup4', color: '#7c5cfc' },
+  '3': { name: 'Offlane', short: 'Offlane', svgType: 'off', color: '#ff4757' },
+  '4': { name: 'Soft Support', short: 'Soft Sup', svgType: 'sup4', color: '#7c5cfc' },
+  '5': { name: 'Hard Support', short: 'Hard Sup', svgType: 'sup5', color: '#00d4aa' },
 };
 
 interface RoleBadgeProps {

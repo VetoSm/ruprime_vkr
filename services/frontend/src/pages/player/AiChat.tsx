@@ -197,7 +197,7 @@ export default function PlayerAiChat() {
             <div className="text-center text-muted" style={{ marginTop: 40 }}>
               <p>Спросите Оракула о своей игре в Dota 2.</p>
               <p style={{ fontSize: '0.85rem', marginTop: 10 }}>
-                Примеры: «Почему просел вижн на POS4?» / «Что тренировать в следующих 10 ranked?»
+                Примеры: «Почему просел вижн на Soft Support?» / «Что тренировать в следующих 10 ranked?»
               </p>
             </div>
           )}
