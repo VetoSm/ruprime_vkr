@@ -70,6 +70,7 @@ export default function PlayerProfile() {
   const [pwdError, setPwdError] = useState('');
   const [autoLinkTried, setAutoLinkTried] = useState(false);
   const [showManualSteam, setShowManualSteam] = useState(false);
+  const [heroesLoaded, setHeroesLoaded] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
@@ -83,7 +84,7 @@ export default function PlayerProfile() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
-    loadHeroes();
+    loadHeroes().then(() => setHeroesLoaded(true));
     coreApi.get('/player/profile').then((r) => {
       setProfile(r.data);
       setDesiredRank(r.data.desired_rank_tier || '');
@@ -221,6 +222,39 @@ export default function PlayerProfile() {
     steamData?.total_games ??
     ((steamData?.win || 0) + (steamData?.lose || 0));
   const winrate = totalGames > 0 ? ((steamData?.win || 0) / totalGames * 100).toFixed(1) : '0';
+  const renderHeroIcon = (heroId?: number, size = 24) => {
+    const icon = heroId && heroesLoaded ? heroIcon(heroId) : '';
+    if (!icon) {
+      return (
+        <span
+          aria-hidden="true"
+          style={{
+            width: size,
+            height: size,
+            borderRadius: 4,
+            border: '1px solid var(--border-color)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: Math.max(9, Math.round(size * 0.38)),
+            color: 'var(--text-muted)',
+            background: 'var(--bg-secondary)',
+            flex: `0 0 ${size}px`,
+          }}
+        >
+          {heroId || '?'}
+        </span>
+      );
+    }
+    return (
+      <img
+        src={icon}
+        alt={heroId ? heroName(heroId) : 'Hero'}
+        style={{ width: size, height: size, borderRadius: 4, border: '1px solid var(--border-color)', flex: `0 0 ${size}px` }}
+        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+      />
+    );
+  };
 
   return (
     <div>
@@ -341,8 +375,7 @@ export default function PlayerProfile() {
                     {steamData.recent_matches.slice(0, 8).map((m) => (
                       <tr key={m.match_id}>
                         <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <img src={heroIcon(m.hero_id)} alt="" style={{ width: 24, height: 24, borderRadius: 4 }}
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          {renderHeroIcon(m.hero_id, 24)}
                           {heroName(m.hero_id)}
                         </td>
                         <td style={{ color: m.win ? 'var(--accent)' : 'var(--danger)' }}>{m.win ? 'Победа' : 'Поражение'}</td>
@@ -366,9 +399,7 @@ export default function PlayerProfile() {
               <div className="grid-3">
                 {steamData.heroes_top.slice(0, 6).map((h: any) => (
                   <div key={h.hero_id} className="ranking-card">
-                    <img src={heroIcon(h.hero_id)} alt="" style={{
-                      width: 40, height: 40, borderRadius: 8, border: '1px solid var(--border-color)'
-                    }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    {renderHeroIcon(h.hero_id, 40)}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700, fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {heroName(h.hero_id)}
@@ -399,9 +430,7 @@ export default function PlayerProfile() {
                   const color = topPct <= 5 ? 'var(--accent)' : topPct <= 20 ? 'var(--warning)' : 'var(--text-primary)';
                   return (
                     <div key={r.hero_id} className="ranking-card">
-                      <img src={heroIcon(r.hero_id)} alt="" style={{
-                        width: 36, height: 36, borderRadius: 6, border: '1px solid var(--border-color)',
-                      }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      {renderHeroIcon(r.hero_id, 36)}
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: 2 }}>{heroName(r.hero_id)}</div>
                         <div className="progress-bar" style={{ height: 5 }}>
