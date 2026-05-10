@@ -105,17 +105,20 @@ export default function PlayerCoaches() {
         <span className="badge badge-accent" style={{
           position: 'absolute', top: 10, right: 10, fontSize: '0.7rem',
         }}>
-          {(rec.score * 100).toFixed(0)}% match
+          MATCH {(rec.score * 100).toFixed(0)}%
         </span>
       )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
         <div>
+          <div className="badge badge-purple" style={{ marginBottom: 8, letterSpacing: 0.8, textTransform: 'uppercase' }}>
+            Coach card
+          </div>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6 }}>
             {coach.about?.split('\n')[0] || `Тренер #${coach.id}`}
           </h3>
           <div className="flex gap-10" style={{ alignItems: 'center' }}>
             {coach.rank_tier && <RankBadge rankName={coach.rank_tier} size="sm" />}
-            {coach.is_verified && <span className="badge badge-accent">Верифицирован</span>}
+            {coach.is_verified && <span className="badge badge-accent">Verified coach</span>}
           </div>
         </div>
         {coach.hourly_rate && (
@@ -127,18 +130,18 @@ export default function PlayerCoaches() {
             <div style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--accent)' }}>
               {coach.hourly_rate.toLocaleString()} ₽
             </div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>за час</div>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>разбор / час</div>
           </div>
         )}
       </div>
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
         <div>
-          <span className="text-muted" style={{ fontSize: '0.78rem' }}>MMR: </span>
+          <span className="text-muted" style={{ fontSize: '0.78rem' }}>Coach MMR: </span>
           <strong>{coach.mmr_estimate ? coach.mmr_estimate.toLocaleString() : '—'}</strong>
         </div>
         <div>
-          <span className="text-muted" style={{ fontSize: '0.78rem' }}>Опыт: </span>
+          <span className="text-muted" style={{ fontSize: '0.78rem' }}>Опыт тренера: </span>
           <strong>{coach.experience_years ? `${coach.experience_years} лет` : '—'}</strong>
         </div>
       </div>
@@ -151,13 +154,13 @@ export default function PlayerCoaches() {
 
       {Array.isArray(coach.hero_pool) && coach.hero_pool.length > 0 && (
         <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: 10 }}>
-          Герои: {coach.hero_pool.join(', ')}
+          Hero pool: {coach.hero_pool.join(', ')}
         </div>
       )}
 
       {rec?.reasons?.length > 0 && (
         <div style={{ marginBottom: 8 }}>
-          <div className="text-muted" style={{ fontSize: '0.76rem', marginBottom: 4 }}>Почему подходит:</div>
+          <div className="text-muted" style={{ fontSize: '0.76rem', marginBottom: 4 }}>Почему подходит под ваш матчап:</div>
           <ul style={{ margin: 0, paddingLeft: 16 }}>
             {rec.reasons.slice(0, 3).map((reason: string, idx: number) => (
               <li key={idx} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{reason}</li>
@@ -177,7 +180,7 @@ export default function PlayerCoaches() {
 
       <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn btn-primary btn-sm" onClick={() => openApply(coach)}>
-          Записаться
+          Записаться на разбор
         </button>
       </div>
     </div>
@@ -186,8 +189,8 @@ export default function PlayerCoaches() {
   return (
     <div>
       <div className="page-header">
-        <h1>Тренеры</h1>
-        <p>Лучшие тренеры, подобранные под ваш профиль</p>
+        <h1>Найти тренера</h1>
+        <p>Coach cards под ваш ранг, роль и зоны роста</p>
       </div>
 
       {steamLinked === false && (
@@ -269,10 +272,10 @@ export default function PlayerCoaches() {
         <>
           <div className="card mb-20" style={{ borderColor: 'var(--accent)', borderWidth: 2 }}>
             <h3 style={{ margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: 'var(--accent)' }}>★</span> Лучше всего подходят (до 5)
+              <span style={{ color: 'var(--accent)' }}>★</span> Лучшие матчапы под ваш профиль
             </h3>
             {bestMatches.length === 0 ? (
-              <p className="text-muted">Пока не удалось определить персональные мэтчи. Проверьте привязку Steam и статистику.</p>
+              <p className="text-muted">Пока не удалось определить персональные match score. Проверьте привязку Steam и статистику.</p>
             ) : (
               <div className="grid-2">
                 {bestMatches.map((coach) => renderCoachCard(coach, recommendedScore.get(coach.id)))}
@@ -281,7 +284,7 @@ export default function PlayerCoaches() {
           </div>
 
           <div>
-            <h3 style={{ margin: '0 0 12px' }}>Остальные тренеры</h3>
+            <h3 style={{ margin: '0 0 12px' }}>Каталог тренеров</h3>
             {otherCoaches.length === 0 ? (
               <div className="card"><p className="text-muted">Нет других тренеров по текущему фильтру.</p></div>
             ) : (
@@ -308,7 +311,7 @@ export default function PlayerCoaches() {
             style={{ width: '100%', maxWidth: 480, border: '1px solid var(--border-color)' }}
           >
             <div className="section-header">
-              <h3 style={{ margin: 0 }}>Записаться на тренировку</h3>
+              <h3 style={{ margin: 0 }}>Записаться на разбор игры</h3>
               <div className="section-line" />
             </div>
 

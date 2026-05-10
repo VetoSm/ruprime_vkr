@@ -231,6 +231,9 @@ export default function PlayerDashboard() {
       <div className="dash-layout mb-20">
         {/* Left: Player Card */}
         <div className="hero-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div className="badge badge-purple" style={{ marginBottom: 10, letterSpacing: 1, textTransform: 'uppercase' }}>
+            Боевой профиль
+          </div>
           {avatarUrl && (
             <img src={avatarUrl} alt="" className="hero-card-avatar" style={{ marginBottom: 12 }} />
           )}
@@ -276,7 +279,11 @@ export default function PlayerDashboard() {
 
           {scopeMatches > 0 && (
             <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              Статистика: {statsScopeLabel} ({scopeMatches} матчей)
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+                <span className="badge badge-accent">RANKED WINDOW</span>
+                <span className="badge badge-purple">{scopeMatches} матчей</span>
+              </div>
+              Статистика: {statsScopeLabel}
               {lifetimeWinrate > 0 && (
                 <div>Винрейт за всё время: {(lifetimeWinrate * 100).toFixed(1)}%</div>
               )}
@@ -311,8 +318,8 @@ export default function PlayerDashboard() {
         <div>
           <div className="flex-between mb-10">
             <h3 style={{ fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              Навыки
-              <InfoTooltip text="Оценка навыков от 0 до 10 на основе ваших матчей. Кликните для деталей." />
+              Панель навыков
+              <InfoTooltip text="Игровые зоны от 0 до 10: фарм, файты, выживаемость, вижн и объекты. Кликните для деталей." />
             </h3>
             {detailedFeatures?.target_rank && (
               <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
@@ -368,7 +375,7 @@ export default function PlayerDashboard() {
       {topGaps.length > 0 && (
         <div className="card mb-20">
           <div className="section-header">
-            <h3>Что подтянуть до {detailedFeatures?.target_rank || desiredRankStr}</h3>
+            <h3>Боевые задачи до {detailedFeatures?.target_rank || desiredRankStr}</h3>
             <div className="section-line" />
           </div>
           {topGaps.slice(0, 5).map((g: any, i: number) => {
@@ -399,7 +406,7 @@ export default function PlayerDashboard() {
             );
           })}
           <div style={{ marginTop: 16 }}>
-            <Link to="/ai-chat" className="btn btn-purple">Спросить AI-тренера</Link>
+            <Link to="/ai-chat" className="btn btn-purple">Разобрать с AI-тренером</Link>
           </div>
         </div>
       )}
@@ -408,7 +415,7 @@ export default function PlayerDashboard() {
       {trends.gpm_over_time && trends.gpm_over_time.length > 0 && (
         <div className="card mb-20">
           <div className="section-header">
-            <h3>GPM тренд <InfoTooltip text={`Как менялось ваше золото в минуту в выборке: ${statsScopeLabel}.`} /></h3>
+            <h3>Темп фарма: GPM <InfoTooltip text={`Как менялось ваше золото в минуту в выборке: ${statsScopeLabel}.`} /></h3>
             <div className="section-line" />
           </div>
           <ResponsiveContainer width="100%" height={240}>
@@ -427,19 +434,19 @@ export default function PlayerDashboard() {
       {/* === Quick Stats === */}
       <div className="grid-4">
         <div className="stat-card">
-          <div className="stat-card-label">Винрейт <InfoTooltip text={`Доля побед в выборке: ${statsScopeLabel}.`} /></div>
+          <div className="stat-card-label">Результативность <InfoTooltip text={`Доля побед в выборке: ${statsScopeLabel}.`} /></div>
           <div className="stat-card-value">{winrate > 0 ? `${(winrate * 100).toFixed(1)}%` : '—'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">GPM <InfoTooltip text="Золото в минуту." /></div>
+          <div className="stat-card-label">Фарм-темп <InfoTooltip text="GPM: золото в минуту." /></div>
           <div className="stat-card-value">{summary.gpm_avg || '—'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">XPM <InfoTooltip text="Опыт в минуту." /></div>
+          <div className="stat-card-label">Темп опыта <InfoTooltip text="XPM: опыт в минуту." /></div>
           <div className="stat-card-value">{summary.xpm_avg || '—'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">KDA <InfoTooltip text="(K + A) / D" /></div>
+          <div className="stat-card-label">Боевой счёт <InfoTooltip text="KDA: (убийства + ассисты) / смерти." /></div>
           <div className="stat-card-value">{summary.kda_avg || '—'}</div>
         </div>
       </div>

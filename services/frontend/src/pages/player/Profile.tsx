@@ -40,6 +40,8 @@ interface SteamData {
     win?: boolean;
     kda?: number;
     gpm?: number;
+    xpm?: number;
+    lane_role?: number;
   }>;
   heroes_top?: any[];
   rankings_top?: any[];
@@ -369,7 +371,7 @@ export default function PlayerProfile() {
               <div className="table-wrap">
                 <table>
                   <thead>
-                    <tr><th>Герой</th><th>Результат</th><th>KDA</th><th>GPM</th></tr>
+                    <tr><th>Герой</th><th>Итог</th><th>Боевой счёт</th><th>Темп</th></tr>
                   </thead>
                   <tbody>
                     {steamData.recent_matches.slice(0, 8).map((m) => (
@@ -378,9 +380,19 @@ export default function PlayerProfile() {
                           {renderHeroIcon(m.hero_id, 24)}
                           {heroName(m.hero_id)}
                         </td>
-                        <td style={{ color: m.win ? 'var(--accent)' : 'var(--danger)' }}>{m.win ? 'Победа' : 'Поражение'}</td>
-                        <td>{m.kda ?? '—'}</td>
-                        <td>{m.gpm ?? '—'}</td>
+                        <td>
+                          <span className={`badge ${m.win ? 'badge-accent' : 'badge-danger'}`}>
+                            {m.win ? 'WIN' : 'LOSS'}
+                          </span>
+                        </td>
+                        <td>{m.kda ?? '—'} KDA</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                            {m.lane_role && <RoleBadge role={m.lane_role} compact />}
+                            <span className="badge badge-purple">{m.gpm ?? '—'} GPM</span>
+                            {m.xpm != null && <span className="badge badge-accent">{m.xpm} XPM</span>}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

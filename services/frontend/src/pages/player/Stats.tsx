@@ -90,14 +90,14 @@ export default function PlayerStats() {
   return (
     <div>
       <div className="page-header">
-        <h1>Статистика</h1>
-        <p>Обзор вашей игры и динамика показателей: {scopeLabel}</p>
+        <h1>Разбор игры</h1>
+        <p>Матчевая сводка: {scopeLabel}</p>
       </div>
 
       <div className="card mb-20">
         <div className="flex-between" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <h3 style={{ margin: 0 }}>Фильтры статистики</h3>
+            <h3 style={{ margin: 0 }}>Фильтры боевого отчёта</h3>
             <p className="text-muted" style={{ margin: '4px 0 0' }}>
               Найдено матчей: {matchesCount}. Сравнение строится с игроками того же ранга
               {applied.role ? ` и ${roleContext}` : ''}{filters.hero_id ? ` на герое ${heroName(Number(filters.hero_id))}` : ''}.
@@ -148,15 +148,15 @@ export default function PlayerStats() {
 
       <div className="grid-4 mb-20">
         <div className="stat-card">
-          <div className="stat-card-label">Матчей в выборке <InfoTooltip text="Количество матчей после выбранных фильтров." /></div>
+          <div className="stat-card-label">Матчей в отчёте <InfoTooltip text="Количество матчей после выбранных фильтров." /></div>
           <div className="stat-card-value">{matchesCount}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">Винрейт <InfoTooltip text={`Доля побед в выборке: ${scopeLabel}.`} /></div>
+          <div className="stat-card-label">Результативность <InfoTooltip text={`Доля побед в выборке: ${scopeLabel}.`} /></div>
           <div className="stat-card-value">{summary.winrate !== null && summary.winrate !== undefined ? `${(summary.winrate * 100).toFixed(1)}%` : '—'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">KDA <InfoTooltip text="(Убийства + Ассисты) / Смерти" /></div>
+          <div className="stat-card-label">Боевой счёт <InfoTooltip text="KDA: (убийства + ассисты) / смерти." /></div>
           <div className="stat-card-value">{summary.kda_avg || '—'}</div>
         </div>
         <div className="stat-card">
@@ -166,10 +166,10 @@ export default function PlayerStats() {
       </div>
 
       <div className="tabs">
-        <div className={`tab ${tab === 'trends' ? 'active' : ''}`} onClick={() => setTab('trends')}>Тренды</div>
+        <div className={`tab ${tab === 'trends' ? 'active' : ''}`} onClick={() => setTab('trends')}>Темп</div>
         <div className={`tab ${tab === 'heroes' ? 'active' : ''}`} onClick={() => setTab('heroes')}>Герои</div>
         <div className={`tab ${tab === 'roles' ? 'active' : ''}`} onClick={() => setTab('roles')}>Позиции</div>
-        <div className={`tab ${tab === 'features' ? 'active' : ''}`} onClick={() => setTab('features')}>Навыки</div>
+        <div className={`tab ${tab === 'features' ? 'active' : ''}`} onClick={() => setTab('features')}>Скиллы</div>
         <div className={`tab ${tab === 'compare' ? 'active' : ''}`} onClick={() => setTab('compare')}>Сравнение</div>
       </div>
 
@@ -179,7 +179,7 @@ export default function PlayerStats() {
             <>
               <div className="card mb-20">
                 <div className="section-header">
-                  <h3>GPM по периодам <InfoTooltip text="Как менялось ваше золото в минуту от матча к матчу." /></h3>
+                  <h3>Фарм-темп по отрезкам <InfoTooltip text="Как менялось ваше золото в минуту от матча к матчу." /></h3>
                   <div className="section-line" />
                 </div>
                 <ResponsiveContainer width="100%" height={280}>
@@ -196,7 +196,7 @@ export default function PlayerStats() {
               <div className="grid-2">
                 <div className="card mb-20">
                   <div className="section-header">
-                    <h3>Винрейт</h3>
+                    <h3>Результативность</h3>
                     <div className="section-line" />
                   </div>
                   <ResponsiveContainer width="100%" height={220}>
@@ -211,7 +211,7 @@ export default function PlayerStats() {
                 </div>
                 <div className="card mb-20">
                   <div className="section-header">
-                    <h3>KDA</h3>
+                    <h3>Боевой счёт KDA</h3>
                     <div className="section-line" />
                   </div>
                   <ResponsiveContainer width="100%" height={220}>
@@ -235,7 +235,7 @@ export default function PlayerStats() {
       {tab === 'heroes' && (
         <div className="card">
           <div className="section-header">
-            <h3>Топ героев</h3>
+            <h3>Пул героев</h3>
             <div className="section-line" />
           </div>
           {heroes.length > 0 ? (
@@ -251,7 +251,7 @@ export default function PlayerStats() {
               </ResponsiveContainer>
               <div className="table-wrap mt-20">
                 <table>
-                  <thead><tr><th>Герой</th><th>Игр</th><th>Винрейт</th><th>KDA</th></tr></thead>
+                  <thead><tr><th>Герой</th><th>Игр</th><th>WR</th><th>Боевой счёт</th></tr></thead>
                   <tbody>
                     {heroes.map((h: any) => (
                       <tr key={h.hero_id}>
@@ -280,7 +280,7 @@ export default function PlayerStats() {
       {tab === 'roles' && (
         <div className="card">
           <div className="section-header">
-            <h3>Распределение по позициям</h3>
+            <h3>Роли в матчах</h3>
             <div className="section-line" />
           </div>
           {rolesData.length > 0 ? (
@@ -352,7 +352,7 @@ export default function PlayerStats() {
         <div className="card">
           <div className="section-header">
             <h3>
-              Сравнение с игроками того же ранга
+              Сравнение с игроками того же ранга и роли
               <InfoTooltip text="Насколько ваши метрики отличаются от среднего для вашего ранга. 100% = на уровне." />
             </h3>
             <div className="section-line" />
