@@ -23,6 +23,12 @@ HIDE_TEST_COACHES = os.getenv("HIDE_TEST_COACHES", "true").lower() in ("true", "
 TEST_COACH_AUTH_IDS = {
     int(v.strip()) for v in os.getenv("TEST_COACH_AUTH_IDS", "4,5").split(",") if v.strip().isdigit()
 }
+ACTIVE_REQUEST_STATUSES = (
+    RequestStatus.NEW,
+    RequestStatus.MATCHING,
+    RequestStatus.WAITING_CONFIRMATION,
+    RequestStatus.ACCEPTED,
+)
 
 
 def _available_coaches(db: Session):
@@ -35,6 +41,47 @@ def _available_coaches(db: Session):
         CoachProfile.mmr_estimate.isnot(None),
     )
     return query.order_by(CoachProfile.id.desc()).all()
+
+
+def _request_response(req: TrainingRequest) -> TrainingRequestResponse:
+    return TrainingRequestResponse(
+        id=req.id,
+        player_profile_id=req.player_profile_id,
+        desired_role=req.desired_role,
+        focus_area=req.focus_area,
+        status=req.status.value,
+        ml_analysis_id=req.ml_analysis_id,
+        recommended_coaches=req.recommended_coaches,
+        created_at=req.created_at,
+    )
+
+
+def _recommended_has_coach(req: TrainingRequest, coach_id: int | None) -> bool:
+    if not coach_id:
+        return False
+    for item in req.recommended_coaches or []:
+        if isinstance(item, dict) and item.get("coach_profile_id") == coach_id:
+            return True
+    return False
+
+
+def _find_existing_active_request(db: Session, profile_id: int, body: CreateTrainingRequest) -> TrainingRequest | None:
+    query = db.query(TrainingRequest).filter(
+        TrainingRequest.player_profile_id == profile_id,
+        TrainingRequest.status.in_(ACTIVE_REQUEST_STATUSES),
+        TrainingRequest.desired_role.is_(None) if body.desired_role is None else TrainingRequest.desired_role == body.desired_role,
+        TrainingRequest.focus_area.is_(None) if body.focus_area is None else TrainingRequest.focus_area == body.focus_area,
+    ).order_by(TrainingRequest.created_at.desc())
+
+    for req in query.limit(20).all():
+        if body.preferred_coach_profile_id:
+            if _recommended_has_coach(req, body.preferred_coach_profile_id):
+                return req
+            continue
+        # For generic matching requests, reuse the active request with same
+        # role/focus regardless of recommendation contents.
+        return req
+    return None
 
 
 @router.post("/requests", response_model=TrainingRequestResponse)
@@ -55,6 +102,14 @@ async def create_request(
         db.add(profile)
         db.commit()
         db.refresh(profile)
+
+    existing_req = _find_existing_active_request(db, profile.id, body)
+    if existing_req:
+        log_action(
+            db, current_user.user_id, current_user.role, "REUSE_REQUEST",
+            "TRAINING_REQUEST", existing_req.id,
+        )
+        return _request_response(existing_req)
 
     # Create request
     req = TrainingRequest(
@@ -92,16 +147,7 @@ async def create_request(
                 db, current_user.user_id, current_user.role, "CREATE_REQUEST_DIRECT",
                 "TRAINING_REQUEST", req.id, {"coach_profile_id": preferred.id},
             )
-            return TrainingRequestResponse(
-                id=req.id,
-                player_profile_id=req.player_profile_id,
-                desired_role=req.desired_role,
-                focus_area=req.focus_area,
-                status=req.status.value,
-                ml_analysis_id=req.ml_analysis_id,
-                recommended_coaches=req.recommended_coaches,
-                created_at=req.created_at,
-            )
+            return _request_response(req)
 
     # Otherwise run the ML matcher as usual.
     try:
@@ -163,16 +209,7 @@ async def create_request(
     log_action(db, current_user.user_id, current_user.role, "CREATE_REQUEST",
                "TRAINING_REQUEST", req.id)
 
-    return TrainingRequestResponse(
-        id=req.id,
-        player_profile_id=req.player_profile_id,
-        desired_role=req.desired_role,
-        focus_area=req.focus_area,
-        status=req.status.value,
-        ml_analysis_id=req.ml_analysis_id,
-        recommended_coaches=req.recommended_coaches,
-        created_at=req.created_at,
-    )
+    return _request_response(req)
 
 
 @router.post("/recommend-preview")

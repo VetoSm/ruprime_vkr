@@ -152,10 +152,11 @@ def _run_sync_job(account_id: int, steam_id: str | None) -> dict:
         account_id = int(data["account_id"])
         _save_player_account(db, data, steam)
 
-        matches = data.get("matches") or []
+        matches = _dedupe_matches(data.get("matches") or [])
         _replace_account_matches(db, account_id, matches)
+        db.flush()
 
-        detailed_ids = [m.get("match_id") for m in matches[:DEEP_SYNC_DETAILED_MATCHES] if m.get("match_id")]
+        detailed_ids = _unique_match_ids(matches, DEEP_SYNC_DETAILED_MATCHES)
         parse_result = request_match_parse(detailed_ids, max_requests=DEEP_SYNC_DETAILED_MATCHES) if detailed_ids else {"requested": 0}
 
         detailed_matches_fetched, players_cached = _cache_other_players_from_detailed_matches(db, detailed_ids)
@@ -223,8 +224,47 @@ def _save_player_account(db, data: dict, steam_id: str):
 
 def _replace_account_matches(db, account_id: int, matches: list[dict]):
     db.query(PlayerMatch).filter(PlayerMatch.account_id == account_id).delete()
-    for m in matches:
+    for m in _dedupe_matches(matches):
         db.add(_build_player_match(account_id, m, is_detailed=bool(m.get("is_detailed"))))
+
+
+def _dedupe_matches(matches: list[dict]) -> list[dict]:
+    """Keep one row per match_id, preferring detailed/richer rows."""
+    by_id: dict[int, dict] = {}
+    for row in matches:
+        match_id = row.get("match_id")
+        try:
+            match_id = int(match_id)
+        except (TypeError, ValueError):
+            continue
+        if not match_id:
+            continue
+        existing = by_id.get(match_id)
+        if not existing:
+            by_id[match_id] = row
+            continue
+        existing_score = int(bool(existing.get("is_detailed"))) + sum(1 for v in existing.values() if v is not None) / 1000
+        row_score = int(bool(row.get("is_detailed"))) + sum(1 for v in row.values() if v is not None) / 1000
+        if row_score >= existing_score:
+            by_id[match_id] = row
+    return list(by_id.values())
+
+
+def _unique_match_ids(matches: list[dict], limit: int) -> list[int]:
+    ids = []
+    seen = set()
+    for row in matches:
+        try:
+            match_id = int(row.get("match_id"))
+        except (TypeError, ValueError):
+            continue
+        if not match_id or match_id in seen:
+            continue
+        seen.add(match_id)
+        ids.append(match_id)
+        if len(ids) >= limit:
+            break
+    return ids
 
 
 def _cache_other_players_from_detailed_matches(db, match_ids: list[int]) -> tuple[int, int]:

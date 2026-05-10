@@ -313,7 +313,19 @@ def request_match_parse(match_ids: list[int], max_requests: int = 80) -> dict:
     """Request OpenDota to parse specific matches (for player linking)."""
     results = {"requested": 0, "failed": 0, "ids": []}
 
-    for match_id in match_ids[:max_requests]:
+    unique_ids = []
+    seen = set()
+    for raw_id in match_ids:
+        try:
+            match_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if not match_id or match_id in seen:
+            continue
+        seen.add(match_id)
+        unique_ids.append(match_id)
+
+    for match_id in unique_ids[:max_requests]:
         time.sleep(RATE_DELAY)
         try:
             with httpx.Client(timeout=10) as client:

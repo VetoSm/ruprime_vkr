@@ -97,7 +97,9 @@ def _build_roles_distribution(matches: list[dict]) -> dict:
 
 def _build_recent_matches(matches: list[dict], limit: int = 12) -> list[dict]:
     recent = []
-    for m in matches[:limit]:
+    deduped = _dedupe_match_dicts(matches)
+    deduped.sort(key=lambda x: x.get("start_time") or 0, reverse=True)
+    for m in deduped[:limit]:
         kills = int(m.get("kills") or 0)
         deaths = int(m.get("deaths") or 0)
         assists = int(m.get("assists") or 0)
@@ -211,6 +213,43 @@ def _build_heroes_top(matches: list[PlayerMatch], limit: int = 10) -> list[dict]
     return sorted(result, key=lambda x: x["games"], reverse=True)[:limit]
 
 
+def _dedupe_match_dicts(matches: list[dict]) -> list[dict]:
+    by_id: dict[int, dict] = {}
+    for row in matches:
+        try:
+            match_id = int(row.get("match_id"))
+        except (TypeError, ValueError):
+            continue
+        if not match_id:
+            continue
+        current = by_id.get(match_id)
+        if not current:
+            by_id[match_id] = row
+            continue
+        current_score = int(bool(current.get("is_detailed"))) + sum(1 for v in current.values() if v is not None) / 1000
+        row_score = int(bool(row.get("is_detailed"))) + sum(1 for v in row.values() if v is not None) / 1000
+        if row_score >= current_score:
+            by_id[match_id] = row
+    return list(by_id.values())
+
+
+def _unique_match_ids(matches: list[dict], limit: int) -> list[int]:
+    ids = []
+    seen = set()
+    for row in matches:
+        try:
+            match_id = int(row.get("match_id"))
+        except (TypeError, ValueError):
+            continue
+        if not match_id or match_id in seen:
+            continue
+        seen.add(match_id)
+        ids.append(match_id)
+        if len(ids) >= limit:
+            break
+    return ids
+
+
 # ---- Steam linking endpoints ----
 
 @router.post("/link-steam-account", response_model=PlayerAccountResponse)
@@ -313,7 +352,7 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
 
     # Save matches (clear old, insert new)
     db.query(PlayerMatch).filter(PlayerMatch.account_id == account_id).delete()
-    matches = data.get("matches", [])
+    matches = _dedupe_match_dicts(data.get("matches", []))
     for m in matches:
         pm = PlayerMatch(
             account_id=account_id,
@@ -348,7 +387,7 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
     # Request parse for recent matches (non-blocking background thread)
     parse_requested = 0
     parse_message = None
-    recent_match_ids = [m.get("match_id") for m in matches[:INITIAL_PARSE_MATCHES] if m.get("match_id")]
+    recent_match_ids = _unique_match_ids(matches, INITIAL_PARSE_MATCHES)
     if recent_match_ids:
         import threading
         from app.match_collector import request_match_parse
@@ -432,7 +471,11 @@ def get_player_account(account_id: int, db: Session = Depends(get_db)):
 
     matches_rows = db.query(PlayerMatch).filter(
         PlayerMatch.account_id == account_id
-    ).order_by(PlayerMatch.start_time.desc().nullslast()).all()
+    ).order_by(
+        PlayerMatch.start_time.desc().nullslast(),
+        PlayerMatch.is_detailed.desc().nullslast(),
+        PlayerMatch.id.desc(),
+    ).all()
     matches_count = len(matches_rows)
 
     recent_matches = _build_recent_matches([{
@@ -448,6 +491,7 @@ def get_player_account(account_id: int, db: Session = Depends(get_db)):
         "radiant_win": m.radiant_win,
         "lane_role": m.lane_role,
         "start_time": m.start_time,
+        "is_detailed": m.is_detailed,
     } for m in matches_rows])
     roles_distribution = _build_roles_distribution([{
         "lane_role": m.lane_role,
