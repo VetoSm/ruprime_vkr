@@ -67,7 +67,10 @@ export default function Register() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h2><span>Регистрация</span></h2>
+        <h2><span>Создать боевой профиль</span></h2>
+        <p className="text-center text-muted" style={{ fontSize: '0.84rem', marginTop: -8, marginBottom: 14 }}>
+          Выберите роль, примите правила штаба и откройте доступ к персональному разбору Dota 2.
+        </p>
 
         <div
           className="landing-persona-switch"
@@ -106,7 +109,7 @@ export default function Register() {
               marginBottom: 14,
             }}
           >
-            Аккаунт тренера попадает в каталог только после подтверждения с тех-аккаунта. До подтверждения вы продолжаете пользоваться сервисом как игрок — со своей статистикой и анализом.
+            Заявка тренера уходит в тех-штаб RuPrime. До подтверждения вы видите сервис как игрок: профиль, матчи, статистику и AI-разбор.
           </div>
         )}
 
@@ -114,7 +117,7 @@ export default function Register() {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>Логин</label>
+            <label>Игровой ник / логин</label>
             <input
               type="text"
               className="form-input"
@@ -125,7 +128,7 @@ export default function Register() {
             />
           </div>
           <div className="form-group">
-            <label>Email</label>
+            <label>Email для входа</label>
             <input
               type="email"
               className="form-input"
@@ -136,7 +139,7 @@ export default function Register() {
             />
           </div>
           <div className="form-group">
-            <label>Пароль</label>
+            <label>Пароль штаба</label>
             <div className="input-with-icon">
               <input
                 type={showPwd ? 'text' : 'password'}
@@ -217,10 +220,10 @@ export default function Register() {
             disabled={loading || !consent}
           >
             {loading
-              ? 'Создаём...'
+              ? 'Создаём профиль...'
               : persona === 'COACH'
-                ? 'Подать заявку тренера'
-                : 'Зарегистрироваться'}
+                ? 'Подать заявку в тренерский штаб'
+                : 'Создать профиль игрока'}
           </button>
         </form>
 
@@ -252,8 +255,8 @@ export default function Register() {
         </a>
         <p className="text-center mt-12 text-muted" style={{ fontSize: '0.78rem' }}>
           {persona === 'COACH'
-            ? 'Через Steam создаётся аккаунт с заявкой на роль тренера. Статус станет «подтверждён» после одобрения тех-аккаунтом.'
-            : 'Аккаунт создаётся автоматически, данные Dota подгружаются сразу.'}
+            ? 'Steam-вход создаёт заявку тренера. Каталог откроется после подтверждения тех-аккаунтом.'
+            : 'Steam-вход сразу создаёт боевой профиль и запускает загрузку открытых Dota-матчей.'}
         </p>
 
         <p className="text-center mt-20 text-muted">

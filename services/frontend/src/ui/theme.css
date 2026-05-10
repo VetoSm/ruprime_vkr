@@ -201,6 +201,8 @@ a:hover {
   padding-top: 68px;
   min-height: 100vh;
   transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-collapsed .main-content {
@@ -1446,7 +1448,7 @@ table tr:hover {
 }
 
 .site-footer {
-  margin-top: 28px;
+  margin-top: auto;
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
 }

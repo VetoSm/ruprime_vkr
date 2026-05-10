@@ -66,17 +66,43 @@ export default function PlayerAiChat() {
   return (
     <div>
       <div className="page-header">
-        <h1>ИИ-коуч</h1>
-        <p>Персональные советы по игре от искусственного интеллекта</p>
+        <h1>Оракул Древних</h1>
+        <p>AI-разбор по вашим матчам, роли и слабым зонам. Отвечает только по Dota 2.</p>
       </div>
 
       <div className="card" style={{ minHeight: 500, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+          <div
+            aria-hidden="true"
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 14,
+              border: '1px solid var(--border-color)',
+              background: 'var(--purple-bg)',
+              color: 'var(--accent-bright)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 900,
+              letterSpacing: 1,
+            }}
+          >
+            AI
+          </div>
+          <div>
+            <div style={{ fontWeight: 800 }}>Оракул Древних</div>
+            <div className="text-muted" style={{ fontSize: '0.82rem' }}>
+              Смотрит последние ranked-матчи, скиллы и role-aware baseline.
+            </div>
+          </div>
+        </div>
         <div className="chat-container" style={{ flex: 1 }}>
           {messages.length === 0 && (
             <div className="text-center text-muted" style={{ marginTop: 40 }}>
-              <p>Спросите ИИ-коуча обо всём, что касается вашей игры в Dota 2!</p>
+              <p>Спросите Оракула о своей игре в Dota 2.</p>
               <p style={{ fontSize: '0.85rem', marginTop: 10 }}>
-                Примеры: «Как улучшить игру на мид-лейне?» / «Каких героев учить для POS4?»
+                Примеры: «Почему просел вижн на POS4?» / «Что тренировать в следующих 10 ranked?»
               </p>
             </div>
           )}
@@ -98,11 +124,11 @@ export default function PlayerAiChat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && send()}
-            placeholder="Спросите ИИ-коуча..."
+            placeholder="Спросите Оракула по Dota 2..."
             disabled={loading}
           />
           <button className="btn btn-primary" onClick={send} disabled={loading}>
-            Отправить
+            Получить разбор
           </button>
         </div>
       </div>
