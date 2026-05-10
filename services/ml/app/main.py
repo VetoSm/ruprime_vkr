@@ -60,6 +60,10 @@ def startup():
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE player_matches ADD COLUMN IF NOT EXISTS obs_placed INTEGER"))
         conn.execute(text("ALTER TABLE player_matches ADD COLUMN IF NOT EXISTS sen_placed INTEGER"))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_player_matches_account_match "
+            "ON player_matches (account_id, match_id)"
+        ))
 
     # Mount images if available
     images_path = os.path.join(os.getenv("KAGGLE_DATA_PATH", "/data/archive-2"), "Images")

@@ -2,6 +2,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.orm import Session as DBSession
 
 from app.database import engine, Base
@@ -61,6 +62,31 @@ async def security_headers_middleware(request, call_next):
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_player_profiles_steam_id_nonempty "
+            "ON player_profiles (steam_id) "
+            "WHERE steam_id IS NOT NULL AND steam_id <> ''"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_player_profiles_dota_account_id_nonempty "
+            "ON player_profiles (dota_account_id) "
+            "WHERE dota_account_id IS NOT NULL AND dota_account_id <> ''"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_training_requests_active_same_scope "
+            "ON training_requests ("
+            "player_profile_id, "
+            "COALESCE(desired_role, ''), "
+            "COALESCE(focus_area, '')"
+            ") "
+            "WHERE status IN ("
+            "'NEW'::request_status_enum, "
+            "'MATCHING'::request_status_enum, "
+            "'WAITING_CONFIRMATION'::request_status_enum, "
+            "'ACCEPTED'::request_status_enum"
+            ")"
+        ))
 
     invalidate_stats = os.getenv("INVALIDATE_ML_ANALYSES_ON_START", "true").lower()
     if invalidate_stats in ("true", "1", "yes"):
