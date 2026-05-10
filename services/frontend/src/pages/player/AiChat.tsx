@@ -6,6 +6,101 @@ interface ChatEntry {
   text: string;
 }
 
+function cleanInline(text: string) {
+  return text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/^>\s?/, '');
+}
+
+function OracleMessage({ text }: { text: string }) {
+  const [body, metaRaw] = text.split(/\n---\n/);
+  const lines = body.split('\n');
+  const blocks: JSX.Element[] = [];
+  let listItems: string[] = [];
+
+  const flushList = () => {
+    if (listItems.length === 0) return;
+    const items = listItems;
+    listItems = [];
+    blocks.push(
+      <ul key={`list-${blocks.length}`} style={{ margin: '6px 0 12px', paddingLeft: 18 }}>
+        {items.map((item, idx) => (
+          <li key={idx} style={{ marginBottom: 4, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+            {cleanInline(item)}
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
+  lines.forEach((raw, idx) => {
+    const line = raw.trim();
+    if (!line) {
+      flushList();
+      return;
+    }
+    if (line.startsWith('# ')) {
+      flushList();
+      blocks.push(
+        <div key={idx} className="badge badge-purple" style={{ margin: '4px 0 10px', letterSpacing: 0.8, textTransform: 'uppercase' }}>
+          {cleanInline(line.replace(/^#\s+/, ''))}
+        </div>
+      );
+      return;
+    }
+    if (line.startsWith('## ')) {
+      flushList();
+      blocks.push(
+        <h3 key={idx} style={{ margin: '14px 0 8px', fontSize: '1rem', color: 'var(--accent-bright)' }}>
+          {cleanInline(line.replace(/^##\s+/, ''))}
+        </h3>
+      );
+      return;
+    }
+    if (line.startsWith('### ')) {
+      flushList();
+      blocks.push(
+        <div key={idx} style={{ margin: '12px 0 6px', fontWeight: 800, color: 'var(--text-primary)' }}>
+          {cleanInline(line.replace(/^###\s+/, ''))}
+        </div>
+      );
+      return;
+    }
+    const bullet = line.match(/^[-*]\s+(.*)$/) || line.match(/^\d+\.\s+(.*)$/);
+    if (bullet) {
+      listItems.push(bullet[1]);
+      return;
+    }
+    flushList();
+    blocks.push(
+      <p key={idx} style={{ margin: '0 0 8px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+        {cleanInline(line)}
+      </p>
+    );
+  });
+  flushList();
+
+  const meta = metaRaw?.split('\n').map((x) => x.trim()).filter(Boolean) || [];
+
+  return (
+    <div className="oracle-message">
+      {blocks}
+      {meta.length > 0 && (
+        <div style={{
+          marginTop: 12,
+          paddingTop: 10,
+          borderTop: '1px solid var(--border-color)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 6,
+        }}>
+          {meta.map((m, idx) => (
+            <span key={idx} className="badge badge-accent" style={{ fontSize: '0.72rem' }}>{m}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PlayerAiChat() {
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [input, setInput] = useState('');
@@ -108,7 +203,11 @@ export default function PlayerAiChat() {
           )}
           {messages.map((msg, i) => (
             <div key={i} className={`chat-message ${msg.type}`}>
-              <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.9rem' }}>{msg.text}</div>
+              {msg.type === 'ai' ? (
+                <OracleMessage text={msg.text} />
+              ) : (
+                <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.9rem' }}>{msg.text}</div>
+              )}
             </div>
           ))}
           {loading && (
