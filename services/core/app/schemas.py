@@ -111,6 +111,12 @@ class PatchTrainingSession(BaseModel):
     scheduled_at: Optional[datetime] = None
 
 
+class ShareSessionContactRequest(BaseModel):
+    contact_type: str
+    contact_value: str
+    note: Optional[str] = None
+
+
 class TrainingSessionResponse(BaseModel):
     id: int
     training_request_id: int
@@ -125,6 +131,7 @@ class TrainingSessionResponse(BaseModel):
     duration_minutes: Optional[int] = None
     status: str
     report: Optional[str] = None
+    contact_exchange: Optional[Any] = None
     created_at: Optional[datetime] = None
 
     class Config:

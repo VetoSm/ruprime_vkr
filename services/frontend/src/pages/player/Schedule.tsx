@@ -10,6 +10,7 @@ interface Session {
   duration_minutes?: number;
   status: string;
   review_given?: boolean;
+  contact_exchange?: any;
 }
 
 export default function PlayerSchedule() {
@@ -36,6 +37,38 @@ export default function PlayerSchedule() {
       setMsg('Сессия отменена.');
     } catch (e: any) {
       setErr(e?.response?.data?.detail || 'Не удалось отменить сессию');
+    }
+  };
+
+  const requestContact = async (id: number) => {
+    setErr(null); setMsg(null);
+    try {
+      const res = await coreApi.post(`/training-sessions/${id}/contact-request`);
+      setSessions((prev) => prev.map(s => s.id === id ? res.data : s));
+      setMsg('Запрос контакта отправлен тренеру.');
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || 'Не удалось запросить контакт');
+    }
+  };
+
+  const shareContact = async (id: number) => {
+    const contactType = window.prompt('Тип контакта: Telegram, Discord, телефон или другое', 'Telegram');
+    if (!contactType) return;
+    const contactValue = window.prompt('Ваш контакт, который увидит тренер');
+    if (!contactValue) return;
+    const note = window.prompt('Комментарий к контакту (опционально)', '') || undefined;
+
+    setErr(null); setMsg(null);
+    try {
+      const res = await coreApi.post(`/training-sessions/${id}/contact-share`, {
+        contact_type: contactType,
+        contact_value: contactValue,
+        note,
+      });
+      setSessions((prev) => prev.map(s => s.id === id ? res.data : s));
+      setMsg('Контакт отправлен тренеру.');
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || 'Не удалось отправить контакт');
     }
   };
 
@@ -82,35 +115,62 @@ export default function PlayerSchedule() {
                   <th>Дата и время</th>
                   <th>Длительность</th>
                   <th>Статус</th>
+                  <th>Контакты</th>
                   <th>Действия</th>
                 </tr>
               </thead>
               <tbody>
-                {sessions.map((s) => (
-                  <tr key={s.id}>
-                    <td>{s.id}</td>
-                    <td>{s.coach_label || `Тренер #${s.coach_profile_id}`}</td>
-                    <td>{s.scheduled_at ? new Date(s.scheduled_at).toLocaleString('ru-RU') : '—'}</td>
-                    <td>{s.duration_minutes ? `${s.duration_minutes} мин` : '—'}</td>
-                    <td>
-                      <span className={`badge ${s.status === 'COMPLETED' ? 'badge-accent' : s.status === 'CANCELLED' ? 'badge-danger' : 'badge-warning'}`}>
-                        {s.status}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-                        {s.status === 'PLANNED' && (
-                          <button className="btn btn-danger btn-sm" onClick={() => cancel(s.id)}>Отменить</button>
+                {sessions.map((s) => {
+                  const contact = s.contact_exchange || {};
+                  const coachContact = contact.coach_contact;
+                  const playerContact = contact.player_contact;
+                  const coachRequested = (contact.requested_by || []).includes('COACH');
+                  return (
+                    <tr key={s.id}>
+                      <td>{s.id}</td>
+                      <td>{s.coach_label || `Тренер #${s.coach_profile_id}`}</td>
+                      <td>{s.scheduled_at ? new Date(s.scheduled_at).toLocaleString('ru-RU') : '—'}</td>
+                      <td>{s.duration_minutes ? `${s.duration_minutes} мин` : '—'}</td>
+                      <td>
+                        <span className={`badge ${s.status === 'COMPLETED' ? 'badge-accent' : s.status === 'CANCELLED' ? 'badge-danger' : 'badge-warning'}`}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td>
+                        {coachContact ? (
+                          <div>
+                            <strong>{coachContact.type}: </strong>{coachContact.value}
+                            {coachContact.note && <div className="text-muted" style={{ fontSize: '0.78rem' }}>{coachContact.note}</div>}
+                          </div>
+                        ) : (
+                          <span className="text-muted">Контакт тренера не отправлен</span>
                         )}
-                        {s.status === 'COMPLETED' && (
-                          <button className="btn btn-primary btn-sm" onClick={() => setReviewFor(s)}>
-                            Оставить отзыв
-                          </button>
+                        {coachRequested && !playerContact && (
+                          <div className="badge badge-warning" style={{ marginTop: 6 }}>Тренер запросил ваш контакт</div>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                        {playerContact && <div className="text-muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>Ваш контакт отправлен</div>}
+                      </td>
+                      <td>
+                        <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+                          {!coachContact && s.status !== 'CANCELLED' && (
+                            <button className="btn btn-outline btn-sm" onClick={() => requestContact(s.id)}>Запросить контакт</button>
+                          )}
+                          {!playerContact && s.status !== 'CANCELLED' && (
+                            <button className="btn btn-outline btn-sm" onClick={() => shareContact(s.id)}>Поделиться контактом</button>
+                          )}
+                          {s.status === 'PLANNED' && (
+                            <button className="btn btn-danger btn-sm" onClick={() => cancel(s.id)}>Отменить</button>
+                          )}
+                          {s.status === 'COMPLETED' && (
+                            <button className="btn btn-primary btn-sm" onClick={() => setReviewFor(s)}>
+                              Оставить отзыв
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

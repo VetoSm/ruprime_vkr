@@ -10,6 +10,13 @@ const COLORS = ['#00d4aa', '#7c5cfc', '#ffa502', '#ff4757', '#1e90ff', '#ff6b81'
 const DEFAULT_FILTERS = { mode: 'ranked', period: '50', role: '', hero_id: '' };
 const MODE_LABELS: Record<string, string> = { ranked: 'Рейтинговые', turbo: 'Turbo', all: 'Все режимы' };
 const PERIOD_LABELS: Record<string, string> = { '20': '20 игр', '50': '50 игр', month: '30 дней', all: 'Вся история' };
+const ROLE_OPTIONS = [
+  { value: '1', label: 'Позиция 1', short: 'Carry' },
+  { value: '2', label: 'Позиция 2', short: 'Mid' },
+  { value: '3', label: 'Позиция 3', short: 'Offlane' },
+  { value: '4', label: 'Позиция 4', short: 'Soft Support' },
+  { value: '5', label: 'Позиция 5', short: 'Hard Support' },
+];
 
 const FEATURE_TIPS: Record<string, string> = {
   farming: 'Эффективность фарма: золото в минуту, крипов в минуту.',
@@ -84,6 +91,10 @@ export default function PlayerStats() {
   const scopeLabel = applied.label || `${PERIOD_LABELS[filters.period]}, ${MODE_LABELS[filters.mode]}`;
   const matchesCount = applied.matches_count ?? summary.games_analyzed ?? 0;
   const metricCounts = summary.metric_counts || {};
+  const roleCounts = applied.role_counts || {};
+  const unknownRoleCount = applied.unknown_role_count ?? 0;
+  const modeCounts = applied.mode_counts || {};
+  const reportBaseCount = applied.after_period_count ?? applied.before_period_count ?? matchesCount;
   const totalGames =
     steamData?.lifetime_games
     ?? steamData?.total_games
@@ -148,19 +159,42 @@ export default function PlayerStats() {
             {applied.total_available != null && (
               <div className="text-muted" style={{ marginTop: 6 }}>
                 Всего загружено: {applied.total_available}; после режима: {applied.after_mode_count ?? '—'};
-                перед ограничением периода: {applied.before_period_count ?? '—'}.
+                после периода: {applied.after_period_count ?? '—'}.
               </div>
             )}
+          </div>
+        )}
+        {unknownRoleCount > 0 && !filters.role && (
+          <div className="alert mt-20" style={{ fontSize: '0.86rem' }}>
+            У {unknownRoleCount} матчей в текущем отчёте позиция ещё не определена OpenDota.
+            Поэтому суммы по POS могут быть меньше, чем {reportBaseCount} матчей отчёта.
+            После parsed-догрузки эти матчи постепенно распределятся по позициям.
           </div>
         )}
         <div className="grid-4 mt-20">
           <label>
             <div className="form-label">Режим</div>
-            <select className="input" value={filters.mode} onChange={(e) => setFilters((f) => ({ ...f, mode: e.target.value }))}>
-              <option value="ranked">Рейтинговые</option>
-              <option value="turbo">Turbo</option>
-              <option value="all">Все режимы</option>
-            </select>
+            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+              {[
+                { value: 'ranked', label: 'Рейтинговые', count: (modeCounts.ranked || 0) + (modeCounts.unknown || 0) },
+                { value: 'turbo', label: 'Turbo', count: modeCounts.turbo || 0 },
+                { value: 'all', label: 'Все', count: modeCounts.all || 0 },
+              ].map((m) => (
+                <button
+                  key={m.value}
+                  type="button"
+                  className={`btn btn-sm ${filters.mode === m.value ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setFilters((f) => ({ ...f, mode: m.value }))}
+                >
+                  {m.label} {m.count ? `(${m.count})` : ''}
+                </button>
+              ))}
+            </div>
+            {modeCounts.unknown > 0 && (
+              <div className="text-muted" style={{ fontSize: '0.76rem', marginTop: 6 }}>
+                {modeCounts.unknown} матчей без режима считаются в ranked-срезе, чтобы не терять старую историю.
+              </div>
+            )}
           </label>
           <label>
             <div className="form-label">Период</div>
@@ -173,14 +207,34 @@ export default function PlayerStats() {
           </label>
           <label>
             <div className="form-label">Позиция</div>
-            <select className="input" value={filters.role} onChange={(e) => setFilters((f) => ({ ...f, role: e.target.value }))}>
-              <option value="">Все позиции</option>
-              <option value="1">Позиция 1</option>
-              <option value="2">Позиция 2</option>
-              <option value="3">Позиция 3</option>
-              <option value="4">Позиция 4</option>
-              <option value="5">Позиция 5</option>
-            </select>
+            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`btn btn-sm ${filters.role === '' ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setFilters((f) => ({ ...f, role: '' }))}
+              >
+                Все ({reportBaseCount})
+              </button>
+              {ROLE_OPTIONS.map((r) => {
+                const count = roleCounts[r.value] || 0;
+                return (
+                  <button
+                    key={r.value}
+                    type="button"
+                    className={`btn btn-sm ${filters.role === r.value ? 'btn-primary' : 'btn-outline'}`}
+                    onClick={() => setFilters((f) => ({ ...f, role: r.value }))}
+                    title={r.label}
+                  >
+                    {r.short} ({count})
+                  </button>
+                );
+              })}
+            </div>
+            {unknownRoleCount > 0 && (
+              <div className="text-muted" style={{ fontSize: '0.76rem', marginTop: 6 }}>
+                Не определено: {unknownRoleCount}
+              </div>
+            )}
           </label>
           <label>
             <div className="form-label">Герой</div>

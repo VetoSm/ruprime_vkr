@@ -105,6 +105,18 @@ class TrainingSession(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class TrainingContactExchange(Base):
+    __tablename__ = "training_contact_exchanges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    training_session_id = Column(Integer, ForeignKey("training_sessions.id", ondelete="CASCADE"), unique=True, index=True)
+    requested_by = Column(JSON, nullable=True)
+    player_contact = Column(JSON, nullable=True)
+    coach_contact = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class CoachReview(Base):
     __tablename__ = "coach_reviews"
 

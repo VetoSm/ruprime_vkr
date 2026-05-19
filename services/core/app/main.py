@@ -9,7 +9,7 @@ from app.database import engine, Base
 from app.models import (  # noqa: F401
     CoreUser, PlayerProfile, CoachProfile,
     TrainingRequest, TrainingSession, CoachReview,
-    AiAdviceHistory, CoreActionLog,
+    TrainingContactExchange, AiAdviceHistory, CoreActionLog,
 )
 from app.routers.me import router as me_router
 from app.routers.player import router as player_router

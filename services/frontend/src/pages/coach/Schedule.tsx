@@ -75,6 +75,38 @@ export default function CoachSchedule() {
     }
   };
 
+  const requestContact = async (id: number) => {
+    setErr(null); setMsg(null);
+    try {
+      const res = await coreApi.post(`/training-sessions/${id}/contact-request`);
+      setSessions((prev) => prev.map(s => s.id === id ? res.data : s));
+      setMsg('Запрос контакта отправлен игроку.');
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || 'Не удалось запросить контакт');
+    }
+  };
+
+  const shareContact = async (id: number) => {
+    const contactType = window.prompt('Тип контакта: Telegram, Discord, телефон или другое', 'Telegram');
+    if (!contactType) return;
+    const contactValue = window.prompt('Ваш контакт, который увидит игрок');
+    if (!contactValue) return;
+    const note = window.prompt('Комментарий к контакту (опционально)', '') || undefined;
+
+    setErr(null); setMsg(null);
+    try {
+      const res = await coreApi.post(`/training-sessions/${id}/contact-share`, {
+        contact_type: contactType,
+        contact_value: contactValue,
+        note,
+      });
+      setSessions((prev) => prev.map(s => s.id === id ? res.data : s));
+      setMsg('Контакт отправлен игроку.');
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || 'Не удалось отправить контакт');
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -189,31 +221,58 @@ export default function CoachSchedule() {
                   <th>Дата</th>
                   <th>Длительность</th>
                   <th>Статус</th>
+                  <th>Контакты</th>
                   <th>Действия</th>
                 </tr>
               </thead>
               <tbody>
-                {sessions.map((s) => (
-                  <tr key={s.id}>
-                    <td>{s.id}</td>
-                    <td>{s.player_label || `Игрок #${s.player_profile_id || '-'}`}</td>
-                    <td>#{s.training_request_id}</td>
-                    <td>{s.scheduled_at ? new Date(s.scheduled_at).toLocaleString('ru-RU') : '-'}</td>
-                    <td>{s.duration_minutes ? `${s.duration_minutes} мин` : '-'}</td>
-                    <td><span className={`badge ${s.status === 'COMPLETED' ? 'badge-accent' : s.status === 'CANCELLED' ? 'badge-danger' : 'badge-warning'}`}>{s.status}</span></td>
-                    <td>
-                      <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-                        {s.status === 'PLANNED' && (
-                          <>
-                            <button className="btn btn-primary btn-sm" onClick={() => complete(s.id)}>Завершить</button>
-                            <button className="btn btn-outline btn-sm" onClick={() => setRescheduleId(s.id)}>Перенести</button>
-                            <button className="btn btn-danger btn-sm" onClick={() => cancel(s.id)}>Отменить</button>
-                          </>
+                {sessions.map((s) => {
+                  const contact = s.contact_exchange || {};
+                  const playerContact = contact.player_contact;
+                  const coachContact = contact.coach_contact;
+                  const playerRequested = (contact.requested_by || []).includes('PLAYER');
+                  return (
+                    <tr key={s.id}>
+                      <td>{s.id}</td>
+                      <td>{s.player_label || `Игрок #${s.player_profile_id || '-'}`}</td>
+                      <td>#{s.training_request_id}</td>
+                      <td>{s.scheduled_at ? new Date(s.scheduled_at).toLocaleString('ru-RU') : '-'}</td>
+                      <td>{s.duration_minutes ? `${s.duration_minutes} мин` : '-'}</td>
+                      <td><span className={`badge ${s.status === 'COMPLETED' ? 'badge-accent' : s.status === 'CANCELLED' ? 'badge-danger' : 'badge-warning'}`}>{s.status}</span></td>
+                      <td>
+                        {playerContact ? (
+                          <div>
+                            <strong>{playerContact.type}: </strong>{playerContact.value}
+                            {playerContact.note && <div className="text-muted" style={{ fontSize: '0.78rem' }}>{playerContact.note}</div>}
+                          </div>
+                        ) : (
+                          <span className="text-muted">Контакт игрока не отправлен</span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                        {playerRequested && !coachContact && (
+                          <div className="badge badge-warning" style={{ marginTop: 6 }}>Игрок запросил ваш контакт</div>
+                        )}
+                        {coachContact && <div className="text-muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>Ваш контакт отправлен</div>}
+                      </td>
+                      <td>
+                        <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+                          {!playerContact && s.status !== 'CANCELLED' && (
+                            <button className="btn btn-outline btn-sm" onClick={() => requestContact(s.id)}>Запросить контакт</button>
+                          )}
+                          {!coachContact && s.status !== 'CANCELLED' && (
+                            <button className="btn btn-outline btn-sm" onClick={() => shareContact(s.id)}>Поделиться контактом</button>
+                          )}
+                          {s.status === 'PLANNED' && (
+                            <>
+                              <button className="btn btn-primary btn-sm" onClick={() => complete(s.id)}>Завершить</button>
+                              <button className="btn btn-outline btn-sm" onClick={() => setRescheduleId(s.id)}>Перенести</button>
+                              <button className="btn btn-danger btn-sm" onClick={() => cancel(s.id)}>Отменить</button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

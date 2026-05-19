@@ -576,7 +576,13 @@ def normalize_stats_filters(
 
 
 def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[pd.DataFrame, dict]:
-    """Apply mode/period/role/hero filters to newest-first match rows."""
+    """Apply mode/period/role/hero filters to newest-first match rows.
+
+    Order matters for product semantics: "last 50 ranked, POS3" means first
+    take the latest 50 ranked-ish matches, then narrow that report by POS3.
+    That way role buckets add up to the number the player sees in the current
+    report, with an explicit "unknown role" bucket for unparsed rows.
+    """
     filters = normalize_stats_filters(**(filters or {}))
     result = df.copy()
     total_available = int(len(result))
@@ -584,12 +590,39 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
     if "start_time" in result.columns:
         result = result.sort_values("start_time", ascending=False, na_position="last").reset_index(drop=True)
 
+    mode_counts = {"all": total_available, "ranked": 0, "turbo": 0, "unknown": 0}
+    if "game_mode" in result.columns:
+        mode_counts["unknown"] = int(result["game_mode"].isna().sum())
+        mode_counts["ranked"] = int(result["game_mode"].isin(RANKED_GAME_MODES).sum())
+        mode_counts["turbo"] = int((result["game_mode"] == TURBO_GAME_MODE).sum())
+
     if filters["mode"] == "ranked" and "game_mode" in result.columns:
         result = result[result["game_mode"].isna() | result["game_mode"].isin(RANKED_GAME_MODES)]
     elif filters["mode"] == "turbo" and "game_mode" in result.columns:
         result = result[result["game_mode"] == TURBO_GAME_MODE]
 
     after_mode = int(len(result))
+
+    before_period = int(len(result))
+    date_from = None
+    limit = None
+    if filters["period"] in {"20", "50"}:
+        limit = int(filters["period"])
+        result = result.head(limit)
+    elif filters["period"] == "month" and "start_time" in result.columns:
+        date_from = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())
+        result = result[result["start_time"].fillna(0) >= date_from]
+
+    after_period = int(len(result))
+
+    role_counts: dict[str, int] = {str(i): 0 for i in range(1, 6)}
+    unknown_role_count = 0
+    if "lane_role" in result.columns:
+        role_values = pd.to_numeric(result["lane_role"], errors="coerce")
+        valid_roles_for_counts = role_values[(role_values >= 1) & (role_values <= 5)]
+        for role_num, count in valid_roles_for_counts.value_counts().to_dict().items():
+            role_counts[str(int(role_num))] = int(count)
+        unknown_role_count = int(after_period - len(valid_roles_for_counts))
 
     explicit_role = filters["role"]
     role_source = "explicit" if explicit_role else "auto"
@@ -617,16 +650,6 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
     if filters["hero_id"] and "hero_id" in result.columns:
         result = result[result["hero_id"] == filters["hero_id"]]
 
-    before_period = int(len(result))
-    date_from = None
-    limit = None
-    if filters["period"] in {"20", "50"}:
-        limit = int(filters["period"])
-        result = result.head(limit)
-    elif filters["period"] == "month" and "start_time" in result.columns:
-        date_from = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())
-        result = result[result["start_time"].fillna(0) >= date_from]
-
     filtered_count = int(len(result))
     labels = {
         "mode": {
@@ -646,10 +669,14 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
         **filters,
         "label": f"{labels['period']}, {labels['mode']}",
         "total_available": total_available,
+        "mode_counts": mode_counts,
         "after_mode_count": after_mode,
+        "after_period_count": after_period,
         "role_source": role_source if filters["role"] else "none",
         "auto_role": auto_role,
         "role_pool_count": int(len(role_pool)),
+        "role_counts": role_counts,
+        "unknown_role_count": unknown_role_count,
         "before_period_count": before_period,
         "matches_count": filtered_count,
         "limit": limit,
