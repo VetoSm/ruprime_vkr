@@ -76,7 +76,7 @@ class CreateTrainingRequest(BaseModel):
 
 
 class PatchTrainingRequest(BaseModel):
-    action: str  # CHOOSE_COACH or CANCEL
+    action: str  # CHOOSE_COACH, REJECT, or CANCEL
     chosen_coach_profile_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
 
@@ -84,11 +84,21 @@ class PatchTrainingRequest(BaseModel):
 class TrainingRequestResponse(BaseModel):
     id: int
     player_profile_id: int
+    player_core_user_id: Optional[int] = None
+    player_label: Optional[str] = None
+    player_dota_account_id: Optional[str] = None
+    player_actual_rank_tier: Optional[str] = None
     desired_role: Optional[str] = None
     focus_area: Optional[str] = None
     status: str
     ml_analysis_id: Optional[str] = None
     recommended_coaches: Optional[Any] = None
+    coach_profile_id: Optional[int] = None
+    coach_core_user_id: Optional[int] = None
+    coach_label: Optional[str] = None
+    coach_rank_tier: Optional[str] = None
+    coach_mmr_estimate: Optional[int] = None
+    coach_hourly_rate: Optional[float] = None
     created_at: Optional[datetime] = None
 
     class Config:

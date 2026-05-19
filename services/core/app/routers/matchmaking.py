@@ -31,6 +31,21 @@ ACTIVE_REQUEST_STATUSES = (
 )
 
 
+def _coach_label(coach: CoachProfile | None) -> str | None:
+    if not coach:
+        return None
+    title = (coach.about or "").splitlines()[0].strip()
+    return title or f"Тренер #{coach.id}"
+
+
+def _player_label(player: PlayerProfile | None) -> str | None:
+    if not player:
+        return None
+    if player.dota_account_id:
+        return f"Игрок {player.dota_account_id}"
+    return f"Игрок #{player.id}"
+
+
 def _available_coaches(db: Session):
     query = db.query(CoachProfile).join(CoreUser, CoreUser.id == CoachProfile.core_user_id)
     if HIDE_TEST_COACHES and TEST_COACH_AUTH_IDS:
@@ -43,15 +58,62 @@ def _available_coaches(db: Session):
     return query.order_by(CoachProfile.id.desc()).all()
 
 
-def _request_response(req: TrainingRequest) -> TrainingRequestResponse:
+def _coach_id_from_request(req: TrainingRequest) -> int | None:
+    for item in req.recommended_coaches or []:
+        if isinstance(item, dict) and item.get("coach_profile_id"):
+            return item.get("coach_profile_id")
+    return None
+
+
+def _request_response(req: TrainingRequest, db: Session | None = None) -> TrainingRequestResponse:
+    player = None
+    coach = None
+    recommended = req.recommended_coaches
+
+    if db:
+        player = db.query(PlayerProfile).filter(PlayerProfile.id == req.player_profile_id).first()
+        coach_id = _coach_id_from_request(req)
+        if coach_id:
+            coach = db.query(CoachProfile).filter(CoachProfile.id == coach_id).first()
+        if recommended:
+            recommended = []
+            for item in req.recommended_coaches or []:
+                if not isinstance(item, dict):
+                    recommended.append(item)
+                    continue
+                enriched = dict(item)
+                item_coach = None
+                item_coach_id = item.get("coach_profile_id")
+                if item_coach_id:
+                    item_coach = db.query(CoachProfile).filter(CoachProfile.id == item_coach_id).first()
+                if item_coach:
+                    enriched.update({
+                        "coach_label": _coach_label(item_coach),
+                        "coach_core_user_id": item_coach.core_user_id,
+                        "rank_tier": item_coach.rank_tier,
+                        "mmr_estimate": item_coach.mmr_estimate,
+                        "hourly_rate": item_coach.hourly_rate,
+                    })
+                recommended.append(enriched)
+
     return TrainingRequestResponse(
         id=req.id,
         player_profile_id=req.player_profile_id,
+        player_core_user_id=player.core_user_id if player else None,
+        player_label=_player_label(player),
+        player_dota_account_id=player.dota_account_id if player else None,
+        player_actual_rank_tier=player.actual_rank_tier if player else None,
         desired_role=req.desired_role,
         focus_area=req.focus_area,
         status=req.status.value,
         ml_analysis_id=req.ml_analysis_id,
-        recommended_coaches=req.recommended_coaches,
+        recommended_coaches=recommended,
+        coach_profile_id=coach.id if coach else None,
+        coach_core_user_id=coach.core_user_id if coach else None,
+        coach_label=_coach_label(coach),
+        coach_rank_tier=coach.rank_tier if coach else None,
+        coach_mmr_estimate=coach.mmr_estimate if coach else None,
+        coach_hourly_rate=coach.hourly_rate if coach else None,
         created_at=req.created_at,
     )
 
@@ -63,6 +125,12 @@ def _recommended_has_coach(req: TrainingRequest, coach_id: int | None) -> bool:
         if isinstance(item, dict) and item.get("coach_profile_id") == coach_id:
             return True
     return False
+
+
+def _has_session_for_request(db: Session, request_id: int) -> bool:
+    return db.query(TrainingSession).filter(
+        TrainingSession.training_request_id == request_id,
+    ).first() is not None
 
 
 def _find_existing_active_request(db: Session, profile_id: int, body: CreateTrainingRequest) -> TrainingRequest | None:
@@ -109,7 +177,7 @@ async def create_request(
             db, current_user.user_id, current_user.role, "REUSE_REQUEST",
             "TRAINING_REQUEST", existing_req.id,
         )
-        return _request_response(existing_req)
+        return _request_response(existing_req, db)
 
     # Create request
     req = TrainingRequest(
@@ -147,7 +215,7 @@ async def create_request(
                 db, current_user.user_id, current_user.role, "CREATE_REQUEST_DIRECT",
                 "TRAINING_REQUEST", req.id, {"coach_profile_id": preferred.id},
             )
-            return _request_response(req)
+            return _request_response(req, db)
 
     # Otherwise run the ML matcher as usual.
     try:
@@ -209,7 +277,7 @@ async def create_request(
     log_action(db, current_user.user_id, current_user.role, "CREATE_REQUEST",
                "TRAINING_REQUEST", req.id)
 
-    return _request_response(req)
+    return _request_response(req, db)
 
 
 @router.post("/recommend-preview")
@@ -303,19 +371,33 @@ def my_requests(
         TrainingRequest.player_profile_id == profile.id,
     ).order_by(TrainingRequest.created_at.desc()).all()
 
-    return [
-        TrainingRequestResponse(
-            id=r.id,
-            player_profile_id=r.player_profile_id,
-            desired_role=r.desired_role,
-            focus_area=r.focus_area,
-            status=r.status.value,
-            ml_analysis_id=r.ml_analysis_id,
-            recommended_coaches=r.recommended_coaches,
-            created_at=r.created_at,
-        )
-        for r in requests
+    return [_request_response(r, db) for r in requests]
+
+
+@router.get("/requests/coach", response_model=list[TrainingRequestResponse])
+def coach_requests(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List pending training applications addressed to the current coach."""
+    if current_user.role not in ("COACH", "ADMIN"):
+        raise HTTPException(status_code=403, detail="Only coaches can view coach requests")
+
+    coach_profile = db.query(CoachProfile).filter(
+        CoachProfile.core_user_id == current_user.user_id
+    ).first()
+    if not coach_profile:
+        return []
+
+    requests = db.query(TrainingRequest).filter(
+        TrainingRequest.status == RequestStatus.WAITING_CONFIRMATION,
+    ).order_by(TrainingRequest.created_at.desc()).all()
+
+    visible = [
+        r for r in requests
+        if _recommended_has_coach(r, coach_profile.id) and not _has_session_for_request(db, r.id)
     ]
+    return [_request_response(r, db) for r in visible]
 
 
 @router.patch("/requests/{request_id}", response_model=TrainingRequestResponse)
@@ -325,32 +407,66 @@ def patch_request(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update a training request (choose coach or cancel)."""
-    profile = db.query(PlayerProfile).filter(
-        PlayerProfile.core_user_id == current_user.user_id
-    ).first()
-
+    """Update a training request (choose/confirm coach, reject, or cancel)."""
     req = db.query(TrainingRequest).filter(TrainingRequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
-    if profile and req.player_profile_id != profile.id and current_user.role != "ADMIN":
-        raise HTTPException(status_code=403, detail="Not your request")
 
     if body.action == "CANCEL":
+        profile = db.query(PlayerProfile).filter(
+            PlayerProfile.core_user_id == current_user.user_id
+        ).first()
+        if current_user.role != "ADMIN" and (not profile or req.player_profile_id != profile.id):
+            raise HTTPException(status_code=403, detail="Not your request")
         req.status = RequestStatus.CANCELLED
         db.commit()
         log_action(db, current_user.user_id, current_user.role, "CANCEL_REQUEST",
                    "TRAINING_REQUEST", req.id)
 
+    elif body.action == "REJECT":
+        coach_profile = db.query(CoachProfile).filter(
+            CoachProfile.core_user_id == current_user.user_id
+        ).first()
+        if current_user.role != "ADMIN" and (
+            not coach_profile or not _recommended_has_coach(req, coach_profile.id)
+        ):
+            raise HTTPException(status_code=403, detail="Not your coach request")
+        req.status = RequestStatus.REJECTED
+        db.commit()
+        log_action(db, current_user.user_id, current_user.role, "REJECT_REQUEST",
+                   "TRAINING_REQUEST", req.id)
+
     elif body.action == "CHOOSE_COACH":
         if req.status != RequestStatus.WAITING_CONFIRMATION:
             raise HTTPException(status_code=400, detail="Request not in WAITING_CONFIRMATION status")
-        if not body.chosen_coach_profile_id:
+
+        chosen_coach_id = body.chosen_coach_profile_id
+        if current_user.role == "COACH":
+            coach_profile = db.query(CoachProfile).filter(
+                CoachProfile.core_user_id == current_user.user_id
+            ).first()
+            if not coach_profile or not _recommended_has_coach(req, coach_profile.id):
+                raise HTTPException(status_code=403, detail="Not your coach request")
+            chosen_coach_id = coach_profile.id
+            if not body.scheduled_at:
+                raise HTTPException(status_code=400, detail="scheduled_at required for coach confirmation")
+        elif current_user.role != "ADMIN":
+            profile = db.query(PlayerProfile).filter(
+                PlayerProfile.core_user_id == current_user.user_id
+            ).first()
+            if not profile or req.player_profile_id != profile.id:
+                raise HTTPException(status_code=403, detail="Not your request")
+
+        if not chosen_coach_id:
             raise HTTPException(status_code=400, detail="Coach profile ID required")
+        if not _recommended_has_coach(req, chosen_coach_id) and current_user.role != "ADMIN":
+            raise HTTPException(status_code=400, detail="Coach is not attached to this request")
+        if _has_session_for_request(db, req.id):
+            raise HTTPException(status_code=400, detail="Session already exists for this request")
 
         session = TrainingSession(
             training_request_id=req.id,
-            coach_profile_id=body.chosen_coach_profile_id,
+            coach_profile_id=chosen_coach_id,
             scheduled_at=body.scheduled_at,
             duration_minutes=60,
             status=SessionStatus.PLANNED,
@@ -362,14 +478,8 @@ def patch_request(
         log_action(db, current_user.user_id, current_user.role, "CREATE_SESSION",
                    "TRAINING_SESSION", session.id)
 
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
+
     db.refresh(req)
-    return TrainingRequestResponse(
-        id=req.id,
-        player_profile_id=req.player_profile_id,
-        desired_role=req.desired_role,
-        focus_area=req.focus_area,
-        status=req.status.value,
-        ml_analysis_id=req.ml_analysis_id,
-        recommended_coaches=req.recommended_coaches,
-        created_at=req.created_at,
-    )
+    return _request_response(req, db)

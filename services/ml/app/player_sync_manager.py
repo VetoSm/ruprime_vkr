@@ -10,6 +10,7 @@ Purpose:
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timezone
 
 from app.database import SessionLocal
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 DEEP_SYNC_MAX_MATCHES = max(500, int(os.getenv("PLAYER_DEEP_SYNC_MAX_MATCHES", "3000")))
 DEEP_SYNC_DETAILED_MATCHES = max(25, int(os.getenv("PLAYER_DEEP_SYNC_DETAILED_MATCHES", "80")))
+PARSE_FOLLOWUP_DELAY_SEC = max(60, int(os.getenv("PLAYER_PARSE_FOLLOWUP_DELAY_SEC", "600")))
 
 _state = {
     "running": False,
@@ -161,6 +163,8 @@ def _run_sync_job(account_id: int, steam_id: str | None) -> dict:
 
         detailed_matches_fetched, players_cached = _cache_other_players_from_detailed_matches(db, detailed_ids)
         db.commit()
+        if parse_result.get("ids"):
+            _schedule_parse_followup(account_id, parse_result["ids"])
 
         return {
             "fetched_matches": len(matches),
@@ -173,6 +177,49 @@ def _run_sync_job(account_id: int, steam_id: str | None) -> dict:
         raise
     finally:
         db.close()
+
+
+def _schedule_parse_followup(account_id: int, match_ids: list[int]):
+    """Fetch requested parses later, after OpenDota has had time to process.
+
+    /request/{match_id} is asynchronous on OpenDota's side. Fetching /matches
+    immediately after requesting parse often returns the old sparse payload, so
+    we do a delayed best-effort pass and upsert the richer rows into
+    player_matches. This is what makes parsed data appear "over time".
+    """
+    ids = _unique_match_ids([{"match_id": mid} for mid in match_ids], DEEP_SYNC_DETAILED_MATCHES)
+    if not ids:
+        return
+
+    def _followup():
+        time.sleep(PARSE_FOLLOWUP_DELAY_SEC)
+        db = SessionLocal()
+        try:
+            detailed_matches_fetched, players_cached = _cache_other_players_from_detailed_matches(db, ids)
+            db.commit()
+            with _lock:
+                cur = dict(_state["jobs"].get(account_id) or {})
+                cur.update({
+                    "parse_followup_at": datetime.now(timezone.utc).isoformat(),
+                    "parse_followup_matches": detailed_matches_fetched,
+                    "parse_followup_players_cached": players_cached,
+                    "message": "Parsed-матчи догружены" if detailed_matches_fetched else cur.get("message"),
+                })
+                _state["jobs"][account_id] = cur
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Parse follow-up failed for account_id=%s: %s", account_id, exc)
+            with _lock:
+                cur = dict(_state["jobs"].get(account_id) or {})
+                cur.update({
+                    "parse_followup_error": str(exc),
+                    "parse_followup_at": datetime.now(timezone.utc).isoformat(),
+                })
+                _state["jobs"][account_id] = cur
+        finally:
+            db.close()
+
+    threading.Thread(target=_followup, daemon=True, name=f"parse-followup-{account_id}").start()
 
 
 def _save_player_account(db, data: dict, steam_id: str):

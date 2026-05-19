@@ -130,7 +130,7 @@ export default function PlayerDashboard() {
   const isLinked = steamData?.linked && steamData?.personaname;
   const displayName = steamData?.personaname || user?.login || 'Игрок';
   const avatarUrl = steamData?.avatar_url;
-  const estimated_mmr = summary.estimated_mmr || 0;
+  const reportMmr = summary.estimated_mmr || 0;
   // "Всего игр" показывается пользователю. Источник правды — lifetime_games
   // из steamData (wl.win + wl.lose). summary.* и matches_loaded отражают
   // количество проанализированных / загруженных матчей и пользователю не
@@ -139,6 +139,7 @@ export default function PlayerDashboard() {
     steamData?.lifetime_games
     ?? steamData?.total_games
     ?? ((steamData?.win || 0) + (steamData?.lose || 0));
+  const accountMmr = steamData?.mmr_estimate ?? reportMmr;
   const lifetimeWinrate = totalGames > 0 ? (steamData?.win || 0) / totalGames : 0;
   const winrate = summary.winrate ?? lifetimeWinrate;
   const statsScopeLabel = summary.stats_scope_label || summary.filters_applied?.label || 'последние 50, рейтинговые матчи';
@@ -146,7 +147,7 @@ export default function PlayerDashboard() {
   const hours = summary.estimated_hours || steamData?.estimated_hours || 0;
   const desiredRankStr = playerProfile?.desired_rank_tier || 'IMMORTAL';
   const desired_mmr = MMR_BY_RANK[desiredRankStr.toUpperCase()] || 5700;
-  const progress = estimated_mmr > 0 ? Math.min((estimated_mmr / desired_mmr) * 100, 100) : 0;
+  const progress = accountMmr > 0 ? Math.min((accountMmr / desired_mmr) * 100, 100) : 0;
 
   const categories = detailedFeatures?.categories || [];
   const topGaps = detailedFeatures?.top_gaps || [];
@@ -248,12 +249,12 @@ export default function PlayerDashboard() {
           <h2 style={{ fontSize: '1.3rem', fontWeight: 800, margin: '4px 0 12px' }}>{displayName}</h2>
 
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-            {estimated_mmr > 0 && (
+            {accountMmr > 0 && (
               <div className="stat-pill" style={{ minWidth: 80, padding: '10px 14px' }}>
                 <span className="stat-pill-label" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  MMR <InfoTooltip text="Оценка рейтинга по вашей статистике матчей." />
+                  MMR <InfoTooltip text="Единая оценка аккаунта из Steam/OpenDota ранга. Фильтры отчёта её не меняют." />
                 </span>
-                <span className="stat-pill-value accent">{estimated_mmr}</span>
+                <span className="stat-pill-value accent">{accountMmr}</span>
               </div>
             )}
             <div className="stat-pill" style={{ minWidth: 80, padding: '10px 14px' }}>
@@ -267,6 +268,12 @@ export default function PlayerDashboard() {
                 Часы <InfoTooltip text="Оценка суммарного игрового времени по данным OpenDota." />
               </span>
               <span className="stat-pill-value">{hours || '—'}</span>
+            </div>
+            <div className="stat-pill" style={{ minWidth: 80, padding: '10px 14px' }}>
+              <span className="stat-pill-label" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                Всего игр <InfoTooltip text="Общее количество игр аккаунта из Steam/OpenDota. Не зависит от фильтров отчёта." />
+              </span>
+              <span className="stat-pill-value">{totalGames ? totalGames.toLocaleString('ru-RU') : '—'}</span>
             </div>
           </div>
 
@@ -290,10 +297,10 @@ export default function PlayerDashboard() {
             </div>
           )}
 
-          {estimated_mmr > 0 && (
+          {accountMmr > 0 && (
             <div style={{ width: '100%', marginTop: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
-                <span>{estimated_mmr} MMR</span>
+                <span>{accountMmr} MMR</span>
                 <span><RankBadge rankName={desiredRankStr} size="sm" /></span>
               </div>
               <div className="progress-bar progress-bar--lg">

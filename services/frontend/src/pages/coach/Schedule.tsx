@@ -4,12 +4,24 @@ import SessionsCalendar from '../../ui/SessionsCalendar';
 
 export default function CoachSchedule() {
   const [sessions, setSessions] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
   const [rescheduleId, setRescheduleId] = useState<number | null>(null);
   const [newDateTime, setNewDateTime] = useState('');
+  const [confirmRequestId, setConfirmRequestId] = useState<number | null>(null);
+  const [confirmDateTime, setConfirmDateTime] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    coreApi.get('/training-sessions/my').then((r) => setSessions(r.data)).catch(() => {});
-  }, []);
+  const reload = async () => {
+    const [sessionsRes, requestsRes] = await Promise.all([
+      coreApi.get('/training-sessions/my'),
+      coreApi.get('/matchmaking/requests/coach'),
+    ]);
+    setSessions(sessionsRes.data);
+    setRequests(requestsRes.data);
+  };
+
+  useEffect(() => { reload().catch(() => {}); }, []);
 
   const complete = async (id: number) => {
     await coreApi.patch(`/training-sessions/${id}`, { action: 'COMPLETE' });
@@ -34,6 +46,35 @@ export default function CoachSchedule() {
     setNewDateTime('');
   };
 
+  const confirmRequest = async () => {
+    if (!confirmRequestId || !confirmDateTime) return;
+    setErr(null); setMsg(null);
+    try {
+      await coreApi.patch(`/matchmaking/requests/${confirmRequestId}`, {
+        action: 'CHOOSE_COACH',
+        scheduled_at: new Date(confirmDateTime).toISOString(),
+      });
+      await reload();
+      setConfirmRequestId(null);
+      setConfirmDateTime('');
+      setMsg('Заявка подтверждена. Сессия добавлена в расписание игрока и тренера.');
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || 'Не удалось подтвердить заявку');
+    }
+  };
+
+  const rejectRequest = async (id: number) => {
+    if (!window.confirm('Отклонить эту заявку?')) return;
+    setErr(null); setMsg(null);
+    try {
+      await coreApi.patch(`/matchmaking/requests/${id}`, { action: 'REJECT' });
+      setRequests(requests.filter((r) => r.id !== id));
+      setMsg('Заявка отклонена.');
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || 'Не удалось отклонить заявку');
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -41,8 +82,85 @@ export default function CoachSchedule() {
         <p>Ваши записи учеников и календарь тренировок</p>
       </div>
 
+      {msg && <div className="alert alert-success mb-20">{msg}</div>}
+      {err && <div className="alert alert-error mb-20">{err}</div>}
+
+      <div className="card mb-20">
+        <div className="section-header">
+          <h3>Новые заявки</h3>
+          <div className="section-line" />
+        </div>
+        {requests.length === 0 ? (
+          <p className="text-muted">Ожидающих заявок нет.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Игрок</th>
+                  <th>Позиция</th>
+                  <th>Фокус</th>
+                  <th>Сообщение</th>
+                  <th>Дата</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requests.map((r) => {
+                  const rec = (r.recommended_coaches || []).find((item: any) => item?.coach_profile_id === r.coach_profile_id)
+                    || (r.recommended_coaches || [])[0];
+                  return (
+                    <tr key={r.id}>
+                      <td>{r.id}</td>
+                      <td>
+                        <div>{r.player_label || `Игрок #${r.player_profile_id}`}</div>
+                        <div className="text-muted" style={{ fontSize: '0.78rem' }}>
+                          Profile #{r.player_profile_id}
+                          {r.player_actual_rank_tier ? ` · ${r.player_actual_rank_tier}` : ''}
+                        </div>
+                      </td>
+                      <td>{r.desired_role || '—'}</td>
+                      <td>{r.focus_area || '—'}</td>
+                      <td>{rec?.message || '—'}</td>
+                      <td>
+                        {confirmRequestId === r.id ? (
+                          <input
+                            type="datetime-local"
+                            className="form-input"
+                            value={confirmDateTime}
+                            onChange={(e) => setConfirmDateTime(e.target.value)}
+                          />
+                        ) : (
+                          <span className="text-muted">Выберите время</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+                          {confirmRequestId === r.id ? (
+                            <>
+                              <button className="btn btn-primary btn-sm" onClick={confirmRequest} disabled={!confirmDateTime}>Подтвердить</button>
+                              <button className="btn btn-outline btn-sm" onClick={() => setConfirmRequestId(null)}>Отмена</button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="btn btn-primary btn-sm" onClick={() => { setConfirmRequestId(r.id); setConfirmDateTime(''); }}>Назначить время</button>
+                              <button className="btn btn-danger btn-sm" onClick={() => rejectRequest(r.id)}>Отклонить</button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {sessions.length === 0 ? (
-        <div className="card"><p className="text-muted">Нет сессий.</p></div>
+        <div className="card"><p className="text-muted">Подтверждённых сессий пока нет.</p></div>
       ) : (
         <>
           <SessionsCalendar sessions={sessions} />

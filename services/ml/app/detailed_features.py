@@ -16,6 +16,7 @@ from app.feature_engine import (
     infer_rank_tier_from_matches,
     normalize_stats_filters,
     _baseline_scope_conditions,
+    _mean_present,
     _read_baselines_for_scope,
 )
 
@@ -464,14 +465,21 @@ def _compute_player_averages(df: pd.DataFrame, acc: PlayerAccount = None, prefer
         source = detailed if not detailed.empty else df
 
         if prefer_match_stats or not detailed.empty:
-            result["gpm"] = round(source["gold_per_min"].fillna(0).mean(), 1)
-            result["xpm"] = round(source["xp_per_min"].fillna(0).mean(), 1)
-            result["hero_damage"] = round(source["hero_damage"].fillna(0).mean(), 0)
-            result["tower_damage"] = round(source["tower_damage"].fillna(0).mean(), 0)
-            result["hero_healing"] = round(source["hero_healing"].fillna(0).mean(), 0)
-            result["last_hits"] = round(source["last_hits"].fillna(0).mean(), 1)
-            result["denies"] = round(source["denies"].fillna(0).mean(), 1)
-            result["avg_duration_min"] = round(source["duration"].fillna(0).mean() / 60, 1)
+            for out_key, col, digits in (
+                ("gpm", "gold_per_min", 1),
+                ("xpm", "xp_per_min", 1),
+                ("hero_damage", "hero_damage", 0),
+                ("tower_damage", "tower_damage", 0),
+                ("hero_healing", "hero_healing", 0),
+                ("last_hits", "last_hits", 1),
+                ("denies", "denies", 1),
+            ):
+                val = _mean_present(source[col], digits, default=None) if col in source.columns else None
+                if val is not None:
+                    result[out_key] = val
+            duration = _mean_present(source["duration"], 1, default=None) if "duration" in source.columns else None
+            if duration is not None:
+                result["avg_duration_min"] = round(duration / 60, 1)
 
         # KDA from filtered matches
         if prefer_match_stats or not result.get("kills"):

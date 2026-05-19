@@ -32,6 +32,12 @@ export default function PlayerCoaches() {
     fetchRecommended();
   }, []);
 
+  useEffect(() => {
+    if (loading || !window.location.hash) return;
+    const target = document.querySelector(window.location.hash);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [loading, coaches.length]);
+
   const fetchRecommended = async (role?: string, focus?: string) => {
     setMatchLoading(true);
     try {
@@ -125,7 +131,7 @@ export default function PlayerCoaches() {
     );
 
     return (
-    <div key={coach.id} className="card" style={{
+    <div id={`coach-${coach.id}`} key={coach.id} className="card" style={{
       position: 'relative',
       borderColor: rec ? 'var(--accent)' : undefined,
       borderWidth: rec ? 2 : undefined,

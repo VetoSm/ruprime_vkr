@@ -263,14 +263,23 @@ async def sync_steam(
     if not steam_id or not steam_id.isdigit():
         raise HTTPException(status_code=400, detail="Некорректный Steam ID в профиле. Перепривяжите аккаунт.")
 
-    # Refresh data in ML (same pipeline as link-steam)
+    # Force-refresh data in ML when we already know account_id. The link
+    # endpoint intentionally returns cached data for existing accounts and only
+    # queues background sync; the user's "Обновить данные" action must pull a
+    # fresh OpenDota snapshot immediately.
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{settings.ML_SERVICE_URL}/ml/link-steam-account",
-                json={"steam_id": steam_id},
-                headers=ml_headers(),
-            )
+            if profile.dota_account_id:
+                resp = await client.post(
+                    f"{settings.ML_SERVICE_URL}/ml/refresh-player-data/{profile.dota_account_id}",
+                    headers=ml_headers(),
+                )
+            else:
+                resp = await client.post(
+                    f"{settings.ML_SERVICE_URL}/ml/link-steam-account",
+                    json={"steam_id": steam_id},
+                    headers=ml_headers(),
+                )
         if resp.status_code != 200:
             raise HTTPException(status_code=502, detail=f"ML сервис ошибка: {resp.text}")
         data = resp.json()

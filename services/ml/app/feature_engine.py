@@ -405,6 +405,23 @@ def _read_baselines_for_scope(mmr_band: str, role: int | None = None, hero_id: i
     return pd.DataFrame(), "none"
 
 
+def _mean_present(series: pd.Series, digits: int = 1, default=None):
+    """Mean over values that are actually present.
+
+    OpenDota's /players/{id}/matches history often lacks economy fields like
+    GPM/XPM for older rows. Treating those NULLs as zero makes the UI look like
+    the player farmed 0 GPM; it really means "metric not loaded for this row".
+    """
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    if values.empty:
+        return default
+    return round(float(values.mean()), digits)
+
+
+def _series_present(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(series, errors="coerce").dropna()
+
+
 def _compute_comparisons(df: pd.DataFrame, mmr_band: str, filters: dict | None = None) -> dict:
     """Compare player stats with baselines for the same MMR band."""
     filters = filters or {}
@@ -419,8 +436,8 @@ def _compute_comparisons(df: pd.DataFrame, mmr_band: str, filters: dict | None =
         return {"vs_same_tier": {}, "baseline_scope": "none"}
 
     avg_baseline = baselines.mean(numeric_only=True)
-    player_gpm = df["gold_per_min"].fillna(0).mean() if "gold_per_min" in df.columns else 0
-    player_xpm = df["xp_per_min"].fillna(0).mean() if "xp_per_min" in df.columns else 0
+    player_gpm = _mean_present(df["gold_per_min"], default=None) if "gold_per_min" in df.columns else None
+    player_xpm = _mean_present(df["xp_per_min"], default=None) if "xp_per_min" in df.columns else None
     player_kda = ((df["kills"].fillna(0) + df["assists"].fillna(0)) / df["deaths"].fillna(0).clip(lower=1)).mean()
 
     def safe_ratio(a, b):
@@ -476,12 +493,12 @@ def _compute_strengths_weaknesses(df: pd.DataFrame, mmr_band: str, filters: dict
     kda_val = ((df["kills"].fillna(0) + df["assists"].fillna(0)) / df["deaths"].fillna(0).clip(lower=1)).mean()
 
     player_scores = {
-        "gpm": safe_col_mean("gold_per_min") / max(avg_b.get("avg_gpm", 1), 1),
-        "xpm": safe_col_mean("xp_per_min") / max(avg_b.get("avg_xpm", 1), 1),
+        "gpm": (_mean_present(df["gold_per_min"], default=0) or 0) / max(avg_b.get("avg_gpm", 1), 1),
+        "xpm": (_mean_present(df["xp_per_min"], default=0) or 0) / max(avg_b.get("avg_xpm", 1), 1),
         "kda": kda_val / max(avg_b.get("avg_kda", 1), 1),
-        "last_hits": safe_col_mean("last_hits") / max(avg_b.get("avg_last_hits", 1), 1),
-        "hero_damage": safe_col_mean("hero_damage") / max(avg_b.get("avg_hero_damage", 1), 1),
-        "tower_damage": safe_col_mean("tower_damage") / max(avg_b.get("avg_tower_damage", 1), 1),
+        "last_hits": (_mean_present(df["last_hits"], default=0) or 0) / max(avg_b.get("avg_last_hits", 1), 1),
+        "hero_damage": (_mean_present(df["hero_damage"], default=0) or 0) / max(avg_b.get("avg_hero_damage", 1), 1),
+        "tower_damage": (_mean_present(df["tower_damage"], default=0) or 0) / max(avg_b.get("avg_tower_damage", 1), 1),
     }
 
     for key, score in player_scores.items():
@@ -568,7 +585,7 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
         result = result.sort_values("start_time", ascending=False, na_position="last").reset_index(drop=True)
 
     if filters["mode"] == "ranked" and "game_mode" in result.columns:
-        result = result[result["game_mode"].notna() & result["game_mode"].isin(RANKED_GAME_MODES)]
+        result = result[result["game_mode"].isna() | result["game_mode"].isin(RANKED_GAME_MODES)]
     elif filters["mode"] == "turbo" and "game_mode" in result.columns:
         result = result[result["game_mode"] == TURBO_GAME_MODE]
 
@@ -712,6 +729,12 @@ def analyze_player_from_account(
     safe_dur = df["duration_minutes"].where(df["duration_minutes"] > 0)
     df["cs_per_min"] = (df["last_hits"].fillna(0) / safe_dur).where(safe_dur.notna())
     df["hero_damage_per_min"] = (df["hero_damage"].fillna(0) / safe_dur).where(safe_dur.notna())
+    metric_counts = {
+        "gpm": int(_series_present(df["gold_per_min"]).count()) if "gold_per_min" in df.columns else 0,
+        "xpm": int(_series_present(df["xp_per_min"]).count()) if "xp_per_min" in df.columns else 0,
+        "last_hits": int(_series_present(df["last_hits"]).count()) if "last_hits" in df.columns else 0,
+        "hero_damage": int(_series_present(df["hero_damage"]).count()) if "hero_damage" in df.columns else 0,
+    }
 
     # Get rank from player_accounts if available
     rank_query = f"SELECT rank_tier FROM player_accounts WHERE account_id = {account_id}"
@@ -769,10 +792,11 @@ def analyze_player_from_account(
             "stats_scope_label": filters_applied["label"],
             "parsed_games_n": parsed_games_n,
             "winrate": None,
-            "gpm_avg": 0,
-            "xpm_avg": 0,
+            "gpm_avg": None,
+            "xpm_avg": None,
             "kda_avg": 0,
             "notice": ranked_only_notice,
+            "metric_counts": metric_counts,
         }
         return {
             "ml_analysis_id": analysis_id,
@@ -800,8 +824,8 @@ def analyze_player_from_account(
         "stats_scope_label": filters_applied["label"],
         "parsed_games_n": parsed_games_n,
         "winrate": winrate_val,
-        "gpm_avg": round(df["gold_per_min"].fillna(0).mean(), 1),
-        "xpm_avg": round(df["xp_per_min"].fillna(0).mean(), 1),
+        "gpm_avg": _mean_present(df["gold_per_min"], 1, default=None),
+        "xpm_avg": _mean_present(df["xp_per_min"], 1, default=None),
         "kda_avg": round(df["kda"].mean(), 2),
         "avg_kills": round(df["kills"].fillna(0).mean(), 1),
         "avg_deaths": round(df["deaths"].fillna(0).mean(), 1),
@@ -810,6 +834,7 @@ def analyze_player_from_account(
         "cs_per_min_avg": round(float(df["cs_per_min"].dropna().mean() or 0), 2),
         "hero_damage_per_min_avg": round(float(df["hero_damage_per_min"].dropna().mean() or 0), 0),
         "notice": ranked_only_notice,
+        "metric_counts": metric_counts,
     }
 
     # Trends by time periods (group by batches of 20 games)
@@ -823,8 +848,8 @@ def analyze_player_from_account(
         decidable = batch["win"].dropna()
         trends_data.append({
             "batch": f"Матчи {i+1}-{min(i+batch_size, len(df_sorted))}",
-            "gpm": round(batch["gold_per_min"].fillna(0).mean(), 1),
-            "xpm": round(batch["xp_per_min"].fillna(0).mean(), 1),
+            "gpm": _mean_present(batch["gold_per_min"], 1, default=None),
+            "xpm": _mean_present(batch["xp_per_min"], 1, default=None),
             "winrate": round(float(decidable.mean()), 3) if len(decidable) > 0 else None,
             "kda": round(batch["kda"].mean(), 2),
         })
@@ -877,9 +902,9 @@ def analyze_player_from_account(
     features = {
         "lane_cs_per_min": round(float(df["cs_per_min"].dropna().mean() or 0), 2),
         "hero_damage_per_min": round(float(df["hero_damage_per_min"].dropna().mean() or 0), 0),
-        "tower_damage_per_game": round(df["tower_damage"].fillna(0).mean(), 0),
-        "avg_gpm": round(df["gold_per_min"].fillna(0).mean(), 1),
-        "avg_xpm": round(df["xp_per_min"].fillna(0).mean(), 1),
+        "tower_damage_per_game": _mean_present(df["tower_damage"], 0, default=None),
+        "avg_gpm": _mean_present(df["gold_per_min"], 1, default=None),
+        "avg_xpm": _mean_present(df["xp_per_min"], 1, default=None),
         "avg_kda": round(df["kda"].mean(), 2),
     }
 

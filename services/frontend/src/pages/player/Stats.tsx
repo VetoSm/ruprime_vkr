@@ -30,6 +30,7 @@ export default function PlayerStats() {
   const [retried, setRetried] = useState(false);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [heroOptions, setHeroOptions] = useState<any[]>([]);
+  const [steamData, setSteamData] = useState<any>(null);
 
   const apiParams = {
     mode: filters.mode,
@@ -51,6 +52,7 @@ export default function PlayerStats() {
         setPid(profileId);
       }
     }).catch(() => {});
+    coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -81,6 +83,13 @@ export default function PlayerStats() {
   const applied = summary.filters_applied || features?.filters_applied || {};
   const scopeLabel = applied.label || `${PERIOD_LABELS[filters.period]}, ${MODE_LABELS[filters.mode]}`;
   const matchesCount = applied.matches_count ?? summary.games_analyzed ?? 0;
+  const metricCounts = summary.metric_counts || {};
+  const totalGames =
+    steamData?.lifetime_games
+    ?? steamData?.total_games
+    ?? ((steamData?.win || 0) + (steamData?.lose || 0));
+  const accountMmr = steamData?.mmr_estimate ?? summary.estimated_mmr;
+  const accountWinrate = totalGames > 0 ? (steamData?.win || 0) / totalGames : null;
   const roleContext = applied.role
     ? `${applied.role_source === 'auto' ? 'основная роль' : 'роль'} ${roleName(applied.role)}`
     : 'все позиции';
@@ -97,17 +106,53 @@ export default function PlayerStats() {
         <p>Матчевая сводка: {scopeLabel}</p>
       </div>
 
+      {steamData?.linked && (
+        <div className="card mb-20">
+          <div className="flex-between" style={{ gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Данные аккаунта</h3>
+              <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+                Это общие данные Steam/OpenDota. Они не меняются от фильтров отчёта ниже.
+              </p>
+            </div>
+            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+              <span className="badge badge-accent">MMR: {accountMmr || '—'}</span>
+              <span className="badge badge-purple">Всего игр: {totalGames ? totalGames.toLocaleString('ru-RU') : '—'}</span>
+              <span className="badge">
+                WR аккаунта: {accountWinrate != null ? `${(accountWinrate * 100).toFixed(1)}%` : '—'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card mb-20">
         <div className="flex-between" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h3 style={{ margin: 0 }}>Фильтры боевого отчёта</h3>
             <p className="text-muted" style={{ margin: '4px 0 0' }}>
-              Найдено матчей: {matchesCount}. Сравнение строится с игроками того же ранга
+              Отчёт считается только по выбранному срезу: {scopeLabel}. Найдено матчей: {matchesCount}.
+              Сравнение строится с игроками того же ранга
               {applied.role ? ` и ${roleContext}` : ''}{filters.hero_id ? ` на герое ${heroName(Number(filters.hero_id))}` : ''}.
             </p>
           </div>
           <button className="btn btn-outline btn-sm" onClick={() => setFilters(DEFAULT_FILTERS)}>Сбросить</button>
         </div>
+        {(summary.notice || matchesCount === 0 || metricCounts.gpm === 0) && (
+          <div className="alert mt-20" style={{ fontSize: '0.86rem' }}>
+            {summary.notice || (
+              metricCounts.gpm === 0
+                ? 'В выбранном срезе есть матчи, но GPM/XPM ещё не загружены для этих строк. Нажмите «Обновить данные» в настройках и дождитесь фоновой догрузки.'
+                : 'По выбранным фильтрам нет матчей. Проверьте режим, роль, героя или период.'
+            )}
+            {applied.total_available != null && (
+              <div className="text-muted" style={{ marginTop: 6 }}>
+                Всего загружено: {applied.total_available}; после режима: {applied.after_mode_count ?? '—'};
+                перед ограничением периода: {applied.before_period_count ?? '—'}.
+              </div>
+            )}
+          </div>
+        )}
         <div className="grid-4 mt-20">
           <label>
             <div className="form-label">Режим</div>
@@ -153,6 +198,7 @@ export default function PlayerStats() {
         <div className="stat-card">
           <div className="stat-card-label">Матчей в отчёте <InfoTooltip text="Количество матчей после выбранных фильтров." /></div>
           <div className="stat-card-value">{matchesCount}</div>
+          {totalGames > 0 && <div className="text-muted" style={{ fontSize: '0.78rem' }}>из {totalGames.toLocaleString('ru-RU')} игр аккаунта</div>}
         </div>
         <div className="stat-card">
           <div className="stat-card-label">Результативность <InfoTooltip text={`Доля побед в выборке: ${scopeLabel}.`} /></div>
@@ -163,8 +209,8 @@ export default function PlayerStats() {
           <div className="stat-card-value">{summary.kda_avg || '—'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">MMR <InfoTooltip text="Оценка рейтинга по матчевой статистике." /></div>
-          <div className="stat-card-value text-accent">{summary.estimated_mmr || '—'}</div>
+          <div className="stat-card-label">MMR аккаунта <InfoTooltip text="Единая оценка аккаунта из Steam/OpenDota ранга. Фильтры отчёта её не меняют." /></div>
+          <div className="stat-card-value text-accent">{accountMmr || '—'}</div>
         </div>
       </div>
 
@@ -185,16 +231,23 @@ export default function PlayerStats() {
                   <h3>Фарм-темп по отрезкам <InfoTooltip text="Как менялось ваше золото в минуту от матча к матчу." /></h3>
                   <div className="section-line" />
                 </div>
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={trends.gpm_over_time}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
-                    <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={11} />
-                    <YAxis stroke="#7b8ba5" fontSize={11} />
-                    <Tooltip contentStyle={CHART_STYLE} />
-                    <Line type="monotone" dataKey="gpm" stroke="#00d4aa" strokeWidth={2.5}
-                      dot={{ fill: '#00d4aa', r: 3 }} activeDot={{ r: 5, fill: '#00ffc8' }} />
-                  </LineChart>
-                </ResponsiveContainer>
+                {metricCounts.gpm === 0 ? (
+                  <p className="text-muted text-center" style={{ padding: 30 }}>
+                    Для выбранных матчей нет загруженного GPM. Это не нулевой фарм, а отсутствующая метрика.
+                  </p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <LineChart data={trends.gpm_over_time}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
+                      <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={11} />
+                      <YAxis stroke="#7b8ba5" fontSize={11} />
+                      <Tooltip contentStyle={CHART_STYLE} />
+                      <Line type="monotone" dataKey="gpm" stroke="#00d4aa" strokeWidth={2.5}
+                        connectNulls={false}
+                        dot={{ fill: '#00d4aa', r: 3 }} activeDot={{ r: 5, fill: '#00ffc8' }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
               </div>
               <div className="grid-2">
                 <div className="card mb-20">

@@ -16,6 +16,11 @@ export default function PlayerRequests() {
     coreApi.get('/matchmaking/requests/my').then((r) => setRequests(r.data)).catch(() => {});
   }, []);
 
+  const primaryCoach = (request: any) => {
+    if (request.coach_profile_id) return request;
+    return (request.recommended_coaches || []).find((coach: any) => coach?.coach_profile_id);
+  };
+
   const cancel = async (id: number) => {
     await coreApi.patch(`/matchmaking/requests/${id}`, { action: 'CANCEL' });
     setRequests(requests.map(r => r.id === id ? { ...r, status: 'CANCELLED' } : r));
@@ -127,29 +132,49 @@ export default function PlayerRequests() {
                 <th>Позиция</th>
                 <th>Фокус</th>
                 <th>Статус</th>
-                <th>Коучи</th>
+                <th>Тренер</th>
                 <th>Действия</th>
               </tr>
             </thead>
             <tbody>
-              {requests.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.id}</td>
-                  <td>{r.desired_role || '—'}</td>
-                  <td>{r.focus_area || '—'}</td>
-                  <td>
-                    <span className={`badge ${r.status === 'CANCELLED' || r.status === 'REJECTED' ? 'badge-danger' : r.status === 'ACCEPTED' ? 'badge-accent' : 'badge-warning'}`}>
-                      {r.status}
-                    </span>
-                  </td>
-                  <td>{r.recommended_coaches?.length || 0}</td>
-                  <td>
-                    {!['CANCELLED', 'ACCEPTED', 'REJECTED'].includes(r.status) && (
-                      <button className="btn btn-danger btn-sm" onClick={() => cancel(r.id)}>Отменить</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {requests.map((r) => {
+                const coach = primaryCoach(r);
+                const coachId = coach?.coach_profile_id || coach?.id;
+                const coachLabel = coach?.coach_label || (coachId ? `Тренер #${coachId}` : null);
+                return (
+                  <tr key={r.id}>
+                    <td>{r.id}</td>
+                    <td>{r.desired_role || '—'}</td>
+                    <td>{r.focus_area || '—'}</td>
+                    <td>
+                      <span className={`badge ${r.status === 'CANCELLED' || r.status === 'REJECTED' ? 'badge-danger' : r.status === 'ACCEPTED' ? 'badge-accent' : 'badge-warning'}`}>
+                        {r.status}
+                      </span>
+                    </td>
+                    <td>
+                      {coachId ? (
+                        <div>
+                          <Link to={`/coaches#coach-${coachId}`}>{coachLabel}</Link>
+                          <div className="text-muted" style={{ fontSize: '0.78rem' }}>
+                            ID #{coachId}
+                            {coach?.rank_tier || r.coach_rank_tier ? ` · ${coach?.rank_tier || r.coach_rank_tier}` : ''}
+                            {coach?.mmr_estimate || r.coach_mmr_estimate ? ` · MMR ${(coach?.mmr_estimate || r.coach_mmr_estimate).toLocaleString()}` : ''}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-muted">
+                          {r.recommended_coaches?.length ? `Рекомендаций: ${r.recommended_coaches.length}` : '—'}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {!['CANCELLED', 'ACCEPTED', 'REJECTED'].includes(r.status) && (
+                        <button className="btn btn-danger btn-sm" onClick={() => cancel(r.id)}>Отменить</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
