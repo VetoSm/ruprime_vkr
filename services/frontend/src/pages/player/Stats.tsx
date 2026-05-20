@@ -10,6 +10,12 @@ const COLORS = ['#00d4aa', '#7c5cfc', '#ffa502', '#ff4757', '#1e90ff', '#ff6b81'
 const DEFAULT_FILTERS = { mode: 'ranked', period: '50', role: '', hero_id: '' };
 const MODE_LABELS: Record<string, string> = { ranked: 'Рейтинговые', turbo: 'Turbo', all: 'Все режимы' };
 const PERIOD_LABELS: Record<string, string> = { '20': '20 игр', '50': '50 игр', month: '30 дней', all: 'Вся история' };
+const PERIOD_OPTIONS = [
+  { value: '20', label: '20 игр' },
+  { value: '50', label: '50 игр' },
+  { value: 'month', label: '30 дней' },
+  { value: 'all', label: 'Вся история' },
+];
 const ROLE_OPTIONS = [
   { value: '1', label: 'Позиция 1', short: 'Carry' },
   { value: '2', label: 'Позиция 2', short: 'Mid' },
@@ -94,13 +100,16 @@ export default function PlayerStats() {
   const roleCounts = applied.role_counts || {};
   const unknownRoleCount = applied.unknown_role_count ?? 0;
   const modeCounts = applied.mode_counts || {};
-  const reportBaseCount = applied.after_period_count ?? applied.before_period_count ?? matchesCount;
+  const reportBaseCount = applied.base_report_count ?? applied.after_period_count ?? applied.before_period_count ?? matchesCount;
+  const narrowingApplied = Boolean(applied.narrowing_applied);
   const totalGames =
     steamData?.lifetime_games
     ?? steamData?.total_games
     ?? ((steamData?.win || 0) + (steamData?.lose || 0));
   const accountMmr = steamData?.mmr_estimate ?? summary.estimated_mmr;
   const accountWinrate = totalGames > 0 ? (steamData?.win || 0) / totalGames : null;
+  const selectedHeroId = filters.hero_id ? Number(filters.hero_id) : null;
+  const selectedHero = selectedHeroId ? heroOptions.find((h: any) => Number(h.hero_id) === selectedHeroId) : null;
   const roleContext = applied.role
     ? `${applied.role_source === 'auto' ? 'основная роль' : 'роль'} ${roleName(applied.role)}`
     : 'все позиции';
@@ -128,7 +137,7 @@ export default function PlayerStats() {
             </div>
             <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
               <span className="badge badge-accent">MMR: {accountMmr || '—'}</span>
-              <span className="badge badge-purple">Всего игр: {totalGames ? totalGames.toLocaleString('ru-RU') : '—'}</span>
+              <span className="badge badge-purple">Игр аккаунта: {totalGames ? totalGames.toLocaleString('ru-RU') : '—'}</span>
               <span className="badge">
                 WR аккаунта: {accountWinrate != null ? `${(accountWinrate * 100).toFixed(1)}%` : '—'}
               </span>
@@ -142,7 +151,8 @@ export default function PlayerStats() {
           <div>
             <h3 style={{ margin: 0 }}>Фильтры боевого отчёта</h3>
             <p className="text-muted" style={{ margin: '4px 0 0' }}>
-              Отчёт считается только по выбранному срезу: {scopeLabel}. Найдено матчей: {matchesCount}.
+              Отчёт считается только по выбранному срезу: {scopeLabel}. База среза: {reportBaseCount} матчей.
+              {narrowingApplied ? ` После фильтра позиции/героя осталось: ${matchesCount}.` : ` В отчёте: ${matchesCount}.`}
               Сравнение строится с игроками того же ранга
               {applied.role ? ` и ${roleContext}` : ''}{filters.hero_id ? ` на герое ${heroName(Number(filters.hero_id))}` : ''}.
             </p>
@@ -158,10 +168,18 @@ export default function PlayerStats() {
             )}
             {applied.total_available != null && (
               <div className="text-muted" style={{ marginTop: 6 }}>
-                Всего загружено: {applied.total_available}; после режима: {applied.after_mode_count ?? '—'};
+                Загружено в базе: {applied.total_available}; после режима: {applied.after_mode_count ?? '—'};
                 после периода: {applied.after_period_count ?? '—'}.
               </div>
             )}
+          </div>
+        )}
+        {(modeCounts.other > 0 || modeCounts.unknown > 0) && (
+          <div className="alert mt-20" style={{ fontSize: '0.86rem' }}>
+            Распределение режимов в загруженной истории: ranked {modeCounts.ranked || 0}, turbo {modeCounts.turbo || 0}
+            {modeCounts.other > 0 ? `, другие режимы ${modeCounts.other}` : ''}
+            {modeCounts.unknown > 0 ? `, режим не определён ${modeCounts.unknown}` : ''}.
+            Режим «Все» включает все эти категории.
           </div>
         )}
         {unknownRoleCount > 0 && !filters.role && (
@@ -198,12 +216,18 @@ export default function PlayerStats() {
           </label>
           <label>
             <div className="form-label">Период</div>
-            <select className="input" value={filters.period} onChange={(e) => setFilters((f) => ({ ...f, period: e.target.value }))}>
-              <option value="20">Последние 20</option>
-              <option value="50">Последние 50</option>
-              <option value="month">Последние 30 дней</option>
-              <option value="all">Вся загруженная история</option>
-            </select>
+            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+              {PERIOD_OPTIONS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  className={`btn btn-sm ${filters.period === p.value ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setFilters((f) => ({ ...f, period: p.value }))}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </label>
           <label>
             <div className="form-label">Позиция</div>
@@ -238,33 +262,113 @@ export default function PlayerStats() {
           </label>
           <label>
             <div className="form-label">Герой</div>
-            <select className="input" value={filters.hero_id} onChange={(e) => setFilters((f) => ({ ...f, hero_id: e.target.value }))}>
-              <option value="">Все герои</option>
-              {heroOptions.map((h: any) => (
-                <option key={h.hero_id} value={h.hero_id}>{h.localized_name || h.name}</option>
-              ))}
-            </select>
+            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`btn btn-sm ${filters.hero_id === '' ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setFilters((f) => ({ ...f, hero_id: '' }))}
+              >
+                Все герои
+              </button>
+              {selectedHero && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setFilters((f) => ({ ...f, hero_id: '' }))}
+                  title="Нажмите, чтобы сбросить героя"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                >
+                  <img
+                    src={heroIcon(selectedHero.hero_id)}
+                    alt=""
+                    style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover' }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                  {selectedHero.localized_name || heroName(selectedHero.hero_id)}
+                </button>
+              )}
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                gap: 8,
+                maxHeight: 220,
+                overflowY: 'auto',
+                marginTop: 10,
+                paddingRight: 4,
+              }}
+            >
+              {heroOptions.map((h: any) => {
+                const active = filters.hero_id === String(h.hero_id);
+                return (
+                  <button
+                    key={h.hero_id}
+                    type="button"
+                    className={`btn btn-sm ${active ? 'btn-primary' : 'btn-outline'}`}
+                    onClick={() => setFilters((f) => ({ ...f, hero_id: String(h.hero_id) }))}
+                    style={{
+                      justifyContent: 'flex-start',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      minWidth: 0,
+                    }}
+                    title={h.localized_name || h.name}
+                  >
+                    <img
+                      src={heroIcon(h.hero_id)}
+                      alt=""
+                      style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover', flex: '0 0 24px' }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {h.localized_name || heroName(h.hero_id)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </label>
         </div>
       </div>
 
       <div className="grid-4 mb-20">
         <div className="stat-card">
-          <div className="stat-card-label">Матчей в отчёте <InfoTooltip text="Количество матчей после выбранных фильтров." /></div>
-          <div className="stat-card-value">{matchesCount}</div>
-          {totalGames > 0 && <div className="text-muted" style={{ fontSize: '0.78rem' }}>из {totalGames.toLocaleString('ru-RU')} игр аккаунта</div>}
+          <div className="stat-card-label">База среза <InfoTooltip text="Сколько матчей попало в отчёт после выбора режима и периода, до позиции/героя." /></div>
+          <div className="stat-card-value">{reportBaseCount}</div>
+          {narrowingApplied && <div className="text-muted" style={{ fontSize: '0.78rem' }}>после фильтров: {matchesCount}</div>}
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-label">Игр аккаунта <InfoTooltip text="Общее число игр из профиля OpenDota/Steam. Это не то же самое, что текущий отчёт." /></div>
+          <div className="stat-card-value">{totalGames ? totalGames.toLocaleString('ru-RU') : '—'}</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-label">Результативность <InfoTooltip text={`Доля побед в выборке: ${scopeLabel}.`} /></div>
           <div className="stat-card-value">{summary.winrate !== null && summary.winrate !== undefined ? `${(summary.winrate * 100).toFixed(1)}%` : '—'}</div>
         </div>
         <div className="stat-card">
+          <div className="stat-card-label">MMR аккаунта <InfoTooltip text="Единая оценка аккаунта из Steam/OpenDota ранга. Фильтры отчёта её не меняют." /></div>
+          <div className="stat-card-value text-accent">{accountMmr || '—'}</div>
+        </div>
+      </div>
+
+      <div className="grid-4 mb-20">
+        <div className="stat-card">
+          <div className="stat-card-label">Матчей после всех фильтров <InfoTooltip text="Итоговая выборка после режима, периода, позиции и героя." /></div>
+          <div className="stat-card-value">{matchesCount}</div>
+        </div>
+        <div className="stat-card">
           <div className="stat-card-label">Боевой счёт <InfoTooltip text="KDA: (убийства + ассисты) / смерти." /></div>
           <div className="stat-card-value">{summary.kda_avg || '—'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">MMR аккаунта <InfoTooltip text="Единая оценка аккаунта из Steam/OpenDota ранга. Фильтры отчёта её не меняют." /></div>
-          <div className="stat-card-value text-accent">{accountMmr || '—'}</div>
+          <div className="stat-card-label">Фарм-темп <InfoTooltip text="GPM: золото в минуту в итоговой выборке." /></div>
+          <div className="stat-card-value">{summary.gpm_avg || '—'}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-label">Темп опыта <InfoTooltip text="XPM: опыт в минуту в итоговой выборке." /></div>
+          <div className="stat-card-value">{summary.xpm_avg || '—'}</div>
         </div>
       </div>
 

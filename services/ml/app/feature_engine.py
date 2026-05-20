@@ -590,11 +590,14 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
     if "start_time" in result.columns:
         result = result.sort_values("start_time", ascending=False, na_position="last").reset_index(drop=True)
 
-    mode_counts = {"all": total_available, "ranked": 0, "turbo": 0, "unknown": 0}
+    mode_counts = {"all": total_available, "ranked": 0, "turbo": 0, "other": 0, "unknown": 0}
     if "game_mode" in result.columns:
         mode_counts["unknown"] = int(result["game_mode"].isna().sum())
         mode_counts["ranked"] = int(result["game_mode"].isin(RANKED_GAME_MODES).sum())
         mode_counts["turbo"] = int((result["game_mode"] == TURBO_GAME_MODE).sum())
+        known_modes = result["game_mode"].notna()
+        known_ranked_or_turbo = result["game_mode"].isin(RANKED_GAME_MODES | {TURBO_GAME_MODE})
+        mode_counts["other"] = int((known_modes & ~known_ranked_or_turbo).sum())
 
     if filters["mode"] == "ranked" and "game_mode" in result.columns:
         result = result[result["game_mode"].isna() | result["game_mode"].isin(RANKED_GAME_MODES)]
@@ -651,6 +654,7 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
         result = result[result["hero_id"] == filters["hero_id"]]
 
     filtered_count = int(len(result))
+    narrowing_applied = bool(filters["role"] or filters["hero_id"])
     labels = {
         "mode": {
             "ranked": "рейтинговые матчи",
@@ -678,6 +682,8 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
         "role_counts": role_counts,
         "unknown_role_count": unknown_role_count,
         "before_period_count": before_period,
+        "base_report_count": after_period,
+        "narrowing_applied": narrowing_applied,
         "matches_count": filtered_count,
         "limit": limit,
         "date_from": date_from,
