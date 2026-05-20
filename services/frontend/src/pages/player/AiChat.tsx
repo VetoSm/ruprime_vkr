@@ -108,7 +108,7 @@ export default function PlayerAiChat() {
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [contextBasis, setContextBasis] = useState<any>(null);
-  const [showBasis, setShowBasis] = useState(true);
+  const [showBasis, setShowBasis] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
@@ -218,10 +218,18 @@ export default function PlayerAiChat() {
           </div>
         </div>
         {contextBasis && (
-          <div className="card mb-20" style={{ padding: 12 }}>
-            <button className="btn btn-outline btn-sm" onClick={() => setShowBasis((v) => !v)}>
-              {showBasis ? 'Скрыть базу ответа' : 'Показать базу ответа'}
-            </button>
+          <div className="card mb-20" style={{ padding: 12, borderStyle: 'dashed' }}>
+            <div className="flex-between" style={{ gap: 10, flexWrap: 'wrap' }}>
+              <div>
+                <strong>База для ответа</strong>
+                <div className="text-muted" style={{ fontSize: '0.78rem' }}>
+                  Резюме среза и ключевые разрывы, которые были переданы Оракулу.
+                </div>
+              </div>
+              <button className="btn btn-outline btn-sm" onClick={() => setShowBasis((v) => !v)}>
+                {showBasis ? 'Свернуть' : 'Развернуть'}
+              </button>
+            </div>
             {showBasis && (
               <div style={{ marginTop: 10, fontSize: '0.86rem' }}>
                 <div className="text-muted">Выборка: {contextBasis.scope || '—'} · Матчей: {contextBasis.matches ?? '—'} · Общий балл: {contextBasis.overall_score ?? '—'}</div>
