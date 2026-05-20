@@ -71,8 +71,10 @@ export default function PlayerStats() {
 
   useEffect(() => {
     if (!pid) return;
+    const featurePeriod = filters.period === '20' ? '20' : '50';
+    const featureParams = { ...apiParams, period: featurePeriod };
     coreApi.get(`/player/${pid}/stats/overview`, { params: apiParams }).then((r2) => setStats(r2.data)).catch(() => {});
-    coreApi.get(`/player/${pid}/detailed-features`, { params: apiParams }).then((r2) => setFeatures(r2.data)).catch(() => {});
+    coreApi.get(`/player/${pid}/detailed-features`, { params: featureParams }).then((r2) => setFeatures(r2.data)).catch(() => {});
   }, [pid, filters.mode, filters.period, filters.role, filters.hero_id]);
 
   useEffect(() => {
@@ -230,6 +232,11 @@ export default function PlayerStats() {
                 )}
               </div>
             )}
+          </div>
+        )}
+        {features?.filters_applied?.label && features.filters_applied.label !== scopeLabel && (
+          <div className="text-muted" style={{ fontSize: '0.78rem', marginTop: 10 }}>
+            Фитчи ниже считаются по свежему срезу: {features.filters_applied.label}. Статистика выше может смотреть более длинный период.
           </div>
         )}
         <div className="grid-4 mt-20">

@@ -32,6 +32,7 @@ RANK_TO_MMR_BAND = {
     "ARCHON": "archon", "LEGEND": "legend", "ANCIENT": "ancient",
     "DIVINE": "divine", "IMMORTAL": "immortal",
 }
+RANK_ORDER = ["HERALD", "GUARDIAN", "CRUSADER", "ARCHON", "LEGEND", "ANCIENT", "DIVINE", "IMMORTAL"]
 
 
 def rank_tier_to_name(rt: int) -> str:
@@ -39,6 +40,14 @@ def rank_tier_to_name(rt: int) -> str:
         return "UNKNOWN"
     medal = rt // 10
     return RANK_NAMES.get(medal, "UNKNOWN")
+
+
+def next_rank_name(current_rank: str) -> str:
+    try:
+        idx = RANK_ORDER.index((current_rank or "").upper())
+    except ValueError:
+        return "IMMORTAL"
+    return RANK_ORDER[min(idx + 1, len(RANK_ORDER) - 1)]
 
 
 def get_baseline_percentiles(mmr_band: str, role: int | None = None, hero_id: int | None = None) -> dict[str, dict]:
@@ -176,7 +185,7 @@ def compute_detailed_features(
     current_band = RANK_TO_MMR_BAND.get(current_rank, "2000-4000")
 
     # Determine target MMR band
-    target_rank = (desired_rank or "IMMORTAL").upper().split(" ")[0].split("[")[0].strip()
+    target_rank = (desired_rank or next_rank_name(current_rank)).upper().split(" ")[0].split("[")[0].strip()
     target_band = RANK_TO_MMR_BAND.get(target_rank, "6000+")
 
     # Get baselines
@@ -536,10 +545,12 @@ def _compute_player_averages(df: pd.DataFrame, acc: PlayerAccount = None, prefer
 
 def _build_category(key: str, name: str, icon: str, components: list) -> dict:
     """Build a category from components."""
-    scores = [c["score"] for c in components]
-    avg_score = round(np.mean(scores), 1) if scores else 5.0
-    target_scores = [c["target_score"] for c in components]
-    avg_target = round(np.mean(target_scores), 1) if target_scores else 7.0
+    measured = [c for c in components if not c.get("missing")]
+    missing = len(measured) == 0
+    scores = [c["score"] for c in measured]
+    avg_score = round(np.mean(scores), 1) if scores else 0.0
+    target_scores = [c["target_score"] for c in measured]
+    avg_target = round(np.mean(target_scores), 1) if target_scores else 0.0
     gap = round(max(avg_target - avg_score, 0), 1)
 
     return {
@@ -549,6 +560,7 @@ def _build_category(key: str, name: str, icon: str, components: list) -> dict:
         "score": avg_score,
         "target": avg_target,
         "gap": gap,
+        "missing": missing,
         "components": components,
     }
 

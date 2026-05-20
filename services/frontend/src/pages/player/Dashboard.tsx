@@ -415,7 +415,8 @@ export default function PlayerDashboard() {
               {categories.map((cat: any) => (
                 <SkillRing key={cat.key} value={cat.score} target={cat.target} label={cat.name}
                   onClick={() => setExpandedSkill(expandedSkill === cat.key ? null : cat.key)}
-                  expanded={expandedSkill === cat.key} />
+                  expanded={expandedSkill === cat.key}
+                  missing={Boolean(cat.missing)} />
               ))}
             </div>
           ) : (

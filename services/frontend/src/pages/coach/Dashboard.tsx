@@ -152,7 +152,7 @@ export default function CoachDashboard() {
                   <>
                     <div className="skill-grid mb-20">
                       {myFeatures.categories.map((cat: any) => (
-                        <SkillRing key={cat.key} value={cat.score} target={cat.target} label={cat.name} />
+                        <SkillRing key={cat.key} value={cat.score} target={cat.target} label={cat.name} missing={Boolean(cat.missing)} />
                       ))}
                     </div>
                     {myFeatures.categories.slice(0, 3).map((cat: any) => (

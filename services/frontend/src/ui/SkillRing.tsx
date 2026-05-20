@@ -5,17 +5,18 @@ interface SkillRingProps {
   size?: number;
   onClick?: () => void;
   expanded?: boolean;
+  missing?: boolean;
 }
 
-export default function SkillRing({ value, target, label, size = 110, onClick, expanded }: SkillRingProps) {
+export default function SkillRing({ value, target, label, size = 110, onClick, expanded, missing }: SkillRingProps) {
   const radius = (size - 14) / 2;
   const circumference = 2 * Math.PI * radius;
-  const progress = Math.min(value / 10, 1);
+  const progress = missing ? 0 : Math.min(value / 10, 1);
   const strokeDashoffset = circumference * (1 - progress);
 
-  const color = value >= 7 ? 'var(--accent)' : value >= 4 ? 'var(--warning)' : 'var(--danger)';
-  const bgGlow = value >= 7 ? 'rgba(0,212,170,0.06)' : value >= 4 ? 'rgba(255,165,2,0.06)' : 'rgba(255,71,87,0.06)';
-  const gap = target ? Math.max(target - value, 0) : 0;
+  const color = missing ? 'var(--text-muted)' : value >= 7 ? 'var(--accent)' : value >= 4 ? 'var(--warning)' : 'var(--danger)';
+  const bgGlow = missing ? 'rgba(255,255,255,0.03)' : value >= 7 ? 'rgba(0,212,170,0.06)' : value >= 4 ? 'rgba(255,165,2,0.06)' : 'rgba(255,71,87,0.06)';
+  const gap = !missing && target ? Math.max(target - value, 0) : 0;
 
   return (
     <div
@@ -40,11 +41,11 @@ export default function SkillRing({ value, target, label, size = 110, onClick, e
           style={{ transition: 'stroke-dashoffset 1s ease', transform: 'rotate(-90deg)', transformOrigin: 'center' }} />
         <text x={size / 2} y={size / 2 - 4} textAnchor="middle" fill={color}
           fontSize="1.4rem" fontWeight="800" fontFamily="Inter, sans-serif">
-          {value.toFixed(1)}
+          {missing ? '—' : value.toFixed(1)}
         </text>
         <text x={size / 2} y={size / 2 + 14} textAnchor="middle" fill="var(--text-muted)"
           fontSize="0.7rem" fontWeight="600" fontFamily="Inter, sans-serif">
-          /10
+          {missing ? 'нет данных' : '/10'}
         </text>
       </svg>
       <span style={{

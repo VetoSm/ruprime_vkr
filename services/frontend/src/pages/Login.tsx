@@ -22,7 +22,12 @@ export default function Login() {
       await login(email, password);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Ошибка входа');
+      const status = err?.response?.status;
+      if (status === 401) {
+        setError('Логин или пароль введены неверно');
+      } else {
+        setError(err.response?.data?.detail || 'Ошибка входа. Попробуйте ещё раз.');
+      }
     } finally {
       setLoading(false);
     }
