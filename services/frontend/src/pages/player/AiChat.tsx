@@ -11,9 +11,16 @@ function cleanInline(text: string) {
   return text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/^>\s?/, '');
 }
 
+function stripAnswerMeta(raw: string) {
+  return raw
+    .replace(/^#\s+Советы тренера\s*\n+/i, '')
+    .replace(/##\s+Резюме[\s\S]*?(?=\n##\s+|$)/i, '')
+    .trim();
+}
+
 function OracleMessage({ text }: { text: string }) {
   const [body, metaRaw] = text.split(/\n---\n/);
-  const lines = body.split('\n');
+  const lines = stripAnswerMeta(body).split('\n');
   const blocks: JSX.Element[] = [];
   let listItems: string[] = [];
 

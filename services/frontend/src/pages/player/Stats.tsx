@@ -44,6 +44,7 @@ export default function PlayerStats() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [heroOptions, setHeroOptions] = useState<any[]>([]);
   const [steamData, setSteamData] = useState<any>(null);
+  const [showFilterNotes, setShowFilterNotes] = useState(false);
 
   const apiParams = {
     mode: filters.mode,
@@ -112,6 +113,15 @@ export default function PlayerStats() {
   const accountWinrate = totalGames > 0 ? (steamData?.win || 0) / totalGames : null;
   const selectedHeroId = filters.hero_id ? Number(filters.hero_id) : null;
   const selectedHero = selectedHeroId ? heroOptions.find((h: any) => Number(h.hero_id) === selectedHeroId) : null;
+  const hasFilterNotes = Boolean(
+    (dataFreshness && dataFreshness !== 'fresh') ||
+    summary.notice ||
+    matchesCount === 0 ||
+    metricCounts.gpm === 0 ||
+    modeCounts.other > 0 ||
+    modeCounts.unknown > 0 ||
+    (unknownRoleCount > 0 && !filters.role)
+  );
   const roleContext = applied.role
     ? `${applied.role_source === 'auto' ? 'основная роль' : 'роль'} ${roleName(applied.role)}`
     : 'все позиции';
@@ -161,46 +171,65 @@ export default function PlayerStats() {
           </div>
           <button className="btn btn-outline btn-sm" onClick={() => setFilters(DEFAULT_FILTERS)}>Сбросить</button>
         </div>
-        {dataFreshness && dataFreshness !== 'fresh' && (
-          <div className="alert mt-20" style={{ fontSize: '0.86rem' }}>
-            {dataFreshness === 'stale' && 'Последние доступные матчи давно не обновлялись. Отчёт показывает последнюю известную форму, а не текущую.'}
-            {dataFreshness === 'low_sample' && 'В выбранном срезе мало матчей, поэтому оценка предварительная.'}
-            {dataFreshness === 'no_matches' && 'В выбранном срезе нет матчей. Попробуйте другой период или обновите данные Steam.'}
-            {sampleQuality.latest_match_at && (
-              <div className="text-muted" style={{ marginTop: 6 }}>
-                Последний матч: {new Date(sampleQuality.latest_match_at).toLocaleDateString('ru-RU')}.
+        {hasFilterNotes && (
+          <div className="card mt-20" style={{ padding: 12, borderStyle: 'dashed' }}>
+            <div className="flex-between" style={{ gap: 10, flexWrap: 'wrap' }}>
+              <div>
+                <strong>Пояснения к данным и фильтрам</strong>
+                <div className="text-muted" style={{ fontSize: '0.78rem' }}>
+                  Качество выборки, недостающие поля и распределение режимов.
+                </div>
+              </div>
+              <button className="btn btn-outline btn-sm" onClick={() => setShowFilterNotes((v) => !v)}>
+                {showFilterNotes ? 'Свернуть' : 'Развернуть'}
+              </button>
+            </div>
+            {showFilterNotes && (
+              <div style={{ marginTop: 10 }}>
+                {dataFreshness && dataFreshness !== 'fresh' && (
+                  <div className="alert mb-10" style={{ fontSize: '0.86rem' }}>
+                    {dataFreshness === 'stale' && 'Последние доступные матчи давно не обновлялись. Отчёт показывает последнюю известную форму, а не текущую.'}
+                    {dataFreshness === 'low_sample' && 'В выбранном срезе мало матчей, поэтому оценка предварительная.'}
+                    {dataFreshness === 'no_matches' && 'В выбранном срезе нет матчей. Попробуйте другой период или обновите данные Steam.'}
+                    {sampleQuality.latest_match_at && (
+                      <div className="text-muted" style={{ marginTop: 6 }}>
+                        Последний матч: {new Date(sampleQuality.latest_match_at).toLocaleDateString('ru-RU')}.
+                      </div>
+                    )}
+                  </div>
+                )}
+                {(summary.notice || matchesCount === 0 || metricCounts.gpm === 0) && (
+                  <div className="alert mb-10" style={{ fontSize: '0.86rem' }}>
+                    {summary.notice || (
+                      metricCounts.gpm === 0
+                        ? 'В выбранном срезе есть матчи, но GPM/XPM ещё не загружены для этих строк. Нажмите «Обновить данные» в настройках и дождитесь фоновой догрузки.'
+                        : 'По выбранным фильтрам нет матчей. Проверьте режим, роль, героя или период.'
+                    )}
+                    {applied.total_available != null && (
+                      <div className="text-muted" style={{ marginTop: 6 }}>
+                        Загружено в базе: {applied.total_available}; после режима: {applied.after_mode_count ?? '—'};
+                        после периода: {applied.after_period_count ?? '—'}.
+                      </div>
+                    )}
+                  </div>
+                )}
+                {(modeCounts.other > 0 || modeCounts.unknown > 0) && (
+                  <div className="alert mb-10" style={{ fontSize: '0.86rem' }}>
+                    Распределение режимов в загруженной истории: ranked {modeCounts.ranked || 0}, turbo {modeCounts.turbo || 0}
+                    {modeCounts.other > 0 ? `, другие режимы ${modeCounts.other}` : ''}
+                    {modeCounts.unknown > 0 ? `, режим не определён ${modeCounts.unknown}` : ''}.
+                    Режим «Все» включает все эти категории.
+                  </div>
+                )}
+                {unknownRoleCount > 0 && !filters.role && (
+                  <div className="alert" style={{ fontSize: '0.86rem' }}>
+                    У {unknownRoleCount} матчей в текущем отчёте позиция ещё не определена OpenDota.
+                    Поэтому суммы по POS могут быть меньше, чем {reportBaseCount} матчей отчёта.
+                    После parsed-догрузки эти матчи постепенно распределятся по позициям.
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
-        {(summary.notice || matchesCount === 0 || metricCounts.gpm === 0) && (
-          <div className="alert mt-20" style={{ fontSize: '0.86rem' }}>
-            {summary.notice || (
-              metricCounts.gpm === 0
-                ? 'В выбранном срезе есть матчи, но GPM/XPM ещё не загружены для этих строк. Нажмите «Обновить данные» в настройках и дождитесь фоновой догрузки.'
-                : 'По выбранным фильтрам нет матчей. Проверьте режим, роль, героя или период.'
-            )}
-            {applied.total_available != null && (
-              <div className="text-muted" style={{ marginTop: 6 }}>
-                Загружено в базе: {applied.total_available}; после режима: {applied.after_mode_count ?? '—'};
-                после периода: {applied.after_period_count ?? '—'}.
-              </div>
-            )}
-          </div>
-        )}
-        {(modeCounts.other > 0 || modeCounts.unknown > 0) && (
-          <div className="alert mt-20" style={{ fontSize: '0.86rem' }}>
-            Распределение режимов в загруженной истории: ranked {modeCounts.ranked || 0}, turbo {modeCounts.turbo || 0}
-            {modeCounts.other > 0 ? `, другие режимы ${modeCounts.other}` : ''}
-            {modeCounts.unknown > 0 ? `, режим не определён ${modeCounts.unknown}` : ''}.
-            Режим «Все» включает все эти категории.
-          </div>
-        )}
-        {unknownRoleCount > 0 && !filters.role && (
-          <div className="alert mt-20" style={{ fontSize: '0.86rem' }}>
-            У {unknownRoleCount} матчей в текущем отчёте позиция ещё не определена OpenDota.
-            Поэтому суммы по POS могут быть меньше, чем {reportBaseCount} матчей отчёта.
-            После parsed-догрузки эти матчи постепенно распределятся по позициям.
           </div>
         )}
         <div className="grid-4 mt-20">

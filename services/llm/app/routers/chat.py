@@ -342,6 +342,7 @@ def _build_llm_messages(message: str, context: dict | None) -> list[dict[str, st
             "Дай 3-5 практических шагов на ближайшие 10 игр.",
             "Не добавляй общие советы без привязки к feature_gaps/categories.",
             "Не повторяй вопрос пользователя отдельным блоком.",
+            "Не добавляй в full_text раздел Резюме: summary уже выводится отдельно в UI.",
         ],
     }
     return [
@@ -445,7 +446,7 @@ def _generate_template_response(message: str, context: dict = None) -> tuple[str
         plan = GENERAL_TIPS[:3]
 
     # Build full text
-    full_text = f"# Советы тренера\n\n## Резюме\n{summary}\n\n"
+    full_text = f"# Советы тренера\n\n"
     full_text += f"Сравниваю с целью: **{target_rank}**. Если включены роль/герой, советы относятся именно к этой выборке.\n\n"
     snapshot = _category_snapshot(categories)
     if snapshot:
