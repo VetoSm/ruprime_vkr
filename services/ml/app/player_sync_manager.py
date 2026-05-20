@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 
 DEEP_SYNC_MAX_MATCHES = max(500, int(os.getenv("PLAYER_DEEP_SYNC_MAX_MATCHES", "3000")))
 DEEP_SYNC_DETAILED_MATCHES = max(25, int(os.getenv("PLAYER_DEEP_SYNC_DETAILED_MATCHES", "80")))
+RECENT_PARSE_MATCHES = max(50, int(os.getenv("PLAYER_RECENT_PARSE_MATCHES", "50")))
 PARSE_FOLLOWUP_DELAY_SEC = max(60, int(os.getenv("PLAYER_PARSE_FOLLOWUP_DELAY_SEC", "600")))
+PARSE_FOLLOWUP_ATTEMPTS = max(1, int(os.getenv("PLAYER_PARSE_FOLLOWUP_ATTEMPTS", "3")))
 
 _state = {
     "running": False,
@@ -158,8 +160,8 @@ def _run_sync_job(account_id: int, steam_id: str | None) -> dict:
         _replace_account_matches(db, account_id, matches)
         db.flush()
 
-        detailed_ids = _unique_match_ids(matches, DEEP_SYNC_DETAILED_MATCHES)
-        parse_result = request_match_parse(detailed_ids, max_requests=DEEP_SYNC_DETAILED_MATCHES) if detailed_ids else {"requested": 0}
+        detailed_ids = _recent_incomplete_match_ids(matches, RECENT_PARSE_MATCHES)
+        parse_result = request_match_parse(detailed_ids, max_requests=RECENT_PARSE_MATCHES) if detailed_ids else {"requested": 0}
 
         detailed_matches_fetched, players_cached = _cache_other_players_from_detailed_matches(db, detailed_ids)
         db.commit()
@@ -169,6 +171,7 @@ def _run_sync_job(account_id: int, steam_id: str | None) -> dict:
         return {
             "fetched_matches": len(matches),
             "parse_requested": int(parse_result.get("requested") or 0),
+            "parse_candidates": len(detailed_ids),
             "detailed_matches_fetched": detailed_matches_fetched,
             "players_cached": players_cached,
         }
@@ -187,37 +190,44 @@ def _schedule_parse_followup(account_id: int, match_ids: list[int]):
     we do a delayed best-effort pass and upsert the richer rows into
     player_matches. This is what makes parsed data appear "over time".
     """
-    ids = _unique_match_ids([{"match_id": mid} for mid in match_ids], DEEP_SYNC_DETAILED_MATCHES)
+    ids = _unique_match_ids([{"match_id": mid} for mid in match_ids], RECENT_PARSE_MATCHES)
     if not ids:
         return
 
     def _followup():
-        time.sleep(PARSE_FOLLOWUP_DELAY_SEC)
-        db = SessionLocal()
-        try:
-            detailed_matches_fetched, players_cached = _cache_other_players_from_detailed_matches(db, ids)
-            db.commit()
-            with _lock:
-                cur = dict(_state["jobs"].get(account_id) or {})
-                cur.update({
-                    "parse_followup_at": datetime.now(timezone.utc).isoformat(),
-                    "parse_followup_matches": detailed_matches_fetched,
-                    "parse_followup_players_cached": players_cached,
-                    "message": "Parsed-матчи догружены" if detailed_matches_fetched else cur.get("message"),
-                })
-                _state["jobs"][account_id] = cur
-        except Exception as exc:
-            db.rollback()
-            logger.warning("Parse follow-up failed for account_id=%s: %s", account_id, exc)
-            with _lock:
-                cur = dict(_state["jobs"].get(account_id) or {})
-                cur.update({
-                    "parse_followup_error": str(exc),
-                    "parse_followup_at": datetime.now(timezone.utc).isoformat(),
-                })
-                _state["jobs"][account_id] = cur
-        finally:
-            db.close()
+        total_matches = 0
+        total_players = 0
+        for attempt in range(1, PARSE_FOLLOWUP_ATTEMPTS + 1):
+            time.sleep(PARSE_FOLLOWUP_DELAY_SEC * attempt)
+            db = SessionLocal()
+            try:
+                detailed_matches_fetched, players_cached = _cache_other_players_from_detailed_matches(db, ids)
+                db.commit()
+                total_matches += detailed_matches_fetched
+                total_players += players_cached
+                with _lock:
+                    cur = dict(_state["jobs"].get(account_id) or {})
+                    cur.update({
+                        "parse_followup_at": datetime.now(timezone.utc).isoformat(),
+                        "parse_followup_attempt": attempt,
+                        "parse_followup_matches": total_matches,
+                        "parse_followup_players_cached": total_players,
+                        "message": "Parsed-матчи догружены" if total_matches else cur.get("message"),
+                    })
+                    _state["jobs"][account_id] = cur
+            except Exception as exc:
+                db.rollback()
+                logger.warning("Parse follow-up failed for account_id=%s attempt=%s: %s", account_id, attempt, exc)
+                with _lock:
+                    cur = dict(_state["jobs"].get(account_id) or {})
+                    cur.update({
+                        "parse_followup_error": str(exc),
+                        "parse_followup_at": datetime.now(timezone.utc).isoformat(),
+                        "parse_followup_attempt": attempt,
+                    })
+                    _state["jobs"][account_id] = cur
+            finally:
+                db.close()
 
     threading.Thread(target=_followup, daemon=True, name=f"parse-followup-{account_id}").start()
 
@@ -347,6 +357,32 @@ def _unique_match_ids(matches: list[dict], limit: int) -> list[int]:
         if len(ids) >= limit:
             break
     return ids
+
+
+def _recent_incomplete_match_ids(matches: list[dict], limit: int) -> list[int]:
+    """Return latest match ids that still benefit from /request parsing.
+
+    We prioritise the current analytics window: recent rows without detailed
+    data or without ward/control/role fields. If there are fewer than ``limit``
+    incomplete rows, fill the rest with newest matches so OpenDota gets a parse
+    request for the whole recent window.
+    """
+    sorted_rows = sorted(matches, key=lambda m: m.get("start_time") or 0, reverse=True)
+
+    def incomplete(row: dict) -> bool:
+        return (
+            not row.get("is_detailed")
+            or row.get("lane_role") is None
+            or row.get("obs_placed") is None
+            or row.get("sen_placed") is None
+            or row.get("gold_per_min") is None
+        )
+
+    selected: list[dict] = [m for m in sorted_rows if incomplete(m)]
+    if len(selected) < limit:
+        seen = {m.get("match_id") for m in selected}
+        selected.extend([m for m in sorted_rows if m.get("match_id") not in seen])
+    return _unique_match_ids(selected, limit)
 
 
 def _cache_other_players_from_detailed_matches(db, match_ids: list[int]) -> tuple[int, int]:

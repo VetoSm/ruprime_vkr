@@ -17,7 +17,7 @@ from app.player_sync_manager import schedule_deep_sync, get_sync_status
 router = APIRouter(prefix="/ml", tags=["ml-analysis"])
 
 BACKGROUND_REFRESH_MINUTES = max(15, int(os.getenv("PLAYER_BACKGROUND_REFRESH_MINUTES", "120")))
-INITIAL_PARSE_MATCHES = max(25, int(os.getenv("PLAYER_INITIAL_PARSE_MATCHES", "80")))
+INITIAL_PARSE_MATCHES = max(50, int(os.getenv("PLAYER_INITIAL_PARSE_MATCHES", "50")))
 
 
 # ---- Schemas for steam linking ----
