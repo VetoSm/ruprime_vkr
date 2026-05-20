@@ -16,12 +16,15 @@ def _stats_filter_params(
     period: str = "50",
     role: int | None = None,
     hero_id: int | None = None,
+    baseline_role: int | None = None,
 ) -> dict:
     params = {"mode": mode, "period": period}
     if role is not None:
         params["role"] = role
     if hero_id is not None:
         params["hero_id"] = hero_id
+    if baseline_role is not None:
+        params["baseline_role"] = baseline_role
     return params
 
 
@@ -138,7 +141,7 @@ async def player_stats_overview(
     if current_user.role == "PLAYER" and profile.core_user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Нет доступа")
 
-    filters = _stats_filter_params(mode, period, role, hero_id)
+    filters = _stats_filter_params(mode=mode, period=period, role=role, hero_id=hero_id)
     data = await _get_or_create_analysis(profile, db, filters)
 
     if data:
@@ -180,7 +183,7 @@ async def player_features(
     if current_user.role == "PLAYER" and profile.core_user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Нет доступа")
 
-    filters = _stats_filter_params(mode, period, role, hero_id)
+    filters = _stats_filter_params(mode=mode, period=period, role=role, hero_id=hero_id)
     data = await _get_or_create_analysis(profile, db, filters)
 
     if data:
@@ -207,6 +210,7 @@ async def player_detailed_features(
     mode: str = "ranked",
     period: str = "50",
     role: int | None = None,
+    baseline_role: int | None = None,
     hero_id: int | None = None,
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -223,7 +227,13 @@ async def player_detailed_features(
         return {"categories": [], "overall_score": 0, "error": "Аккаунт не привязан"}
 
     try:
-        params = _stats_filter_params(mode, period, role, hero_id)
+        params = _stats_filter_params(
+            mode=mode,
+            period=period,
+            role=role,
+            hero_id=hero_id,
+            baseline_role=baseline_role,
+        )
         if profile.desired_rank_tier:
             params["desired_rank"] = profile.desired_rank_tier
         async with httpx.AsyncClient(timeout=15.0) as client:

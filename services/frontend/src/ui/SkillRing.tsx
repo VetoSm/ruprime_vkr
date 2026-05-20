@@ -71,9 +71,28 @@ interface ComponentBarProps {
   baselineValue: number;
   score: number;
   targetScore: number;
+  missing?: boolean;
 }
 
-export function ComponentBar({ name, playerValue, targetValue, baselineValue, score, targetScore }: ComponentBarProps) {
+export function ComponentBar({ name, playerValue, targetValue, baselineValue, score, targetScore, missing }: ComponentBarProps) {
+  if (missing) {
+    return (
+      <div style={{
+        marginBottom: 16,
+        padding: '10px 12px',
+        border: '1px dashed var(--border-color)',
+        borderRadius: 'var(--radius)',
+        color: 'var(--text-secondary)',
+        background: 'rgba(255,255,255,0.02)',
+      }}>
+        <strong style={{ color: 'var(--text-primary)' }}>{name}</strong>
+        <div style={{ fontSize: '0.78rem', marginTop: 4 }}>
+          Метрика пока не посчитана: нужны parsed-матчи. Не учитываем её как слабое место.
+        </div>
+      </div>
+    );
+  }
+
   const maxVal = Math.max(targetValue, playerValue, baselineValue, 1);
   const playerPct = Math.min((playerValue / maxVal) * 100, 100);
   const targetPct = Math.min((targetValue / maxVal) * 100, 100);

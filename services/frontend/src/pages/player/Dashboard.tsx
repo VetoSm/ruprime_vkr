@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 import { useAuth } from '../../store/AuthContext';
-import { loadHeroes } from '../../api/heroes';
+import { loadHeroes, roleName } from '../../api/heroes';
 import SkillRing, { ComponentBar } from '../../ui/SkillRing';
-import { RankBadge, InfoTooltip } from '../../ui/GameComponents';
+import { RankBadge, RoleBadge, InfoTooltip } from '../../ui/GameComponents';
 import DotaPrivacyBanner from '../../ui/DotaPrivacyBanner';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -27,6 +27,12 @@ const FEATURE_TIPS: Record<string, string> = {
 const CHART_STYLE = { background: '#151c2e', border: '1px solid #1e2a45', color: '#e8edf5' };
 const STEAM_PENDING_KEY = 'steam_pending_link_id';
 const DEFAULT_STATS_PARAMS = { mode: 'ranked', period: '50' };
+const DASHBOARD_ROLES = ['POS1', 'POS2', 'POS3', 'POS4', 'POS5'];
+
+function roleToNumber(role?: string | null) {
+  const m = String(role || '').match(/POS([1-5])/);
+  return m ? Number(m[1]) : undefined;
+}
 
 export default function PlayerDashboard() {
   const { user } = useAuth();
@@ -39,12 +45,16 @@ export default function PlayerDashboard() {
   const [retried, setRetried] = useState(false);
   const [pendingSteamChecked, setPendingSteamChecked] = useState(false);
   const [syncStatus, setSyncStatus] = useState<any>(null);
+  const [selectedAnalysisRole, setSelectedAnalysisRole] = useState('');
 
   useEffect(() => {
     loadHeroes();
     coreApi.get('/me/overview').then((r) => setOverview(r.data)).catch(() => {});
     coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
-    coreApi.get('/player/profile').then((r) => setPlayerProfile(r.data)).catch(() => {});
+    coreApi.get('/player/profile').then((r) => {
+      setPlayerProfile(r.data);
+      setSelectedAnalysisRole(r.data?.analysis_role || '');
+    }).catch(() => {});
   }, []);
 
   // Poll deep-sync status while a job is running so the dashboard can show
@@ -75,9 +85,20 @@ export default function PlayerDashboard() {
     if (overview?.profile?.id) {
       const pid = overview.profile.id;
       coreApi.get(`/player/${pid}/stats/overview`, { params: DEFAULT_STATS_PARAMS }).then((r) => setPlayerStats(r.data)).catch(() => {});
-      coreApi.get(`/player/${pid}/detailed-features`, { params: DEFAULT_STATS_PARAMS }).then((r) => setDetailedFeatures(r.data)).catch(() => {});
     }
   }, [overview]);
+
+  useEffect(() => {
+    if (!overview?.profile?.id) return;
+    const pid = overview.profile.id;
+    const baselineRole = roleToNumber(selectedAnalysisRole);
+    coreApi.get(`/player/${pid}/detailed-features`, {
+      params: {
+        ...DEFAULT_STATS_PARAMS,
+        ...(baselineRole ? { baseline_role: baselineRole } : {}),
+      },
+    }).then((r) => setDetailedFeatures(r.data)).catch(() => {});
+  }, [overview?.profile?.id, selectedAnalysisRole]);
 
   useEffect(() => {
     if (pendingSteamChecked) return;
@@ -101,9 +122,11 @@ export default function PlayerDashboard() {
         await coreApi.post('/player/sync-steam').catch(() => {});
         localStorage.removeItem(STEAM_PENDING_KEY);
         coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
-        coreApi.get('/player/profile').then((r) => setPlayerProfile(r.data)).catch(() => {});
+        coreApi.get('/player/profile').then((r) => {
+          setPlayerProfile(r.data);
+          setSelectedAnalysisRole(r.data?.analysis_role || '');
+        }).catch(() => {});
         coreApi.get(`/player/${pid}/stats/overview`, { params: DEFAULT_STATS_PARAMS }).then((r) => setPlayerStats(r.data)).catch(() => {});
-        coreApi.get(`/player/${pid}/detailed-features`, { params: DEFAULT_STATS_PARAMS }).then((r) => setDetailedFeatures(r.data)).catch(() => {});
       } catch {
         /* останется ручная кнопка в настройках, но без потери pending steam id */
       }
@@ -119,7 +142,6 @@ export default function PlayerDashboard() {
       coreApi.post('/player/sync-steam').then(() => {
         const pid = overview.profile.id;
         coreApi.get(`/player/${pid}/stats/overview`, { params: DEFAULT_STATS_PARAMS }).then((r) => setPlayerStats(r.data)).catch(() => {});
-        coreApi.get(`/player/${pid}/detailed-features`, { params: DEFAULT_STATS_PARAMS }).then((r) => setDetailedFeatures(r.data)).catch(() => {});
         coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
       }).catch(() => {});
     }
@@ -127,6 +149,8 @@ export default function PlayerDashboard() {
 
   const summary = playerStats?.summary || {};
   const trends = playerStats?.trends || {};
+  const dataFreshness = detailedFeatures?.data_freshness || summary.data_freshness;
+  const sampleQuality = detailedFeatures?.sample_quality || summary.sample_quality || {};
   const isLinked = steamData?.linked && steamData?.personaname;
   const displayName = steamData?.personaname || user?.login || 'Игрок';
   const avatarUrl = steamData?.avatar_url;
@@ -152,6 +176,7 @@ export default function PlayerDashboard() {
   const categories = detailedFeatures?.categories || [];
   const topGaps = detailedFeatures?.top_gaps || [];
   const overallScore = detailedFeatures?.overall_score || 0;
+  const effectiveAnalysisRole = selectedAnalysisRole || (detailedFeatures?.baseline_role ? `POS${detailedFeatures.baseline_role}` : '');
 
   const coachPending = user?.coach_application_status === 'PENDING';
   const coachRejected = user?.coach_application_status === 'REJECTED';
@@ -202,6 +227,18 @@ export default function PlayerDashboard() {
         onRefreshed={(data) => data && setSteamData((prev: any) => ({ ...(prev || {}), ...data, linked: true }))}
       />
 
+      {isLinked && dataFreshness && dataFreshness !== 'fresh' && (
+        <div className="alert mb-20" style={{ fontSize: '0.9rem' }}>
+          {dataFreshness === 'stale' && 'Последние доступные матчи давно не обновлялись. Фитчи показывают последнюю известную форму, а не текущую.'}
+          {dataFreshness === 'low_sample' && 'Для стабильной оценки пока мало матчей в текущем срезе. Фитчи предварительные.'}
+          {dataFreshness === 'no_matches' && 'Матчи для анализа пока не загружены. Обновите Steam или проверьте открытость истории матчей.'}
+          {sampleQuality.latest_match_at && (
+            <div className="text-muted" style={{ marginTop: 6 }}>
+              Последний матч: {new Date(sampleQuality.latest_match_at).toLocaleDateString('ru-RU')}.
+            </div>
+          )}
+        </div>
+      )}
 
       {isLinked && syncStatus?.scheduled && (syncStatus.status === 'queued' || syncStatus.status === 'running') && (
         <div
@@ -335,6 +372,44 @@ export default function PlayerDashboard() {
             )}
           </div>
 
+          <div className="card mb-20">
+            <div className="flex-between" style={{ gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <h4 style={{ margin: 0 }}>Роль для baseline</h4>
+                <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+                  Меняет сравнение фитчей с игроками выбранной роли. Матчевая статистика остаётся фактической.
+                </p>
+              </div>
+              {effectiveAnalysisRole && (
+                <span className="badge badge-accent">Сейчас: {roleName(effectiveAnalysisRole)}</span>
+              )}
+            </div>
+            <div className="flex gap-10" style={{ flexWrap: 'wrap', marginTop: 12 }}>
+              <button
+                type="button"
+                className={`btn btn-sm ${!selectedAnalysisRole ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setSelectedAnalysisRole('')}
+              >
+                Авто
+              </button>
+              {DASHBOARD_ROLES.map((role) => (
+                <button
+                  key={role}
+                  type="button"
+                  className={`btn btn-sm ${selectedAnalysisRole === role ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setSelectedAnalysisRole(role)}
+                >
+                  <RoleBadge role={role} compact />
+                </button>
+              ))}
+            </div>
+            {!playerProfile?.analysis_role && !detailedFeatures?.baseline_role && (
+              <div className="text-muted" style={{ fontSize: '0.78rem', marginTop: 8 }}>
+                Если авто-роль не определяется уверенно, выберите основную роль в настройках или прямо здесь.
+              </div>
+            )}
+          </div>
+
           {categories.length > 0 ? (
             <div className="skill-grid">
               {categories.map((cat: any) => (
@@ -372,7 +447,8 @@ export default function PlayerDashboard() {
             {cat.components.map((comp: any) => (
               <ComponentBar key={comp.key} name={comp.name}
                 playerValue={comp.player_value} targetValue={comp.target_value}
-                baselineValue={comp.baseline_value} score={comp.score} targetScore={comp.target_score} />
+                baselineValue={comp.baseline_value} score={comp.score} targetScore={comp.target_score}
+                missing={Boolean(comp.missing)} />
             ))}
           </div>
         );
@@ -413,7 +489,7 @@ export default function PlayerDashboard() {
             );
           })}
           <div style={{ marginTop: 16 }}>
-            <Link to="/ai-chat" className="btn btn-purple">Разобрать с AI-тренером</Link>
+            <Link to="/ai-chat?auto=gaps" className="btn btn-purple">Разобрать с AI-тренером</Link>
           </div>
         </div>
       )}

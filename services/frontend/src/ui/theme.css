@@ -177,16 +177,16 @@ a:hover {
 }
 
 .sidebar-toggle {
-  background: none;
-  border: none;
-  border-top: 1px solid var(--border-color);
+  background: linear-gradient(90deg, rgba(22, 233, 212, 0.12), rgba(125, 94, 255, 0.08));
+  border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  padding: 12px;
+  padding: 10px 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: auto;
+  margin: auto 12px 12px;
+  border-radius: var(--radius);
   transition: var(--transition);
 }
 .sidebar-toggle:hover {
@@ -197,7 +197,7 @@ a:hover {
 .main-content {
   flex: 1;
   margin-left: var(--sidebar-width);
-  padding: 28px 32px;
+  padding: 28px 32px 18px;
   padding-top: 68px;
   min-height: 100vh;
   transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -298,6 +298,64 @@ a:hover {
   letter-spacing: 0.4px;
   padding: 0 5px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.mini-ai-chat {
+  position: fixed;
+  right: 24px;
+  bottom: 92px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: 520px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow);
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mini-ai-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mini-ai-body {
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mini-ai-msg {
+  padding: 9px 11px;
+  border-radius: var(--radius);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.mini-ai-msg.user {
+  align-self: flex-end;
+  background: var(--accent-bg);
+}
+
+.mini-ai-msg.ai {
+  align-self: flex-start;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.mini-ai-input {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border-color);
 }
 
 /* ===== Password Eye Toggle ===== */
@@ -1449,6 +1507,9 @@ table tr:hover {
 
 .site-footer {
   margin-top: auto;
+  margin-left: -32px;
+  margin-right: -32px;
+  margin-bottom: -18px;
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
 }
@@ -1456,12 +1517,36 @@ table tr:hover {
 .site-footer-inner {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 14px 20px;
+  padding: 12px 20px;
   display: flex;
   gap: 12px;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
+}
+
+.toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1200;
+  max-width: 360px;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  font-size: 0.9rem;
+}
+
+.toast-success {
+  background: rgba(0, 212, 170, 0.16);
+  border: 1px solid rgba(0, 212, 170, 0.45);
+  color: var(--text-primary);
+}
+
+.toast-error {
+  background: rgba(255, 71, 87, 0.16);
+  border: 1px solid rgba(255, 71, 87, 0.45);
+  color: var(--text-primary);
 }
 
 .site-footer-brand {

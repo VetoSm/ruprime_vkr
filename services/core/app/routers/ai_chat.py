@@ -9,7 +9,7 @@ from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
 from app.ml_client import ml_headers
 from app.models import PlayerProfile, AiAdviceHistory
-from app.schemas import AiChatRequest, AiChatResponse, AiHistoryEntry
+from app.schemas import AiChatRequest, AiChatResponse, AiHistoryEntry, MessageResponse
 
 router = APIRouter(prefix="/ai", tags=["ai-chat"])
 
@@ -48,6 +48,7 @@ def _limit_response(context: dict, used_today: int) -> AiChatResponse:
     return AiChatResponse(
         advice_summary=summary,
         advice_full=full,
+        context_basis=_context_basis(context),
         llm_status="rate_limited",
         llm_error="AI_CHAT_DAILY_LIMIT exceeded",
         requests_used_today=used_today,
@@ -57,6 +58,12 @@ def _limit_response(context: dict, used_today: int) -> AiChatResponse:
 
 
 def _desired_primary_role(profile: PlayerProfile) -> int | None:
+    if profile and profile.analysis_role:
+        digits = "".join(ch for ch in str(profile.analysis_role) if ch.isdigit())
+        if digits:
+            val = int(digits)
+            if 1 <= val <= 5:
+                return val
     roles = profile.desired_roles if profile else None
     if not roles:
         return None
@@ -73,6 +80,24 @@ def _desired_primary_role(profile: PlayerProfile) -> int | None:
             if 1 <= val <= 5:
                 return val
     return None
+
+
+def _context_basis(context: dict) -> dict:
+    summary = context.get("summary", {}) if context else {}
+    filters = context.get("filters_applied") or summary.get("filters_applied") or {}
+    gaps = context.get("feature_gaps") or []
+    categories = context.get("feature_categories") or []
+    return {
+        "scope": filters.get("label") or summary.get("stats_scope_label"),
+        "matches": summary.get("games_analyzed"),
+        "winrate": summary.get("winrate"),
+        "mmr": summary.get("estimated_mmr"),
+        "overall_score": context.get("overall_score"),
+        "current_rank": context.get("current_rank"),
+        "target_rank": context.get("target_rank"),
+        "top_gaps": gaps[:5],
+        "weak_categories": sorted(categories, key=lambda c: c.get("score", 0))[:4],
+    }
 
 
 @router.post("/chat", response_model=AiChatResponse)
@@ -93,8 +118,6 @@ async def ai_chat(
     if profile and profile.dota_account_id:
         params = dict(DEFAULT_AI_STATS_PARAMS)
         role = _desired_primary_role(profile)
-        if role:
-            params["role"] = role
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(
@@ -109,7 +132,7 @@ async def ai_chat(
                     "weaknesses": ml_data.get("weaknesses_ranked", []),
                     "strengths": ml_data.get("strengths_ranked", []),
                     "comparisons": ml_data.get("comparisons", {}),
-                    "filters": params,
+                    "filters": {**params, **({"baseline_role": role} if role else {})},
                 }
         except Exception:
             pass
@@ -120,7 +143,7 @@ async def ai_chat(
             params = dict(DEFAULT_AI_STATS_PARAMS)
             role = _desired_primary_role(profile)
             if role:
-                params["role"] = role
+                params["baseline_role"] = role
             if profile.desired_rank_tier:
                 params["desired_rank"] = profile.desired_rank_tier
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -202,6 +225,7 @@ async def ai_chat(
     return AiChatResponse(
         advice_summary=advice_summary,
         advice_full=advice_full,
+        context_basis=_context_basis(context),
         llm_request_id=llm_request_id,
         llm_status=llm_status,
         llm_error=llm_error,
@@ -237,3 +261,22 @@ def ai_history(
         )
         for e in entries
     ]
+
+
+@router.delete("/history", response_model=MessageResponse)
+def clear_ai_history(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Clear AI chat history for the current player."""
+    profile = db.query(PlayerProfile).filter(
+        PlayerProfile.core_user_id == current_user.user_id
+    ).first()
+    if profile:
+        db.query(AiAdviceHistory).filter(
+            AiAdviceHistory.player_profile_id == profile.id,
+        ).delete(synchronize_session=False)
+        db.commit()
+        log_action(db, current_user.user_id, current_user.role, "CLEAR_AI_HISTORY",
+                   "AI_ADVICE", profile.id)
+    return MessageResponse(message="History cleared")

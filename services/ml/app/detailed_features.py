@@ -18,6 +18,8 @@ from app.feature_engine import (
     _baseline_scope_conditions,
     _mean_present,
     _read_baselines_for_scope,
+    _data_freshness,
+    _sample_quality,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,6 +122,7 @@ def compute_detailed_features(
     desired_rank: str = None,
     db: Session = None,
     filters: dict | None = None,
+    baseline_role: int | None = None,
 ) -> dict:
     """
     Compute 6 feature categories with sub-components.
@@ -138,9 +141,12 @@ def compute_detailed_features(
     WHERE account_id = {account_id}
     ORDER BY start_time DESC NULLS LAST
     """
-    df = pd.read_sql(match_query, engine)
+    df_all = pd.read_sql(match_query, engine)
     normalized_filters = normalize_stats_filters(**(filters or {}))
-    df, filters_applied = apply_stats_filters(df, normalized_filters)
+    df, filters_applied = apply_stats_filters(df_all, normalized_filters)
+    sample_quality = _sample_quality(df)
+    freshness = _data_freshness(df)
+    baseline_role = baseline_role or filters_applied.get("auto_role") or normalized_filters.get("role")
 
     if df.empty and not acc:
         return {"categories": [], "overall_score": 0, "error": "Нет данных"}
@@ -155,6 +161,9 @@ def compute_detailed_features(
             "total_games_lifetime": int(lifetime_games),
             "parsed_games_n": int(parsed_games_n),
             "filters_applied": filters_applied,
+            "data_freshness": freshness,
+            "last_match_at": sample_quality.get("latest_match_at"),
+            "sample_quality": sample_quality,
         }
 
     # Determine current MMR band. Prefer account rank_tier, then the median
@@ -162,7 +171,7 @@ def compute_detailed_features(
     rank_source = "account_rank_tier" if acc and acc.rank_tier else "unknown"
     effective_rank_tier = acc.rank_tier if acc and acc.rank_tier else None
     if not effective_rank_tier:
-        effective_rank_tier, rank_source = infer_rank_tier_from_matches(df)
+        effective_rank_tier, rank_source = infer_rank_tier_from_matches(df_all)
     current_rank = rank_tier_to_name(effective_rank_tier) if effective_rank_tier else "UNKNOWN"
     current_band = RANK_TO_MMR_BAND.get(current_rank, "2000-4000")
 
@@ -172,13 +181,13 @@ def compute_detailed_features(
 
     # Get baselines
     current_baseline = get_baseline_averages(
-        current_band, db, role=normalized_filters.get("role"), hero_id=normalized_filters.get("hero_id")
+        current_band, db, role=baseline_role, hero_id=normalized_filters.get("hero_id")
     )
     target_baseline = get_baseline_averages(
-        target_band, db, role=normalized_filters.get("role"), hero_id=normalized_filters.get("hero_id")
+        target_band, db, role=baseline_role, hero_id=normalized_filters.get("hero_id")
     )
     current_pcts = get_baseline_percentiles(
-        current_band, role=normalized_filters.get("role"), hero_id=normalized_filters.get("hero_id")
+        current_band, role=baseline_role, hero_id=normalized_filters.get("hero_id")
     )
 
     def _pct(metric: str) -> dict | None:
@@ -293,7 +302,7 @@ def compute_detailed_features(
             _component("observer_wards", "Обсервер варды/игра", obs, 2.0, 4.0),
             _component("sentry_wards", "Сентри варды/игра", sen, 2.0, 4.0),
         ] if vision_has_data else [
-            _component("vision_data", "Недостаточно данных — нужны parsed матчи", 0, 1, 1),
+            {**_component("vision_data", "Недостаточно данных — нужны parsed матчи", 0, 1, 1), "missing": True},
         ],
     ))
 
@@ -360,7 +369,7 @@ def compute_detailed_features(
         components=[
             _component("stuns", "Секунд стана/игра", stuns, 15, 25),
         ] if stuns_has_data else [
-            _component("stuns_data", "Недостаточно данных — нужны parsed матчи", 0, 1, 1),
+            {**_component("stuns_data", "Недостаточно данных — нужны parsed матчи", 0, 1, 1), "missing": True},
         ],
     ))
 
@@ -371,6 +380,8 @@ def compute_detailed_features(
     all_gaps = []
     for cat in categories:
         for comp in cat["components"]:
+            if comp.get("missing") or str(comp.get("key", "")).endswith("_data"):
+                continue
             if comp["gap"] > 0.5:
                 all_gaps.append({
                     "category": cat["name"],
@@ -394,6 +405,10 @@ def compute_detailed_features(
         "current_rank": current_rank,
         "current_band": current_band,
         "rank_source": rank_source,
+        "baseline_role": baseline_role,
+        "data_freshness": freshness,
+        "last_match_at": sample_quality.get("latest_match_at"),
+        "sample_quality": sample_quality,
         "rank_tier": int(effective_rank_tier) if effective_rank_tier else None,
         "target_rank": target_rank,
         "target_band": target_band,

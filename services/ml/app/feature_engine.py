@@ -340,22 +340,35 @@ def estimate_mmr(rank_tier: int | float | None, df: pd.DataFrame | None = None, 
     return _estimate_mmr_from_stats(df, mmr_band or "crusader")
 
 
-def infer_rank_tier_from_matches(df: pd.DataFrame | None) -> tuple[int | None, str]:
-    """Infer the most current rank_tier from recent filtered matches.
+def infer_rank_tier_from_matches(df: pd.DataFrame | None, recent_limit: int = 10) -> tuple[int | None, str]:
+    """Infer current rank_tier from the most recent ranked match averages.
 
     Priority:
     1. Player account profile rank_tier is handled by callers before this.
-    2. Median average_rank from the already-filtered recent ranked window.
-       Median is more robust than mean when one match has a noisy rank.
+    2. Median average_rank from the latest ranked matches with average_rank.
+       Median is more robust than mode/mean when one match has a noisy lobby.
     3. None, so callers can decide whether to show unknown or use a heuristic.
     """
     if df is None or df.empty or "average_rank" not in df.columns:
         return None, "unknown"
-    ranks = pd.to_numeric(df["average_rank"], errors="coerce").dropna()
+
+    scope = df.copy()
+    if "start_time" in scope.columns:
+        scope = scope.sort_values("start_time", ascending=False, na_position="last")
+
+    # Prefer known ranked modes for current-rank fallback. If mode is missing
+    # for old rows, keep them only when no known ranked rows are available.
+    if "game_mode" in scope.columns:
+        ranked_scope = scope[scope["game_mode"].isin(RANKED_GAME_MODES)]
+        if not ranked_scope.empty:
+            scope = ranked_scope
+
+    ranks = pd.to_numeric(scope["average_rank"], errors="coerce").dropna()
     ranks = ranks[(ranks > 0) & (ranks < 100)]
     if ranks.empty:
         return None, "unknown"
-    return int(round(float(ranks.median()))), "recent_matches_average_rank"
+    recent_ranks = ranks.head(max(int(recent_limit), 1))
+    return int(round(float(recent_ranks.median()))), "recent_ranked_average_rank"
 
 
 def _estimate_mmr_from_stats(df: pd.DataFrame, mmr_band: str) -> int:
@@ -420,6 +433,57 @@ def _mean_present(series: pd.Series, digits: int = 1, default=None):
 
 def _series_present(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").dropna()
+
+
+def _sample_quality(df: pd.DataFrame | None) -> dict:
+    if df is None or df.empty:
+        return {
+            "matches_count": 0,
+            "gpm_count": 0,
+            "xpm_count": 0,
+            "role_count": 0,
+            "average_rank_count": 0,
+            "latest_match_at": None,
+        }
+
+    latest_match_at = None
+    if "start_time" in df.columns:
+        starts = pd.to_numeric(df["start_time"], errors="coerce").dropna()
+        if not starts.empty:
+            latest_match_at = datetime.fromtimestamp(int(starts.max()), tz=timezone.utc).isoformat()
+
+    role_count = 0
+    if "lane_role" in df.columns:
+        roles = pd.to_numeric(df["lane_role"], errors="coerce").dropna()
+        role_count = int(((roles >= 1) & (roles <= 5)).sum())
+
+    average_rank_count = 0
+    if "average_rank" in df.columns:
+        ranks = pd.to_numeric(df["average_rank"], errors="coerce").dropna()
+        average_rank_count = int(((ranks > 0) & (ranks < 100)).sum())
+
+    return {
+        "matches_count": int(len(df)),
+        "gpm_count": int(_series_present(df["gold_per_min"]).count()) if "gold_per_min" in df.columns else 0,
+        "xpm_count": int(_series_present(df["xp_per_min"]).count()) if "xp_per_min" in df.columns else 0,
+        "role_count": role_count,
+        "average_rank_count": average_rank_count,
+        "latest_match_at": latest_match_at,
+    }
+
+
+def _data_freshness(df: pd.DataFrame | None, *, min_sample: int = 10, stale_days: int = 90) -> str:
+    if df is None or df.empty:
+        return "no_matches"
+    if len(df) < min_sample:
+        return "low_sample"
+    if "start_time" in df.columns:
+        starts = pd.to_numeric(df["start_time"], errors="coerce").dropna()
+        if not starts.empty:
+            cutoff = datetime.now(timezone.utc).timestamp() - stale_days * 24 * 3600
+            if float(starts.max()) < cutoff:
+                return "stale"
+    return "fresh"
 
 
 def _compute_comparisons(df: pd.DataFrame, mmr_band: str, filters: dict | None = None) -> dict:
@@ -740,6 +804,8 @@ def analyze_player_from_account(
 
     normalized_filters = normalize_stats_filters(**(filters or {}))
     df, filters_applied = apply_stats_filters(df_all, normalized_filters)
+    sample_quality = _sample_quality(df)
+    freshness = _data_freshness(df)
     if df.empty:
         ranked_only_notice = "По выбранным фильтрам нет матчей. Измените фильтр режима, роли, героя или периода."
     else:
@@ -780,7 +846,7 @@ def analyze_player_from_account(
     rank_source = "account_rank_tier" if rank_tier else "unknown"
     effective_rank_tier = rank_tier
     if not effective_rank_tier:
-        effective_rank_tier, rank_source = infer_rank_tier_from_matches(df)
+        effective_rank_tier, rank_source = infer_rank_tier_from_matches(df_all)
     mmr_band = rank_tier_to_mmr_band(effective_rank_tier or 0)
     estimated_mmr = estimate_mmr(effective_rank_tier, df, mmr_band)
     if rank_source == "unknown" and estimated_mmr:
@@ -830,6 +896,9 @@ def analyze_player_from_account(
             "kda_avg": 0,
             "notice": ranked_only_notice,
             "metric_counts": metric_counts,
+            "sample_quality": sample_quality,
+            "data_freshness": freshness,
+            "last_match_at": sample_quality.get("latest_match_at"),
         }
         return {
             "ml_analysis_id": analysis_id,
@@ -868,6 +937,9 @@ def analyze_player_from_account(
         "hero_damage_per_min_avg": round(float(df["hero_damage_per_min"].dropna().mean() or 0), 0),
         "notice": ranked_only_notice,
         "metric_counts": metric_counts,
+        "sample_quality": sample_quality,
+        "data_freshness": freshness,
+        "last_match_at": sample_quality.get("latest_match_at"),
     }
 
     # Trends by time periods (group by batches of 20 games)
@@ -981,6 +1053,7 @@ def analyze_player_from_account(
 
 def _minimal_analysis(analysis_id: str, player_profile_id: int = None) -> dict:
     """Return a minimal analysis for players with no data."""
+    sample_quality = _sample_quality(pd.DataFrame())
     return {
         "ml_analysis_id": analysis_id,
         "summary": {
@@ -995,6 +1068,9 @@ def _minimal_analysis(analysis_id: str, player_profile_id: int = None) -> dict:
             "avg_deaths": 0,
             "avg_assists": 0,
             "avg_duration_min": 0,
+            "data_freshness": "no_matches",
+            "last_match_at": None,
+            "sample_quality": sample_quality,
         },
         "trends": {},
         "roles": {"actual_roles_distribution": {}},

@@ -87,6 +87,10 @@ def startup():
             "'ACCEPTED'::request_status_enum"
             ")"
         ))
+        conn.execute(text(
+            "ALTER TABLE player_profiles "
+            "ADD COLUMN IF NOT EXISTS analysis_role VARCHAR(20)"
+        ))
 
     invalidate_stats = os.getenv("INVALIDATE_ML_ANALYSES_ON_START", "true").lower()
     if invalidate_stats in ("true", "1", "yes"):

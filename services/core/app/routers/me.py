@@ -39,6 +39,7 @@ def me_overview(current_user: CurrentUser = Depends(get_current_user), db: Sessi
                 "actual_rank_tier": profile.actual_rank_tier if profile else None,
                 "steam_id": profile.steam_id if profile else None,
                 "ml_analysis_id": profile.ml_analysis_id if profile else None,
+                "analysis_role": profile.analysis_role if profile else None,
             },
             stats={
                 "active_requests": active_requests,
@@ -83,6 +84,7 @@ def me_overview(current_user: CurrentUser = Depends(get_current_user), db: Sessi
                 "steam_id": player_profile.steam_id if player_profile else None,
                 "dota_account_id": player_profile.dota_account_id if player_profile else None,
                 "actual_rank_tier": player_profile.actual_rank_tier if player_profile else None,
+                "analysis_role": player_profile.analysis_role if player_profile else None,
             },
             stats={
                 "upcoming_sessions": upcoming_sessions,

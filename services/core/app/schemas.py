@@ -7,6 +7,7 @@ from datetime import datetime
 class PlayerProfileUpdate(BaseModel):
     desired_rank_tier: Optional[str] = None
     desired_roles: Optional[list[str]] = None
+    analysis_role: Optional[str] = None
     training_goals: Optional[list[str]] = None
     about: Optional[str] = None
 
@@ -20,6 +21,7 @@ class PlayerProfileResponse(BaseModel):
     actual_roles: Optional[Any] = None
     desired_rank_tier: Optional[str] = None
     desired_roles: Optional[Any] = None
+    analysis_role: Optional[str] = None
     training_goals: Optional[Any] = None
     about: Optional[str] = None
     ml_analysis_id: Optional[str] = None
@@ -170,6 +172,7 @@ class AiChatRequest(BaseModel):
 class AiChatResponse(BaseModel):
     advice_summary: str
     advice_full: str
+    context_basis: Optional[Any] = None
     llm_request_id: Optional[str] = None
     llm_status: Optional[str] = None
     llm_error: Optional[str] = None

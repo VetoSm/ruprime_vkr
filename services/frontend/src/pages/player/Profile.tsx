@@ -56,6 +56,7 @@ export default function PlayerProfile() {
   const [steamData, setSteamData] = useState<SteamData | null>(null);
   const [desiredRank, setDesiredRank] = useState('');
   const [desiredRoles, setDesiredRoles] = useState('');
+  const [analysisRole, setAnalysisRole] = useState('');
   const [goals, setGoals] = useState('');
   const [about, setAbout] = useState('');
   const [steamId, setSteamId] = useState('');
@@ -91,6 +92,7 @@ export default function PlayerProfile() {
       setProfile(r.data);
       setDesiredRank(r.data.desired_rank_tier || '');
       setDesiredRoles(Array.isArray(r.data.desired_roles) ? r.data.desired_roles.join(', ') : '');
+      setAnalysisRole(r.data.analysis_role || '');
       setGoals(Array.isArray(r.data.training_goals) ? r.data.training_goals.join(', ') : '');
       setAbout(r.data.about || '');
     }).catch(() => {});
@@ -139,6 +141,7 @@ export default function PlayerProfile() {
       const res = await coreApi.post('/player/profile', {
         desired_rank_tier: desiredRank || undefined,
         desired_roles: desiredRoles ? desiredRoles.split(',').map(s => s.trim()) : undefined,
+        analysis_role: analysisRole || '',
         training_goals: goals ? goals.split(',').map(s => s.trim()) : undefined,
         about: about || undefined,
       });
@@ -267,8 +270,8 @@ export default function PlayerProfile() {
         <p>Привязка Steam, смена пароля, цели и предпочтения</p>
       </div>
 
-      {msg && <div className="alert alert-success" style={{ whiteSpace: 'pre-line' }}>{msg}</div>}
-      {error && <div className="alert alert-error">{error}</div>}
+      {msg && <div className="toast toast-success" style={{ whiteSpace: 'pre-line' }}>{msg}</div>}
+      {error && <div className="toast toast-error">{error}</div>}
 
       {isLinked ? (
         <>
@@ -569,6 +572,31 @@ export default function PlayerProfile() {
                 );
               })}
             </div>
+          </div>
+        </div>
+        <div className="form-group">
+          <label>Основная роль для анализа</label>
+          <p className="text-muted" style={{ fontSize: '0.82rem', margin: '0 0 8px' }}>
+            Используется на дашборде для сравнения фитчей с baseline выбранной роли. Сырые фильтры статистики всё равно строятся по фактическим матчам.
+          </p>
+          <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`btn btn-sm ${!analysisRole ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setAnalysisRole('')}
+            >
+              Авто
+            </button>
+            {['POS1', 'POS2', 'POS3', 'POS4', 'POS5'].map((r) => (
+              <button
+                key={r}
+                type="button"
+                className={`btn btn-sm ${analysisRole === r ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setAnalysisRole(r)}
+              >
+                <RoleBadge role={r} compact />
+              </button>
+            ))}
           </div>
         </div>
         <div className="form-group">

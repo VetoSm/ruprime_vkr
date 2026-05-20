@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 
 interface ChatEntry {
@@ -106,6 +107,9 @@ export default function PlayerAiChat() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
+  const [contextBasis, setContextBasis] = useState<any>(null);
+  const [showBasis, setShowBasis] = useState(true);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
     coreApi.get('/ai/history').then((r) => {
@@ -120,9 +124,9 @@ export default function PlayerAiChat() {
     }).catch(() => {});
   }, []);
 
-  const send = async () => {
-    if (!input.trim()) return;
-    const userMsg = input;
+  const send = async (preset?: string) => {
+    const userMsg = preset || input;
+    if (!userMsg.trim()) return;
     setMessages((prev) => [...prev, { type: 'user', text: userMsg }]);
     setInput('');
     setLoading(true);
@@ -145,6 +149,7 @@ export default function PlayerAiChat() {
       if (res.data.llm_error && res.data.llm_status !== 'generated') {
         meta.push(`Причина: ${res.data.llm_error}`);
       }
+      setContextBasis(res.data.context_basis || null);
       const metaText = meta.length ? `\n\n---\n${meta.join('\n')}` : '';
       setMessages((prev) => [...prev, {
         type: 'ai',
@@ -156,6 +161,22 @@ export default function PlayerAiChat() {
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (searchParams.get('auto') !== 'gaps' || loading || messages.length > 0) return;
+    const prompt = 'Разбери мои главные разрывы по фитчам: собери недостающие проценты до целевых показателей и дай план, что улучшать в ближайших 10 ranked-матчах.';
+    send(prompt);
+    const next = new URLSearchParams(searchParams);
+    next.delete('auto');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, loading, messages.length]);
+
+  const clearChat = async () => {
+    await coreApi.delete('/ai/history').catch(() => {});
+    setMessages([]);
+    setHistory([]);
+    setContextBasis(null);
   };
 
   return (
@@ -191,7 +212,30 @@ export default function PlayerAiChat() {
               Смотрит последние ranked-матчи, скиллы и role-aware baseline.
             </div>
           </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-outline btn-sm" onClick={clearChat}>Очистить чат</button>
+            <Link to="/dashboard" className="btn btn-outline btn-sm">К дашборду</Link>
+          </div>
         </div>
+        {contextBasis && (
+          <div className="card mb-20" style={{ padding: 12 }}>
+            <button className="btn btn-outline btn-sm" onClick={() => setShowBasis((v) => !v)}>
+              {showBasis ? 'Скрыть базу ответа' : 'Показать базу ответа'}
+            </button>
+            {showBasis && (
+              <div style={{ marginTop: 10, fontSize: '0.86rem' }}>
+                <div className="text-muted">Выборка: {contextBasis.scope || '—'} · Матчей: {contextBasis.matches ?? '—'} · Общий балл: {contextBasis.overall_score ?? '—'}</div>
+                {contextBasis.top_gaps?.length > 0 && (
+                  <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                    {contextBasis.top_gaps.slice(0, 5).map((g: any, idx: number) => (
+                      <li key={idx}>{g.component}: {g.player_value} → {g.target_value}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <div className="chat-container" style={{ flex: 1 }}>
           {messages.length === 0 && (
             <div className="text-center text-muted" style={{ marginTop: 40 }}>

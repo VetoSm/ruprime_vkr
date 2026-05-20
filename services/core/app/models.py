@@ -46,6 +46,7 @@ class PlayerProfile(Base):
     actual_roles = Column(JSON, nullable=True)
     desired_rank_tier = Column(String(50), nullable=True)
     desired_roles = Column(JSON, nullable=True)
+    analysis_role = Column(String(20), nullable=True)
     training_goals = Column(JSON, nullable=True)
     about = Column(Text, nullable=True)
     ml_analysis_id = Column(String(100), nullable=True)

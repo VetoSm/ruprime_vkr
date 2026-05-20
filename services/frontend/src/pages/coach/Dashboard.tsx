@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 import { useAuth } from '../../store/AuthContext';
 import { InfoTooltip } from '../../ui/GameComponents';
+import SkillRing, { ComponentBar } from '../../ui/SkillRing';
 
 interface Student {
   player_profile_id: number;
@@ -27,6 +28,9 @@ export default function CoachDashboard() {
   const [overview, setOverview] = useState<any>(null);
   const [sessions, setSessions] = useState<any[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [myStats, setMyStats] = useState<any>(null);
+  const [myFeatures, setMyFeatures] = useState<any>(null);
+  const [showMyAnalysis, setShowMyAnalysis] = useState(false);
 
   useEffect(() => {
     coreApi.get('/me/overview').then((r) => setOverview(r.data)).catch(() => {});
@@ -43,6 +47,17 @@ export default function CoachDashboard() {
   const cancelledSessions = sessions.filter((s) => s.status === 'CANCELLED').length;
 
   const isVerified = Boolean(profile.is_verified);
+
+  useEffect(() => {
+    const playerProfileId = overview?.profile?.player_profile_id;
+    if (!playerProfileId || !showMyAnalysis) return;
+    coreApi.get(`/player/${playerProfileId}/stats/overview`, { params: { mode: 'ranked', period: '50' } })
+      .then((r) => setMyStats(r.data))
+      .catch(() => {});
+    coreApi.get(`/player/${playerProfileId}/detailed-features`, { params: { mode: 'ranked', period: '50' } })
+      .then((r) => setMyFeatures(r.data))
+      .catch(() => {});
+  }, [overview?.profile?.player_profile_id, showMyAnalysis]);
 
   return (
     <div>
@@ -119,10 +134,42 @@ export default function CoachDashboard() {
               Те же инструменты, которыми пользуются ваши ученики, доступны и вам.
             </p>
             <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-              <Link to="/stats" className="btn btn-primary">Мой разбор игры</Link>
+              <button className="btn btn-primary" onClick={() => setShowMyAnalysis((v) => !v)}>
+                {showMyAnalysis ? 'Скрыть мой разбор' : 'Мой разбор игры'}
+              </button>
               <Link to="/ai-chat" className="btn btn-outline">Спросить Оракула</Link>
               <Link to="/settings" className="btn btn-outline">Steam и настройки</Link>
             </div>
+            {showMyAnalysis && (
+              <div style={{ marginTop: 16 }}>
+                <div className="grid-4 mb-20">
+                  <div className="stat-card"><div className="stat-card-label">Матчей</div><div className="stat-card-value">{myStats?.summary?.games_analyzed ?? '—'}</div></div>
+                  <div className="stat-card"><div className="stat-card-label">WR</div><div className="stat-card-value">{typeof myStats?.summary?.winrate === 'number' ? `${(myStats.summary.winrate * 100).toFixed(1)}%` : '—'}</div></div>
+                  <div className="stat-card"><div className="stat-card-label">GPM</div><div className="stat-card-value">{myStats?.summary?.gpm_avg ?? '—'}</div></div>
+                  <div className="stat-card"><div className="stat-card-label">KDA</div><div className="stat-card-value">{myStats?.summary?.kda_avg ?? '—'}</div></div>
+                </div>
+                {myFeatures?.categories?.length > 0 && (
+                  <>
+                    <div className="skill-grid mb-20">
+                      {myFeatures.categories.map((cat: any) => (
+                        <SkillRing key={cat.key} value={cat.score} target={cat.target} label={cat.name} />
+                      ))}
+                    </div>
+                    {myFeatures.categories.slice(0, 3).map((cat: any) => (
+                      <div key={cat.key} style={{ marginBottom: 12 }}>
+                        <h4 style={{ margin: '0 0 8px' }}>{cat.name}</h4>
+                        {cat.components.map((comp: any) => (
+                          <ComponentBar key={comp.key} name={comp.name}
+                            playerValue={comp.player_value} targetValue={comp.target_value}
+                            baselineValue={comp.baseline_value} score={comp.score}
+                            targetScore={comp.target_score} missing={Boolean(comp.missing)} />
+                        ))}
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
           </>
         ) : (
           <>

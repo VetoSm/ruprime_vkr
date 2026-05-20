@@ -659,6 +659,7 @@ def detailed_features_endpoint(
     mode: str = "ranked",
     period: str = "50",
     role: int | None = None,
+    baseline_role: int | None = None,
     hero_id: int | None = None,
     db: Session = Depends(get_db),
 ):
@@ -669,6 +670,7 @@ def detailed_features_endpoint(
         desired_rank,
         db,
         filters={"mode": mode, "period": period, "role": role, "hero_id": hero_id},
+        baseline_role=baseline_role,
     )
     return result
 

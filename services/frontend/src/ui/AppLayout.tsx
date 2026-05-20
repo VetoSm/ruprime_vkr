@@ -1,5 +1,6 @@
 import { ReactNode, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
+import { coreApi } from '../api/client';
 import { useAuth } from '../store/AuthContext';
 import {
   IconHome, IconChart, IconGraduate,
@@ -36,6 +37,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [showAiChat, setShowAiChat] = useState(false);
+  const [miniAiInput, setMiniAiInput] = useState('');
+  const [miniAiMessages, setMiniAiMessages] = useState<Array<{ type: 'user' | 'ai'; text: string }>>([]);
+  const [miniAiLoading, setMiniAiLoading] = useState(false);
 
   const playerLinks = [
     { to: '/dashboard', label: 'Дашборд' },
@@ -75,6 +79,22 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       ? '/admin/users'
       : '/settings';
   const showAiFab = user?.role === 'PLAYER' || user?.role === 'COACH';
+
+  const sendMiniAi = async () => {
+    const text = miniAiInput.trim();
+    if (!text) return;
+    setMiniAiMessages((prev) => [...prev, { type: 'user', text }]);
+    setMiniAiInput('');
+    setMiniAiLoading(true);
+    try {
+      const res = await coreApi.post('/ai/chat', { message: text, context_mode: 'AUTO' });
+      setMiniAiMessages((prev) => [...prev, { type: 'ai', text: res.data.advice_summary || res.data.advice_full || 'Нет ответа' }]);
+    } catch {
+      setMiniAiMessages((prev) => [...prev, { type: 'ai', text: 'Оракул временно недоступен.' }]);
+    } finally {
+      setMiniAiLoading(false);
+    }
+  };
 
   return (
     <ConsentGate>
@@ -139,11 +159,38 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       {showAiFab && (
         <button className="ai-fab" onClick={() => {
           setShowAiChat(!showAiChat);
-          if (!showAiChat) navigate('/ai-chat');
         }} aria-label="Открыть AI тренера" title="AI Тренер">
           <IconMessageCircle size={24} color="#fff" />
           <span className="ai-fab-badge">AI</span>
         </button>
+      )}
+      {showAiFab && showAiChat && (
+        <div className="mini-ai-chat">
+          <div className="mini-ai-head">
+            <strong>Оракул</strong>
+            <div className="flex gap-10">
+              <button className="btn btn-outline btn-sm" onClick={() => setMiniAiMessages([])}>Очистить</button>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/ai-chat')}>Открыть</button>
+            </div>
+          </div>
+          <div className="mini-ai-body">
+            {miniAiMessages.length === 0 && <p className="text-muted">Задайте короткий вопрос по игре.</p>}
+            {miniAiMessages.map((m, idx) => (
+              <div key={idx} className={`mini-ai-msg ${m.type}`}>{m.text}</div>
+            ))}
+            {miniAiLoading && <div className="mini-ai-msg ai">Думаю...</div>}
+          </div>
+          <div className="mini-ai-input">
+            <input
+              className="form-input"
+              value={miniAiInput}
+              onChange={(e) => setMiniAiInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendMiniAi()}
+              placeholder="Спросить..."
+            />
+            <button className="btn btn-primary btn-sm" onClick={sendMiniAi} disabled={miniAiLoading}>→</button>
+          </div>
+        </div>
       )}
     </div>
     </ConsentGate>

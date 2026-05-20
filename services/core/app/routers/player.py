@@ -82,6 +82,11 @@ def create_or_update_player_profile(
         profile.desired_rank_tier = body.desired_rank_tier
     if body.desired_roles is not None:
         profile.desired_roles = body.desired_roles
+    if body.analysis_role is not None:
+        role = body.analysis_role.strip().upper() if body.analysis_role else ""
+        if role and role not in ("POS1", "POS2", "POS3", "POS4", "POS5"):
+            raise HTTPException(status_code=400, detail="analysis_role must be POS1..POS5")
+        profile.analysis_role = role or None
     if body.training_goals is not None:
         profile.training_goals = body.training_goals
     if body.about is not None:

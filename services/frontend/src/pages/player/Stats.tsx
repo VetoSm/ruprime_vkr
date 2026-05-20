@@ -97,6 +97,8 @@ export default function PlayerStats() {
   const scopeLabel = applied.label || `${PERIOD_LABELS[filters.period]}, ${MODE_LABELS[filters.mode]}`;
   const matchesCount = applied.matches_count ?? summary.games_analyzed ?? 0;
   const metricCounts = summary.metric_counts || {};
+  const sampleQuality = summary.sample_quality || {};
+  const dataFreshness = summary.data_freshness;
   const roleCounts = applied.role_counts || {};
   const unknownRoleCount = applied.unknown_role_count ?? 0;
   const modeCounts = applied.mode_counts || {};
@@ -159,6 +161,18 @@ export default function PlayerStats() {
           </div>
           <button className="btn btn-outline btn-sm" onClick={() => setFilters(DEFAULT_FILTERS)}>Сбросить</button>
         </div>
+        {dataFreshness && dataFreshness !== 'fresh' && (
+          <div className="alert mt-20" style={{ fontSize: '0.86rem' }}>
+            {dataFreshness === 'stale' && 'Последние доступные матчи давно не обновлялись. Отчёт показывает последнюю известную форму, а не текущую.'}
+            {dataFreshness === 'low_sample' && 'В выбранном срезе мало матчей, поэтому оценка предварительная.'}
+            {dataFreshness === 'no_matches' && 'В выбранном срезе нет матчей. Попробуйте другой период или обновите данные Steam.'}
+            {sampleQuality.latest_match_at && (
+              <div className="text-muted" style={{ marginTop: 6 }}>
+                Последний матч: {new Date(sampleQuality.latest_match_at).toLocaleDateString('ru-RU')}.
+              </div>
+            )}
+          </div>
+        )}
         {(summary.notice || matchesCount === 0 || metricCounts.gpm === 0) && (
           <div className="alert mt-20" style={{ fontSize: '0.86rem' }}>
             {summary.notice || (
@@ -552,7 +566,8 @@ export default function PlayerStats() {
                 {cat.components.map((comp: any) => (
                   <ComponentBar key={comp.key} name={comp.name} playerValue={comp.player_value}
                     targetValue={comp.target_value} baselineValue={comp.baseline_value}
-                    score={comp.score} targetScore={comp.target_score} />
+                    score={comp.score} targetScore={comp.target_score}
+                    missing={Boolean(comp.missing)} />
                 ))}
               </div>
             ))

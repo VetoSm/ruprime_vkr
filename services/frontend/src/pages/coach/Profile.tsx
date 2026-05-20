@@ -16,6 +16,7 @@ export default function CoachProfilePage() {
   const [studentsCount, setStudentsCount] = useState<number | null>(null);
   const [sessionsCount, setSessionsCount] = useState<number | null>(null);
   const [avgRating, setAvgRating] = useState<number | null>(null);
+  const [steamData, setSteamData] = useState<any>(null);
 
   useEffect(() => {
     coreApi.get('/coach/profile').then((r) => {
@@ -40,6 +41,7 @@ export default function CoachProfilePage() {
       setStudentsCount(students.length);
       setSessionsCount(students.reduce((acc: number, s: any) => acc + (s.sessions_total || 0), 0));
     }).catch(() => {});
+    coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
   }, []);
 
   const save = async () => {
@@ -67,27 +69,43 @@ export default function CoachProfilePage() {
         <p>Редактируйте профиль для привлечения учеников</p>
       </div>
 
-      {msg && <div className="alert alert-success">{msg}</div>}
+      {msg && <div className={`toast ${msg.includes('Ошибка') ? 'toast-error' : 'toast-success'}`}>{msg}</div>}
 
-      {/* Stats Row */}
-      <div className="coach-stats-row">
-        <div className="coach-stat">
-          <div className="coach-stat-value">{studentsCount ?? '—'}</div>
-          <div className="coach-stat-label">Ученики</div>
-        </div>
-        <div className="coach-stat">
-          <div className="coach-stat-value">{sessionsCount ?? '—'}</div>
-          <div className="coach-stat-label">Сессии</div>
-        </div>
-        <div className="coach-stat">
-          <div className="coach-stat-value">{avgRating !== null ? avgRating.toFixed(1) : '—'}</div>
-          <div className="coach-stat-label">Рейтинг</div>
-        </div>
-        <div className="coach-stat">
-          <div className="coach-stat-value" style={{ fontSize: '1.4rem' }}>
-            {rate ? `${parseInt(rate).toLocaleString()} ₽` : '—'}
+      <div className="grid-2 mb-20" style={{ alignItems: 'stretch' }}>
+        <div className="hero-card" style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
+          {steamData?.avatar_url && (
+            <img src={steamData.avatar_url} alt="" className="hero-card-avatar" />
+          )}
+          <div style={{ flex: 1 }}>
+            <div className="badge badge-purple" style={{ marginBottom: 8 }}>Coach profile</div>
+            <h2 style={{ margin: '0 0 8px' }}>{steamData?.personaname || firstName || 'Тренер'}</h2>
+            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+              {steamData?.rank_tier ? <RankBadge rankTier={steamData.rank_tier} size="sm" /> : rank && <RankBadge rankName={rank} size="sm" />}
+              <span className="badge badge-accent">MMR: {steamData?.mmr_estimate || mmr || '—'}</span>
+              <span className="badge">Игр: {steamData?.lifetime_games || steamData?.total_games || '—'}</span>
+            </div>
           </div>
-          <div className="coach-stat-label">Ставка / час</div>
+        </div>
+
+        <div className="coach-stats-row" style={{ margin: 0 }}>
+          <div className="coach-stat">
+            <div className="coach-stat-value">{studentsCount ?? '—'}</div>
+            <div className="coach-stat-label">Ученики</div>
+          </div>
+          <div className="coach-stat">
+            <div className="coach-stat-value">{sessionsCount ?? '—'}</div>
+            <div className="coach-stat-label">Сессии</div>
+          </div>
+          <div className="coach-stat">
+            <div className="coach-stat-value">{avgRating !== null ? avgRating.toFixed(1) : '—'}</div>
+            <div className="coach-stat-label">Рейтинг</div>
+          </div>
+          <div className="coach-stat">
+            <div className="coach-stat-value" style={{ fontSize: '1.4rem' }}>
+              {rate ? `${parseInt(rate).toLocaleString()} ₽` : '—'}
+            </div>
+            <div className="coach-stat-label">Ставка / час</div>
+          </div>
         </div>
       </div>
 
