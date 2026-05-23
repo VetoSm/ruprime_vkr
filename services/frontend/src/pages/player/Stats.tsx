@@ -383,8 +383,35 @@ export default function PlayerStats() {
           )}
         </div>
 
-        {/* Винрейт по ролям — справа от графика, с более воздушными
-            строками (есть место). */}
+        {/* Радар — справа от Динамики, занимает место бывшего «Винрейт по
+            ролям» (та же ширина — 3fr). Сам Винрейт переехал в Row 4. */}
+        <div className="card dash-card">
+          <div className="card-head">
+            <div className="card-title">Радар навыков</div>
+            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+              ты vs цель
+            </span>
+          </div>
+          {radarData.length > 2 ? (
+            <ResponsiveContainer width="100%" height={320}>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
+                <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={11} />
+                <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.4)" fontSize={9} angle={45} />
+                <Radar name="Ты" dataKey="you" stroke="#16e9d4" fill="#16e9d4" fillOpacity={0.18} />
+                <Radar name="Цель" dataKey="baseline" stroke="#9b59ff" fill="#9b59ff" fillOpacity={0.10} />
+                <Legend verticalAlign="bottom" iconType="line" wrapperStyle={{ fontSize: 11, color: '#a0b1c8' }} />
+                <Tooltip contentStyle={CHART_STYLE} />
+              </RadarChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
+          )}
+        </div>
+      </div>
+
+      {/* ============ Row 3: Винрейт по ролям (слева) | Игры по ролям + Топ героев (справа стопкой) ============ */}
+      <div className="stats-split">
         <div className="card dash-card">
           <div className="card-head">
             <div className="card-title">Винрейт по ролям</div>
@@ -415,44 +442,19 @@ export default function PlayerStats() {
             ))}
           </div>
         </div>
-      </div>
 
-      {/* ============ Row 3: Радар навыков (слева) | Игры по ролям + Топ героев (справа стопкой) ============ */}
-      <div className="stats-split stats-split--even">
-        <div className="card dash-card">
-          <div className="card-head">
-            <div className="card-title">Радар навыков</div>
-            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
-              ты vs цель
-            </span>
-          </div>
-          {radarData.length > 2 ? (
-            <ResponsiveContainer width="100%" height={320}>
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
-                <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={12} />
-                <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.4)" fontSize={10} angle={45} />
-                <Radar name="Ты" dataKey="you" stroke="#16e9d4" fill="#16e9d4" fillOpacity={0.18} />
-                <Radar name="Цель" dataKey="baseline" stroke="#9b59ff" fill="#9b59ff" fillOpacity={0.10} />
-                <Legend verticalAlign="bottom" iconType="line" wrapperStyle={{ fontSize: 11, color: '#a0b1c8' }} />
-                <Tooltip contentStyle={CHART_STYLE} />
-              </RadarChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
-          )}
-        </div>
-
-        {/* Справа — стопка из двух блоков: Игры по ролям + Топ героев */}
+        {/* Справа — стопка из двух блоков: Игры по ролям + Топ героев.
+            Теперь шире (3fr вместо clamp ~340px) — больше места для
+            метрик и имён героев. */}
         <div className="stats-side-stack">
           <div className="card dash-card">
             <div className="card-head">
               <div className="card-title">Игры по ролям</div>
               <span className="text-muted" style={{ fontSize: '0.72rem' }}>средние</span>
             </div>
-            <div className="role-stats-grid role-stats-grid--compact">
+            <div className="role-stats-grid">
               {roleStats.map((r) => (
-                <div key={r.role} className="role-stat-cell role-stat-cell--compact">
+                <div key={r.role} className="role-stat-cell">
                   <div className="role-stat-cell-head">
                     <span className="role-stat-cell-name">{r.label}</span>
                     <span className="role-stat-cell-count">{r.total} м</span>

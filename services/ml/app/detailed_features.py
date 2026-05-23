@@ -153,6 +153,35 @@ def compute_detailed_features(
     df_all = pd.read_sql(match_query, engine)
     normalized_filters = normalize_stats_filters(**(filters or {}))
     df, filters_applied = apply_stats_filters(df_all, normalized_filters)
+
+    # Mirror the ranked→all fallback from analyze_player: if the user
+    # asked for ranked-only but barely played ranked (or didn't play any
+    # — e.g. turbo-only accounts like demo data), relax the filter to
+    # "all" so the Radar / Weak-spots widgets aren't permanently empty.
+    # Without this the dashboard "Общий балл" tile and the entire skill
+    # widget on /stats stay at zero for an entire class of real users.
+    from app.feature_engine import RANKED_FALLBACK_MIN
+    from app.match_clusters import CLUSTER_RANKED
+    fallback_notice = None
+    requested_mode = normalized_filters.get("mode")
+    if requested_mode == CLUSTER_RANKED and len(df) < RANKED_FALLBACK_MIN:
+        relaxed = dict(normalized_filters)
+        relaxed["mode"] = "all"
+        df_fallback, fb_applied = apply_stats_filters(df_all, relaxed)
+        if len(df_fallback) > len(df):
+            df = df_fallback
+            filters_applied = {
+                **fb_applied,
+                "requested_mode": requested_mode,
+                "effective_mode": "all",
+                "fallback_in_effect": True,
+            }
+            fallback_notice = (
+                f"Для рейтинговых матчей нашлось всего "
+                f"{filters_applied.get('mode_counts', {}).get('ranked', 0)} — "
+                "анализ компонентов построен по всем доступным режимам."
+            )
+
     sample_quality = _sample_quality(df)
     freshness = _data_freshness(df)
     baseline_role = baseline_role or filters_applied.get("auto_role") or normalized_filters.get("role")
@@ -430,6 +459,9 @@ def compute_detailed_features(
         # the tech panel, not for user-facing labels.
         "parsed_games_n": int(parsed_games_n),
         "filters_applied": filters_applied,
+        # Same notice format as analyze_player's "notice" — surfaced so the
+        # UI can tell the user "we used all modes because ranked was empty".
+        "notice": fallback_notice,
         "vision_data": {
             "parsed_matches_in_scope": vision_rows,
             "missing_matches_in_scope": vision_missing,
