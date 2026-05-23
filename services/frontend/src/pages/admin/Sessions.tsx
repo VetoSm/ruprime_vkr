@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { coreApi } from '../../api/client';
 import SessionsCalendar from '../../ui/SessionsCalendar';
 import { InfoTooltip } from '../../ui/GameComponents';
+import { Dropdown } from '../../ui/Dropdown';
 
 export default function AdminSessions() {
   const [sessions, setSessions] = useState<any[]>([]);
@@ -71,13 +72,18 @@ export default function AdminSessions() {
           <h3 className="card-title">Список записей</h3>
           <div className="form-group" style={{ marginBottom: 0, minWidth: 220 }}>
             <label>Фильтр статуса</label>
-            <select className="form-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="">Все</option>
-              <option value="PLANNED">PLANNED</option>
-              <option value="COMPLETED">COMPLETED</option>
-              <option value="CANCELLED">CANCELLED</option>
-              <option value="RESCHEDULED">RESCHEDULED</option>
-            </select>
+            <Dropdown
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value: '',            label: 'Все' },
+                { value: 'PLANNED',     label: 'PLANNED' },
+                { value: 'COMPLETED',   label: 'COMPLETED' },
+                { value: 'CANCELLED',   label: 'CANCELLED' },
+                { value: 'RESCHEDULED', label: 'RESCHEDULED' },
+              ]}
+              align="right"
+            />
           </div>
         </div>
         <div className="table-wrap">

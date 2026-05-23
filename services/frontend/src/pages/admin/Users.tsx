@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
+import { Dropdown } from '../../ui/Dropdown';
 
 type Tab = 'all' | 'players' | 'coaches' | 'applications';
 
@@ -176,20 +177,28 @@ export default function AdminUsers() {
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Роль</label>
-              <select className="form-select" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as any)}>
-                <option value="">Все</option>
-                <option value="PLAYER">PLAYER</option>
-                <option value="COACH">COACH</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
+              <Dropdown
+                value={roleFilter}
+                onChange={(v) => setRoleFilter(v as any)}
+                options={[
+                  { value: '', label: 'Все' },
+                  { value: 'PLAYER', label: 'PLAYER' },
+                  { value: 'COACH', label: 'COACH' },
+                  { value: 'ADMIN', label: 'ADMIN' },
+                ]}
+              />
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Steam</label>
-              <select className="form-select" value={steamFilter} onChange={(e) => setSteamFilter(e.target.value as any)}>
-                <option value="">Любой</option>
-                <option value="linked">Привязан</option>
-                <option value="unlinked">Не привязан</option>
-              </select>
+              <Dropdown
+                value={steamFilter}
+                onChange={(v) => setSteamFilter(v as any)}
+                options={[
+                  { value: '', label: 'Любой' },
+                  { value: 'linked', label: 'Привязан' },
+                  { value: 'unlinked', label: 'Не привязан' },
+                ]}
+              />
             </div>
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginLeft: 'auto' }}>
               Показано: {filteredAll.length} из {allUsers.length}
@@ -270,17 +279,17 @@ export default function AdminUsers() {
                         {u.coach_application_status === 'NONE' && <span className="text-muted">—</span>}
                       </td>
                       <td>
-                        <select
-                          className="form-select"
+                        <Dropdown
                           value={u.role}
-                          disabled={busyId === u.auth_user_id}
-                          onChange={(e) => changeRole(u, e.target.value as 'PLAYER' | 'COACH' | 'ADMIN')}
-                          style={{ minWidth: 110 }}
-                        >
-                          <option value="PLAYER">PLAYER</option>
-                          <option value="COACH">COACH</option>
-                          <option value="ADMIN">ADMIN</option>
-                        </select>
+                          onChange={(v) => changeRole(u, v as 'PLAYER' | 'COACH' | 'ADMIN')}
+                          options={[
+                            { value: 'PLAYER', label: 'PLAYER' },
+                            { value: 'COACH', label: 'COACH' },
+                            { value: 'ADMIN', label: 'ADMIN' },
+                          ]}
+                          size="sm"
+                          align="right"
+                        />
                       </td>
                     </tr>
                   );

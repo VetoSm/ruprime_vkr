@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { coreApi } from '../../api/client';
+import { Dropdown } from '../../ui/Dropdown';
 
 interface UserDetail {
   auth: {
@@ -136,16 +137,17 @@ export default function AdminUserDetail() {
           </p>
         </div>
         <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-          <select
-            className="form-select"
+          <Dropdown
             value={data.auth.role}
-            onChange={(e) => changeRole(e.target.value as any)}
-            style={{ minWidth: 140 }}
-          >
-            <option value="PLAYER">PLAYER</option>
-            <option value="COACH">COACH</option>
-            <option value="ADMIN">ADMIN</option>
-          </select>
+            onChange={(v) => changeRole(v as any)}
+            options={[
+              { value: 'PLAYER', label: 'PLAYER' },
+              { value: 'COACH', label: 'COACH' },
+              { value: 'ADMIN', label: 'ADMIN' },
+            ]}
+            label="Роль"
+            align="right"
+          />
           {data.account_id && (
             <button className="btn btn-outline btn-sm" disabled={refreshing} onClick={refreshSteam}>
               {refreshing ? 'Догружаем...' : 'Догрузить Steam/OpenDota'}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { coreApi } from '../../api/client';
+import { Dropdown } from '../../ui/Dropdown';
 
 type TabType = 'stats' | 'tables' | 'baselines' | 'analyses' | 'accounts';
 
@@ -241,13 +242,18 @@ export default function MlData() {
           )}
 
           <div className="flex gap-10 mb-20">
-            <select className="form-select" style={{ maxWidth: 200 }} value={mmrFilter} onChange={(e) => setMmrFilter(e.target.value)}>
-              <option value="">Все MMR-бэнды</option>
-              <option value="0-2000">0-2000</option>
-              <option value="2000-4000">2000-4000</option>
-              <option value="4000-6000">4000-6000</option>
-              <option value="6000+">6000+</option>
-            </select>
+            <Dropdown
+              value={mmrFilter}
+              onChange={setMmrFilter}
+              options={[
+                { value: '',           label: 'Все MMR-бэнды' },
+                { value: '0-2000',     label: '0–2000' },
+                { value: '2000-4000',  label: '2000–4000' },
+                { value: '4000-6000',  label: '4000–6000' },
+                { value: '6000+',      label: '6000+' },
+              ]}
+              label="MMR"
+            />
             <button className="btn btn-outline btn-sm" onClick={loadBaselines}>Обновить</button>
           </div>
 

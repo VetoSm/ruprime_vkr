@@ -8,6 +8,7 @@ import SkillRing from '../../ui/SkillRing';
 import DotaPrivacyBanner from '../../ui/DotaPrivacyBanner';
 import ParseProgressBadge from '../../ui/ParseProgressBadge';
 import { EmptyState } from '../../ui/Primitives';
+import { Dropdown } from '../../ui/Dropdown';
 import {
   IconChevronRight, IconCalendar, IconTrendUp,
 } from '../../ui/Icons';
@@ -358,24 +359,23 @@ export default function PlayerDashboard() {
           <p>Отслеживай прогресс, анализируй игры и побеждай!</p>
         </div>
         <div className="dash-filter-row">
-          <select
-            className="dash-filter-select"
+          <Dropdown
             value={periodCount}
-            onChange={(e) => setPeriodCount(e.target.value as any)}
-            aria-label="Период"
-          >
-            {PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <select
-            className="dash-filter-select"
+            onChange={(v) => setPeriodCount(v as any)}
+            options={PERIOD_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+            label="Период"
+            align="right"
+          />
+          <Dropdown
             value={selectedAnalysisRole}
-            onChange={(e) => setSelectedAnalysisRole(e.target.value)}
-            aria-label="Роль"
-          >
-            {DASHBOARD_ROLES.map(r => (
-              <option key={r || 'auto'} value={r}>{r ? roleName(r) : 'Авто'}</option>
-            ))}
-          </select>
+            onChange={setSelectedAnalysisRole}
+            options={DASHBOARD_ROLES.map(r => ({
+              value: r,
+              label: r ? roleName(r) : 'Авто',
+            }))}
+            label="Роль"
+            align="right"
+          />
         </div>
       </div>
 
@@ -467,17 +467,18 @@ export default function PlayerDashboard() {
         <div className="card dash-card dash-card--chart">
           <div className="card-head">
             <div className="card-title">Динамика</div>
-            <select
-              className="dash-filter-select dash-filter-select--mini"
+            <Dropdown
               value={chartMetric}
-              onChange={(e) => setChartMetric(e.target.value as any)}
-              aria-label="Метрика графика"
-            >
-              <option value="gpm">GPM</option>
-              <option value="xpm">XPM</option>
-              <option value="kda">KDA</option>
-              <option value="winrate">Винрейт</option>
-            </select>
+              onChange={(v) => setChartMetric(v as any)}
+              options={[
+                { value: 'gpm',     label: 'GPM' },
+                { value: 'xpm',     label: 'XPM' },
+                { value: 'kda',     label: 'KDA' },
+                { value: 'winrate', label: 'Винрейт' },
+              ]}
+              size="sm"
+              align="right"
+            />
           </div>
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>

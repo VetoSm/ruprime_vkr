@@ -4,6 +4,7 @@ import { coreApi } from '../../api/client';
 import { RankBadge } from '../../ui/GameComponents';
 import { EmptyState } from '../../ui/Primitives';
 import { CoachAvatar } from '../../ui/Avatar';
+import { Dropdown } from '../../ui/Dropdown';
 import { loadHeroes, heroIcon, heroName, roleName } from '../../api/heroes';
 import { IconSearch, IconChevronRight, IconClose, IconStar } from '../../ui/Icons';
 
@@ -228,22 +229,40 @@ export default function PlayerCoaches() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <select className="dash-filter-select dash-filter-select--mini" value={filterRank} onChange={(e) => setFilterRank(e.target.value)}>
-          <option value="">Ранг: любой</option>
-          {RANK_OPTIONS.filter(Boolean).map(r => <option key={r} value={r}>{r}</option>)}
-        </select>
-        <select className="dash-filter-select dash-filter-select--mini" value={filterRole} onChange={(e) => setFilterRole(e.target.value)}>
-          {ROLE_OPTIONS.map(r => <option key={r.value || 'all'} value={r.value}>{r.label}</option>)}
-        </select>
-        <select className="dash-filter-select dash-filter-select--mini" value={filterMaxRate} onChange={(e) => setFilterMaxRate(e.target.value)}>
-          {PRICE_OPTIONS.map(p => <option key={p.value || 'any'} value={p.value}>{p.label}</option>)}
-        </select>
-        <select className="dash-filter-select dash-filter-select--mini" value={filterLang} onChange={(e) => setFilterLang(e.target.value)}>
-          {LANG_OPTIONS.map(l => <option key={l} value={l}>Язык: {l}</option>)}
-        </select>
-        <select className="dash-filter-select dash-filter-select--mini" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-          {SORT_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
+        <Dropdown
+          value={filterRank}
+          onChange={setFilterRank}
+          options={[
+            { value: '', label: 'Любой' },
+            ...RANK_OPTIONS.filter(Boolean).map(r => ({ value: r, label: r })),
+          ]}
+          label="Ранг"
+        />
+        <Dropdown
+          value={filterRole}
+          onChange={setFilterRole}
+          options={ROLE_OPTIONS.map(r => ({ value: r.value, label: r.label }))}
+          label="Роль"
+        />
+        <Dropdown
+          value={filterMaxRate}
+          onChange={setFilterMaxRate}
+          options={PRICE_OPTIONS.map(p => ({ value: p.value, label: p.label }))}
+          label="Цена"
+        />
+        <Dropdown
+          value={filterLang}
+          onChange={setFilterLang}
+          options={LANG_OPTIONS.map(l => ({ value: l, label: l }))}
+          label="Язык"
+        />
+        <Dropdown
+          value={sortBy}
+          onChange={setSortBy}
+          options={SORT_OPTIONS.map(s => ({ value: s.value, label: s.label }))}
+          label="Сортировка"
+          align="right"
+        />
       </div>
 
       {/* ============ Coach cards grid ============ */}
@@ -447,13 +466,14 @@ export default function PlayerCoaches() {
 
                 <div className="form-group">
                   <label>Позиция для разбора</label>
-                  <select className="form-select" value={applyRole} onChange={(e) => setApplyRole(e.target.value)}>
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r.value || 'any'} value={r.value}>
-                        {r.value ? r.label : 'Не указывать'}
-                      </option>
-                    ))}
-                  </select>
+                  <Dropdown
+                    value={applyRole}
+                    onChange={setApplyRole}
+                    options={ROLE_OPTIONS.map((r) => ({
+                      value: r.value,
+                      label: r.value ? r.label : 'Не указывать',
+                    }))}
+                  />
                 </div>
 
                 <div className="form-group">
