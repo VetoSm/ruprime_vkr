@@ -333,7 +333,11 @@ export default function PlayerStats() {
        * занимает большую левую колонку и тянется в высоту примерно как
        * два прежних компактных «Винрейт по ролям» сложенных вместе. */}
       <div className="stats-split">
-        <div className="card dash-card dash-card--chart">
+        {/* NB: НЕ ставим класс `dash-card--chart` — он определён под
+            named grid-area дашборда (.dash-widgets-grid) и в контексте
+            .stats-split ломает раскладку: карточка пытается занять
+            несуществующую named-area "chart" и съезжает с auto-flow. */}
+        <div className="card dash-card stats-dynamics-card">
           <div className="card-head">
             <div className="card-title">Динамика</div>
             <Dropdown

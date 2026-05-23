@@ -2514,6 +2514,11 @@ table tr:hover {
 .stats-split--wide-left > .card {
   display: flex;
   flex-direction: column;
+  /* Сбрасываем `grid-area: <name>` от dashboard-specific модификаторов
+     (например, `.dash-card--chart`), чтобы при копировании компонента
+     из дашборда на /stats карточка не пыталась занять named-area из
+     совсем другой сетки и не съезжала из своей колонки. */
+  grid-area: auto;
 }
 /* Role-WR bars: when the WR card sits next to the much taller Dynamics
    chart, spread the rows out vertically instead of hugging the top of
