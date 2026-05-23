@@ -151,7 +151,7 @@ interface EmptyStateProps {
 
 export function EmptyState({ icon, title, description, cta, compact }: EmptyStateProps) {
   return (
-    <div style={{
+    <div className="empty-state" style={{
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',

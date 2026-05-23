@@ -328,11 +328,11 @@ export default function PlayerStats() {
         />
       </div>
 
-      {/* ============ Row 1: Динамика (половинной высоты) | Колонка справа (WR / Роли / Герои) ============ */}
+      {/* ============ Row 2: Динамика (большая, слева) | Винрейт по ролям (справа) ============
+       * График трендов — основное visual storytelling страницы, поэтому
+       * занимает большую левую колонку и тянется в высоту примерно как
+       * два прежних компактных «Винрейт по ролям» сложенных вместе. */}
       <div className="stats-split">
-        {/* «Динамика» — в половину прежней высоты. Раньше держали 420px,
-            сейчас — 210px (вкл. оси), плюс маленький отступ. Так график
-            визуально равен одной строке боковых блоков. */}
         <div className="card dash-card dash-card--chart">
           <div className="card-head">
             <div className="card-title">Динамика</div>
@@ -347,7 +347,7 @@ export default function PlayerStats() {
             />
           </div>
           {dynamicTrend.length > 0 ? (
-            <ResponsiveContainer width="100%" height={210}>
+            <ResponsiveContainer width="100%" height={360}>
               <LineChart data={dynamicTrend} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="dynamicLineGrad" x1="0" y1="0" x2="1" y2="0">
@@ -379,40 +379,68 @@ export default function PlayerStats() {
           )}
         </div>
 
-        {/* Узкая колонка: 3 блока друг под другом */}
-        <div className="stats-side-stack">
-          {/* Винрейт по ролям */}
-          <div className="card dash-card">
-            <div className="card-head">
-              <div className="card-title">Винрейт по ролям</div>
-              <span className="text-muted" style={{ fontSize: '0.72rem' }}>
-                {steamData?.recent_matches?.length || 0} м
-              </span>
-            </div>
-            <div className="role-wr-list role-wr-list--compact">
-              {roleStats.map((r) => (
-                <div key={r.role} className="role-wr-row role-wr-row--compact">
-                  <span className="role-wr-label">{r.label}</span>
-                  <div className="role-wr-bar">
-                    <div
-                      className="role-wr-bar-fill"
-                      style={{
-                        width: r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '0%',
-                        background: r.winrate != null && r.winrate >= 0.5
-                          ? 'linear-gradient(90deg, var(--accent-bright) 0%, var(--accent) 100%)'
-                          : 'linear-gradient(90deg, var(--purple) 0%, rgba(155, 89, 255, 0.6) 100%)',
-                      }}
-                    />
-                  </div>
-                  <span className="role-wr-value">
-                    {r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}
-                  </span>
-                </div>
-              ))}
-            </div>
+        {/* Винрейт по ролям — справа от графика, с более воздушными
+            строками (есть место). */}
+        <div className="card dash-card">
+          <div className="card-head">
+            <div className="card-title">Винрейт по ролям</div>
+            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+              по {steamData?.recent_matches?.length || 0} матчам
+            </span>
           </div>
+          <div className="role-wr-list">
+            {roleStats.map((r) => (
+              <div key={r.role} className="role-wr-row">
+                <span className="role-wr-label">{r.label}</span>
+                <div className="role-wr-bar">
+                  <div
+                    className="role-wr-bar-fill"
+                    style={{
+                      width: r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '0%',
+                      background: r.winrate != null && r.winrate >= 0.5
+                        ? 'linear-gradient(90deg, var(--accent-bright) 0%, var(--accent) 100%)'
+                        : 'linear-gradient(90deg, var(--purple) 0%, rgba(155, 89, 255, 0.6) 100%)',
+                    }}
+                  />
+                </div>
+                <span className="role-wr-value">
+                  {r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}
+                  {r.total > 0 && <small> · {r.total}</small>}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
-          {/* Игры по ролям */}
+      {/* ============ Row 3: Радар навыков (слева) | Игры по ролям + Топ героев (справа стопкой) ============ */}
+      <div className="stats-split stats-split--even">
+        <div className="card dash-card">
+          <div className="card-head">
+            <div className="card-title">Радар навыков</div>
+            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+              ты vs цель
+            </span>
+          </div>
+          {radarData.length > 2 ? (
+            <ResponsiveContainer width="100%" height={320}>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
+                <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={12} />
+                <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.4)" fontSize={10} angle={45} />
+                <Radar name="Ты" dataKey="you" stroke="#16e9d4" fill="#16e9d4" fillOpacity={0.18} />
+                <Radar name="Цель" dataKey="baseline" stroke="#9b59ff" fill="#9b59ff" fillOpacity={0.10} />
+                <Legend verticalAlign="bottom" iconType="line" wrapperStyle={{ fontSize: 11, color: '#a0b1c8' }} />
+                <Tooltip contentStyle={CHART_STYLE} />
+              </RadarChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
+          )}
+        </div>
+
+        {/* Справа — стопка из двух блоков: Игры по ролям + Топ героев */}
+        <div className="stats-side-stack">
           <div className="card dash-card">
             <div className="card-head">
               <div className="card-title">Игры по ролям</div>
@@ -435,7 +463,6 @@ export default function PlayerStats() {
             </div>
           </div>
 
-          {/* Топ героев — компактный вертикальный список */}
           <div className="card dash-card">
             <div className="card-head">
               <div className="card-title">Топ героев</div>
@@ -464,36 +491,9 @@ export default function PlayerStats() {
         </div>
       </div>
 
-      {/* ============ Row 2: Радар навыков (полная ширина — поднят выше) ============
-       * Раньше радар делил ряд с тепловой картой. Хитмап без бэкенда — это
-       * визуальная заглушка, она не должна делить место с реальными данными.
-       * Поэтому радар теперь сам на ряду. */}
-      <div className="card dash-card stats-row">
-        <div className="card-head">
-          <div className="card-title">Радар навыков</div>
-          <span className="text-muted" style={{ fontSize: '0.78rem' }}>
-            твои показатели vs цель для следующего ранга
-          </span>
-        </div>
-        {radarData.length > 2 ? (
-          <ResponsiveContainer width="100%" height={320}>
-            <RadarChart data={radarData}>
-              <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
-              <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={12} />
-              <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.4)" fontSize={10} angle={45} />
-              <Radar name="Ты" dataKey="you" stroke="#16e9d4" fill="#16e9d4" fillOpacity={0.18} />
-              <Radar name="Цель" dataKey="baseline" stroke="#9b59ff" fill="#9b59ff" fillOpacity={0.10} />
-              <Legend verticalAlign="bottom" iconType="line" wrapperStyle={{ fontSize: 11, color: '#a0b1c8' }} />
-              <Tooltip contentStyle={CHART_STYLE} />
-            </RadarChart>
-          </ResponsiveContainer>
-        ) : (
-          <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
-        )}
-      </div>
-
-      {/* ============ Слабые места — circular widget ============ */}
-      <div className="card dash-card stats-row weak-card">
+      {/* ============ Row 4: Слабые места (слева) | Тепловая карта (справа, узкая) ============ */}
+      <div className="stats-split stats-split--wide-left">
+      <div className="card dash-card weak-card weak-card--in-split">
         <div className="card-head">
           <div className="card-title">Слабые места — над чем работать</div>
           {weakFeaturesSorted.length > 0 && (
@@ -641,19 +641,17 @@ export default function PlayerStats() {
         )}
       </div>
 
-      {/* ============ Тепловая карта — узкая, в самом низу ============
-       * Это пока заглушка (бэк ещё не отдаёт координаты ивентов из replay
-       * parser). Чтобы не отвлекать от живой статистики выше, сужаем её и
-       * ставим в конец, оставляя explicit empty state. */}
-      <div className="stats-heatmap-wrap">
+        {/* Тепловая карта — узкая колонка справа. Пока бэк не отдаёт
+            координаты ивентов из replay parser, держим explicit empty
+            state в компактной форме. */}
         <div className="card dash-card">
           <div className="card-head">
             <div className="card-title">Тепловая карта</div>
-            <span className="badge badge-muted">parsed-данные</span>
+            <span className="badge badge-muted">parsed</span>
           </div>
           <EmptyState
             title="Появится из parsed-матчей"
-            description="Тепловая карта строится по координатам ивентов в матчах после parsed-загрузки. Как только данные подгрузятся — карточка обновится автоматически."
+            description="Карта построится по координатам ивентов в parsed-матчах. Как только данные подгрузятся — карточка обновится."
             compact
           />
         </div>

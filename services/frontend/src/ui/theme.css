@@ -2455,20 +2455,48 @@ table tr:hover {
 }
 @media (max-width: 1100px) { .stats-two-col { grid-template-columns: 1fr; } }
 
-/* Split row: smaller chart on the left, narrow stack on the right.
-   The right column holds three smaller cards (WR by role / role stats /
-   top heroes) stacked one under another. We *don't* stretch the chart
-   to the side column's natural height — the chart card stays compact at
-   ~half height (see Stats.tsx ResponsiveContainer height=210). The side
-   stack flows past that, which is the desired shape: a short overview
-   line + three quick-reference panels next to it. */
+/* Generic "main column + sidekick" row used three times on /stats:
+   - default ratio for Dynamics(left) + Winrate-by-roles(right)
+   - .stats-split--even for Radar(left) + RoleStats+TopHeroes stack(right)
+   - .stats-split--wide-left for the big Weak-spots widget + narrow
+     Heatmap placeholder.
+   We use align-items:stretch everywhere so the right card always
+   visually matches the left card's height — cleaner edges and avoids
+   the "lonely tall card next to a short one" look. Individual cards
+   add internal flex-grow rules below to use up the extra space
+   gracefully (lists space out, empty states stay centered). */
 .stats-split {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(280px, 1fr);
   gap: 18px;
   margin-bottom: 18px;
-  align-items: start;
+  align-items: stretch;
 }
+.stats-split--even {
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 1fr);
+}
+.stats-split--wide-left {
+  grid-template-columns: minmax(0, 1.9fr) minmax(260px, 1fr);
+}
+
+/* Cards inside any stats-split row become flex columns so their inner
+   content can grow to fill the equalised height — gives us a single
+   place to control "what happens when this card is shorter than the
+   neighbour". */
+.stats-split > .card,
+.stats-split--even > .card,
+.stats-split--wide-left > .card {
+  display: flex;
+  flex-direction: column;
+}
+/* Role-WR bars: when the WR card sits next to the much taller Dynamics
+   chart, spread the rows out vertically instead of hugging the top of
+   the card. */
+.stats-split > .card > .role-wr-list { flex: 1; justify-content: space-around; }
+/* Empty state inside the heatmap card on Row 4: centre it vertically
+   so the narrow placeholder doesn't sit awkwardly at the top while the
+   neighbouring Weak-spots widget towers next to it. */
+.stats-split--wide-left > .card > .empty-state { margin: auto; }
 .stats-side-stack {
   display: flex;
   flex-direction: column;
@@ -2477,15 +2505,28 @@ table tr:hover {
 }
 .stats-side-stack > .card { margin: 0; }
 @media (max-width: 1100px) {
-  .stats-split { grid-template-columns: 1fr; }
+  .stats-split,
+  .stats-split--even,
+  .stats-split--wide-left { grid-template-columns: 1fr; }
 }
 
-/* Narrow centered wrapper used at the bottom of /stats for the heatmap
-   placeholder. Keeps the empty-state card from spanning the full width
-   and dominating the page — it's still a stub waiting for parsed data. */
-.stats-heatmap-wrap {
-  max-width: 720px;
-  margin: 0 auto 18px;
+/* Weak-spots widget when placed inside .stats-split: the inner
+   3-column layout (circle + details + list) is fine at full page width
+   but cramped when sharing a row with the heatmap. Switch to a 2-column
+   inner grid (circle + details), and let the "all weak spots" list flow
+   underneath. */
+.weak-card--in-split { margin-bottom: 0; }
+.weak-card--in-split .weak-circle-layout {
+  grid-template-columns: 180px 1fr;
+  gap: 18px;
+}
+.weak-card--in-split .weak-list {
+  grid-column: 1 / -1;
+  max-height: 200px;
+  margin-top: 4px;
+}
+@media (max-width: 1100px) {
+  .weak-card--in-split .weak-circle-layout { grid-template-columns: 1fr; }
 }
 
 /* Compact variants for the side stack. Same look, just denser:
