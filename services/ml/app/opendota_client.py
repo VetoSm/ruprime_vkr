@@ -161,6 +161,7 @@ def fetch_recent_matches(account_id: int) -> list[dict]:
             "start_time": m.get("start_time"),
             "party_size": m.get("party_size"),
             "game_mode": m.get("game_mode"),
+            "lobby_type": m.get("lobby_type"),
             "average_rank": m.get("average_rank"),
             "is_detailed": True,
         })
@@ -205,6 +206,7 @@ def fetch_player_matches_paginated(account_id: int, max_matches: int = 500) -> l
                 "start_time": m.get("start_time"),
                 "party_size": m.get("party_size"),
                 "game_mode": m.get("game_mode"),
+                "lobby_type": m.get("lobby_type"),
                 "average_rank": m.get("average_rank"),
                 "is_detailed": False,
             })

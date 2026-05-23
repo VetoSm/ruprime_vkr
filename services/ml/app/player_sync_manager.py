@@ -160,17 +160,20 @@ def _run_sync_job(account_id: int, steam_id: str | None) -> dict:
         _replace_account_matches(db, account_id, matches)
         db.flush()
 
-        detailed_ids = _recent_incomplete_match_ids(matches, RECENT_PARSE_MATCHES)
-        parse_result = request_match_parse(detailed_ids, max_requests=RECENT_PARSE_MATCHES) if detailed_ids else {"requested": 0}
+        # Per-match parse requests are now driven by the central parse
+        # worker via ``parse_queue.enqueue_for_account`` — see PR-2.
+        # We still synchronously cache *other players'* basic info from
+        # detailed matches so MM and coach matchmaking have fresh data.
+        from app.parse_queue import enqueue_for_account
+        enqueue_stats = enqueue_for_account(db, account_id)
 
+        detailed_ids = _recent_incomplete_match_ids(matches, RECENT_PARSE_MATCHES)
         detailed_matches_fetched, players_cached = _cache_other_players_from_detailed_matches(db, detailed_ids)
         db.commit()
-        if parse_result.get("ids"):
-            _schedule_parse_followup(account_id, parse_result["ids"])
 
         return {
             "fetched_matches": len(matches),
-            "parse_requested": int(parse_result.get("requested") or 0),
+            "parse_requested": enqueue_stats.get("warm", 0) + enqueue_stats.get("cold", 0),
             "parse_candidates": len(detailed_ids),
             "detailed_matches_fetched": detailed_matches_fetched,
             "players_cached": players_cached,
@@ -507,6 +510,7 @@ def _build_player_match(account_id: int, row: dict, is_detailed: bool) -> Player
         start_time=row.get("start_time"),
         party_size=row.get("party_size"),
         game_mode=row.get("game_mode"),
+        lobby_type=row.get("lobby_type"),
         average_rank=row.get("average_rank"),
         is_detailed=is_detailed,
     )

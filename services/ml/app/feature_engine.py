@@ -356,10 +356,13 @@ def infer_rank_tier_from_matches(df: pd.DataFrame | None, recent_limit: int = 10
     if "start_time" in scope.columns:
         scope = scope.sort_values("start_time", ascending=False, na_position="last")
 
-    # Prefer known ranked modes for current-rank fallback. If mode is missing
-    # for old rows, keep them only when no known ranked rows are available.
-    if "game_mode" in scope.columns:
-        ranked_scope = scope[scope["game_mode"].isin(RANKED_GAME_MODES)]
+    # Average_rank is only meaningful for ranked matches — turbo's
+    # ``average_rank`` is randomised garbage. Use the proper cluster
+    # classifier so a Captain's Mode draft (game_mode != 22) but in a
+    # ranked lobby still counts.
+    if {"lobby_type", "game_mode"}.intersection(scope.columns):
+        ranked_scope = add_cluster_column(scope.copy())
+        ranked_scope = ranked_scope[ranked_scope["cluster"] == CLUSTER_RANKED]
         if not ranked_scope.empty:
             scope = ranked_scope
 
@@ -581,26 +584,36 @@ def _compute_strengths_weaknesses(df: pd.DataFrame, mmr_band: str, filters: dict
     return strengths, weaknesses
 
 
-# Game modes treated as "ranked / serious": Ranked AP, Captains, RD, SD.
-# Turbo (23) and 1v1 Mid (21) are excluded by default because their economy,
-# duration and damage numbers skew averages vs. kaggle baselines.
+from app.match_clusters import (
+    CLUSTER_RANKED, CLUSTER_TURBO, CLUSTER_UNRANKED, CLUSTER_OTHER,
+    add_cluster_column, counts_by_cluster,
+)
+
+# Legacy constants kept only because external modules import them. New
+# filtering goes through ``match_clusters.classify_*``.
 RANKED_GAME_MODES = {2, 3, 4, 22}
 TURBO_GAME_MODE = 23
+
 DEFAULT_STATS_MODE = "ranked"
 DEFAULT_STATS_PERIOD = "50"
+# Minimum ranked matches in the analysis window before we trust the
+# ranked baseline. Below that we fall back to unranked+turbo with a clear
+# disclaimer on the response.
+RANKED_FALLBACK_MIN = 8
 
 
 def _filter_ranked(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep only matches whose game_mode is in RANKED_GAME_MODES.
+    """Keep only matches that classify as ``ranked``.
 
-    NULL game_mode is kept (old rows loaded before game_mode became reliable)
-    to avoid wiping all historical data for existing users; will be pruned
-    once we backfill modes. Rows with an *explicit* turbo/1v1 mode are dropped.
+    NULL ``lobby_type`` is treated as ``unranked`` (see
+    ``match_clusters``), so legacy rows never sneak into the ranked
+    baseline. They'll start being counted as ranked again the next time
+    OpenDota re-syncs with the lobby_type populated.
     """
-    if "game_mode" not in df.columns:
+    if df.empty:
         return df
-    mask = df["game_mode"].isna() | df["game_mode"].isin(RANKED_GAME_MODES)
-    return df[mask].copy()
+    out = add_cluster_column(df.copy())
+    return out[out["cluster"] == CLUSTER_RANKED].copy()
 
 
 def normalize_stats_filters(
@@ -611,7 +624,7 @@ def normalize_stats_filters(
 ) -> dict:
     """Normalize user-facing stats filters into a small trusted dict."""
     mode_val = (mode or DEFAULT_STATS_MODE).lower()
-    if mode_val not in {"ranked", "turbo", "all"}:
+    if mode_val not in {"ranked", "turbo", "unranked", "all"}:
         mode_val = DEFAULT_STATS_MODE
 
     period_val = str(period or DEFAULT_STATS_PERIOD).lower()
@@ -654,19 +667,27 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
     if "start_time" in result.columns:
         result = result.sort_values("start_time", ascending=False, na_position="last").reset_index(drop=True)
 
-    mode_counts = {"all": total_available, "ranked": 0, "turbo": 0, "other": 0, "unknown": 0}
-    if "game_mode" in result.columns:
-        mode_counts["unknown"] = int(result["game_mode"].isna().sum())
-        mode_counts["ranked"] = int(result["game_mode"].isin(RANKED_GAME_MODES).sum())
-        mode_counts["turbo"] = int((result["game_mode"] == TURBO_GAME_MODE).sum())
-        known_modes = result["game_mode"].notna()
-        known_ranked_or_turbo = result["game_mode"].isin(RANKED_GAME_MODES | {TURBO_GAME_MODE})
-        mode_counts["other"] = int((known_modes & ~known_ranked_or_turbo).sum())
+    # Classify every row into ranked / turbo / unranked / other up front
+    # so subsequent filtering and counts share one definition.
+    result = add_cluster_column(result)
+    cluster_counts = counts_by_cluster(result)
+    mode_counts = {
+        "all": total_available,
+        "ranked": cluster_counts.get(CLUSTER_RANKED, 0),
+        "turbo": cluster_counts.get(CLUSTER_TURBO, 0),
+        "unranked": cluster_counts.get(CLUSTER_UNRANKED, 0),
+        "other": cluster_counts.get(CLUSTER_OTHER, 0),
+        # Legacy field — some callers still read it. Maps to "lobby_type
+        # missing AND not turbo" which we now reclassify as unranked.
+        "unknown": cluster_counts.get(CLUSTER_UNRANKED, 0) if "lobby_type" not in result.columns else 0,
+    }
 
-    if filters["mode"] == "ranked" and "game_mode" in result.columns:
-        result = result[result["game_mode"].isna() | result["game_mode"].isin(RANKED_GAME_MODES)]
-    elif filters["mode"] == "turbo" and "game_mode" in result.columns:
-        result = result[result["game_mode"] == TURBO_GAME_MODE]
+    # Mode filter — for product semantics we always apply the user's
+    # choice strictly. The "automatic fallback to unranked+turbo when
+    # ranked is empty" happens upstream (analyze_player_from_account)
+    # because it needs to communicate *that fallback* to the UI.
+    if filters["mode"] in {CLUSTER_RANKED, CLUSTER_TURBO, CLUSTER_UNRANKED}:
+        result = result[result["cluster"] == filters["mode"]]
 
     after_mode = int(len(result))
 
@@ -723,6 +744,7 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
         "mode": {
             "ranked": "рейтинговые матчи",
             "turbo": "turbo-матчи",
+            "unranked": "обычные матчи (без рейтинга)",
             "all": "все режимы",
         }[filters["mode"]],
         "period": {
@@ -784,7 +806,7 @@ def analyze_player_from_account(
     """
     query = f"""
     SELECT
-        match_id, hero_id, lane_role, game_mode,
+        match_id, hero_id, lane_role, game_mode, lobby_type,
         kills, deaths, assists,
         gold_per_min, xp_per_min,
         last_hits, denies,
@@ -806,10 +828,43 @@ def analyze_player_from_account(
     df, filters_applied = apply_stats_filters(df_all, normalized_filters)
     sample_quality = _sample_quality(df)
     freshness = _data_freshness(df)
+
+    # Ranked is our preferred analytical baseline. If the user is on the
+    # default ('ranked') and we don't have enough ranked data, fall back
+    # to unranked+turbo so they get *some* analysis — but mark it so the
+    # UI can warn that comparisons are less reliable.
+    fallback_in_effect = False
+    fallback_notice = None
+    requested_mode = normalized_filters["mode"]
+    if (
+        requested_mode == CLUSTER_RANKED
+        and len(df) < RANKED_FALLBACK_MIN
+    ):
+        relaxed = dict(normalized_filters)
+        relaxed["mode"] = "all"
+        df_fallback, fb_applied = apply_stats_filters(df_all, relaxed)
+        # Only switch if the fallback actually has more material than the
+        # ranked-only slice (otherwise we'd show the user a tiny mixed
+        # report instead of an honest "few ranked matches" report).
+        if len(df_fallback) > len(df):
+            df = df_fallback
+            filters_applied = {
+                **fb_applied,
+                "requested_mode": requested_mode,
+                "effective_mode": "all",
+                "fallback_in_effect": True,
+            }
+            fallback_in_effect = True
+            fallback_notice = (
+                f"Для рейтинговых матчей нашлось всего "
+                f"{filters_applied['mode_counts'].get('ranked', 0)} — "
+                "анализ построен по всем доступным режимам, перцентили снижены по надёжности."
+            )
+
     if df.empty:
         ranked_only_notice = "По выбранным фильтрам нет матчей. Измените фильтр режима, роли, героя или периода."
     else:
-        ranked_only_notice = None
+        ranked_only_notice = fallback_notice
 
     # Win per match — only when we actually know radiant_win and player_slot.
     def _win_row(row):

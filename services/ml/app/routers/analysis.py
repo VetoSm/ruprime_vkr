@@ -12,6 +12,7 @@ from app.models import MlPlayerAnalysis, MlConstantHero, PlayerAccount, PlayerMa
 from app.schemas import PlayerAnalysisResponse, HeroResponse
 from app.feature_engine import analyze_player
 from app.opendota_client import fetch_full_player_data, steam_id_to_account_id
+from app.parse_queue import enqueue_for_account, progress_for_account
 from app.player_sync_manager import schedule_deep_sync, get_sync_status
 
 router = APIRouter(prefix="/ml", tags=["ml-analysis"])
@@ -402,6 +403,7 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
             start_time=m.get("start_time"),
             party_size=m.get("party_size"),
             game_mode=m.get("game_mode"),
+            lobby_type=m.get("lobby_type"),
             average_rank=m.get("average_rank"),
             is_detailed=m.get("is_detailed", False),
         )
@@ -409,25 +411,18 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
 
     db.commit()
 
-    # Request parse for recent matches (non-blocking background thread)
-    parse_requested = 0
-    parse_message = None
-    recent_match_ids = _unique_match_ids(matches, INITIAL_PARSE_MATCHES)
-    if recent_match_ids:
-        import threading
-        from app.match_collector import request_match_parse
-
-        def _do_parse():
-            return request_match_parse(recent_match_ids, max_requests=INITIAL_PARSE_MATCHES)
-
-        parse_thread = threading.Thread(target=_do_parse, daemon=True)
-        parse_thread.start()
-        parse_requested = len(recent_match_ids)
-        parse_message = (
-            f"Запрошен парсинг {parse_requested} матчей в OpenDota. "
-            f"Полные данные (варды, станы, APM) будут доступны через 5-10 минут. "
-            f"Нажмите «Обновить данные» позже для получения обогащённой статистики."
-        )
+    # Hand the analysis window to the parse worker. It will fire parse
+    # requests at the right pace (token bucket) and recheck with backoff,
+    # so this endpoint stays fast and we don't spawn ad-hoc threads.
+    enqueue_stats = enqueue_for_account(db, account_id)
+    db.commit()
+    parse_requested = enqueue_stats.get("warm", 0) + enqueue_stats.get("cold", 0)
+    parse_message = (
+        f"В очередь парсинга добавлено {parse_requested} матчей "
+        f"({enqueue_stats.get('warm', 0)} приоритетных, "
+        f"{enqueue_stats.get('cold', 0)} в фоне). "
+        "Полная статистика подтянется автоматически в течение 30-60 минут."
+    ) if parse_requested else None
 
     sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=True)
     sync_msg = (
@@ -503,6 +498,8 @@ def refresh_player_data(
     if not data.get("error"):
         _save_player_account(db, data, steam_id)
         _replace_account_matches(db, account_id, data.get("matches") or [])
+        db.commit()
+        enqueue_for_account(db, account_id)
         db.commit()
 
     sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=True)
@@ -706,6 +703,59 @@ def debug_steam_web(steam_id: str):
             "last_played": enriched.get("steam_dota_last_played"),
         } if found else None,
     }
+
+
+@router.get("/parse-progress/{account_id}")
+def parse_progress_for_account(account_id: int, db: Session = Depends(get_db)):
+    """Сводка прогресса парсинга для пользователя — кормит badge на UI.
+
+    Считаем по тому же окну ``ANALYSIS_WINDOW``, в которое воркер кладёт
+    матчи (``parse_queue.enqueue_for_account``), чтобы знаменатель в
+    UI совпадал с тем, что мы фактически парсим.
+    """
+    from app.parse_worker import get_worker_status
+
+    progress = progress_for_account(db, account_id)
+    progress["worker"] = get_worker_status()
+    return progress
+
+
+@router.get("/match-detail/{match_id}")
+def get_match_detail(
+    match_id: int,
+    account_id: int | None = None,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Полная карточка матча в едином формате (см. ``to_view``).
+
+    ``account_id`` — игрок, для которого вычисляются персональные блоки
+    (lane phase, item timings, ability upgrades). Без него вернётся
+    общая часть матча без блока ``focus``.
+    """
+    from app.match_detail_service import match_detail_service, to_view
+
+    dto = match_detail_service.get(db, match_id, force_refresh=refresh)
+    if dto is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Матч не найден ни в кэше, ни в OpenDota. "
+                "Если игра свежая — подождите 5-10 минут и обновите страницу."
+            ),
+        )
+    return to_view(dto, focus_account_id=account_id)
+
+
+@router.post("/match-detail/{match_id}/request-parse")
+def request_match_detail_parse(match_id: int, db: Session = Depends(get_db)):
+    """Принудительно запросить парсинг матча у OpenDota."""
+    from app.match_detail_service import match_detail_service
+
+    for adapter in match_detail_service.adapters:
+        if adapter.request_parse(match_id):
+            return {"status": "requested", "source": adapter.name}
+    return {"status": "rejected"}
 
 
 @router.get("/heroes", response_model=list[HeroResponse])

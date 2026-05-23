@@ -233,11 +233,61 @@ class PlayerMatch(Base):
     start_time = Column(Integer, nullable=True)
     party_size = Column(Integer, nullable=True)
     game_mode = Column(Integer, nullable=True)
+    # ``lobby_type`` is how Dota actually classified the match (Ranked,
+    # Public Matchmaking, Practice, Tournament, Battle Cup, ...). It is
+    # the only reliable way to tell ranked from unranked — game_mode 22
+    # is used for *both* Ranked All Pick and Unranked All Pick. Without
+    # this column the analysis blends those two together and ruins the
+    # baseline comparisons. See ``match_clusters.classify``.
+    lobby_type = Column(Integer, nullable=True, index=True)
     average_rank = Column(Integer, nullable=True)
     hero_healing = Column(Float, nullable=True)
     obs_placed = Column(Integer, nullable=True)
     sen_placed = Column(Integer, nullable=True)
     is_detailed = Column(Boolean, default=False)  # True if from /recentMatches
+
+
+class PlayerMatchDetail(Base):
+    """Полная карточка матча из одного из внешних источников.
+
+    PK по ``match_id`` — данные для одного матча кэшируются один раз,
+    даже если в нём играли несколько наших пользователей. Структура спе-
+    цифична для источника; ``MatchDetailDTO`` поверх адаптеров приводит
+    её к единому виду для прикладного кода.
+    """
+
+    __tablename__ = "player_match_details"
+
+    match_id = Column(BigInteger, primary_key=True, index=True)
+    source = Column(String(20), nullable=False, index=True)  # 'opendota' | 'stratz' | 'self_parsed'
+    is_parsed = Column(Boolean, default=False, index=True)
+    parser_version = Column(Integer, nullable=True)
+    start_time = Column(Integer, nullable=True, index=True)
+    duration = Column(Integer, nullable=True)
+    game_mode = Column(Integer, nullable=True)
+    lobby_type = Column(Integer, nullable=True)
+    radiant_win = Column(Boolean, nullable=True)
+    avg_rank_tier = Column(Integer, nullable=True)
+    raw_json = Column(JSON, nullable=True)  # full source payload
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now())
+    parse_requested_at = Column(DateTime(timezone=True), nullable=True)
+    parse_attempts = Column(Integer, default=0)
+    last_parse_check_at = Column(DateTime(timezone=True), nullable=True)
+    # --- background parse queue control ---
+    # 1=hot (user is looking at it right now), 2=warm (recent matches of an
+    # active user), 3=cold (older 'fill the analysis' matches). Lower wins
+    # in the parse worker ORDER BY.
+    priority = Column(Integer, default=3, index=True, nullable=False)
+    # Worker only touches rows where next_check_at <= NOW(). Lets us put
+    # the same row back into the queue with exponential backoff after a
+    # "still not parsed" reply.
+    next_check_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    # State machine for one match in the parse pipeline:
+    #   queued     - we want it parsed, parse hasn't been requested yet
+    #   requested  - POST /request/{id} sent, waiting for OpenDota
+    #   parsed     - GET /matches/{id} returned a payload with version != null
+    #   unavailable- exhausted retries (replay not in Valve cluster anymore)
+    parse_state = Column(String(20), default="queued", index=True, nullable=False)
 
 
 class MlPlayerAnalysis(Base):

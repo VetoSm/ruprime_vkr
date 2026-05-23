@@ -11,7 +11,7 @@ from app.models import (  # noqa: F401
     MlRawMatch, MlRawPlayer, MlRawTeam, MlRawPicksBans,
     MlConstantHero, MlConstantItem, MlConstantAbility,
     MlKaggleBaseline, MlPlayerAnalysis,
-    PlayerAccount, PlayerMatch,
+    PlayerAccount, PlayerMatch, PlayerMatchDetail,
 )
 from app.routers.admin import router as admin_router
 from app.routers.analysis import router as analysis_router
@@ -60,9 +60,37 @@ def startup():
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE player_matches ADD COLUMN IF NOT EXISTS obs_placed INTEGER"))
         conn.execute(text("ALTER TABLE player_matches ADD COLUMN IF NOT EXISTS sen_placed INTEGER"))
+        conn.execute(text("ALTER TABLE player_matches ADD COLUMN IF NOT EXISTS lobby_type INTEGER"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_player_matches_lobby_type "
+            "ON player_matches (lobby_type)"
+        ))
         conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_player_matches_account_match "
             "ON player_matches (account_id, match_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_player_match_details_parsed_seen "
+            "ON player_match_details (is_parsed, last_parse_check_at)"
+        ))
+        # Parse-queue columns may not exist on installations created before
+        # PR-2; add them defensively. SQLAlchemy.create_all would only
+        # create them on a fresh DB.
+        conn.execute(text(
+            "ALTER TABLE player_match_details "
+            "ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 3"
+        ))
+        conn.execute(text(
+            "ALTER TABLE player_match_details "
+            "ADD COLUMN IF NOT EXISTS next_check_at TIMESTAMP WITH TIME ZONE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE player_match_details "
+            "ADD COLUMN IF NOT EXISTS parse_state VARCHAR(20) NOT NULL DEFAULT 'queued'"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_player_match_details_queue "
+            "ON player_match_details (parse_state, priority, next_check_at)"
         ))
 
     # Mount images if available
@@ -76,6 +104,12 @@ def startup():
         from app.match_collector import start_collector
         start_collector()
 
+    # Per-match parse worker. One daemon thread; safe to always start.
+    auto_parse = os.getenv("AUTO_PARSE_WORKER", "true").lower()
+    if auto_parse in ("true", "1", "yes"):
+        from app.parse_worker import start_parse_worker
+        start_parse_worker()
+
     # Periodic background refresh of linked Steam accounts (24h by default).
     from app.auto_refresh import start as _start_auto_refresh
     _start_auto_refresh()
@@ -84,10 +118,18 @@ def startup():
 @app.get("/health")
 def health():
     from app.match_collector import get_collector_status
+    from app.parse_worker import get_worker_status
     status = get_collector_status()
+    worker = get_worker_status()
     return {
         "status": "ok",
         "service": "ml",
         "collector_running": status.get("running", False),
         "matches_collected": status.get("matches_collected_total", 0),
+        "parse_worker": {
+            "running": worker.get("running"),
+            "matches_parsed_total": worker.get("matches_parsed_total"),
+            "matches_requested_total": worker.get("matches_requested_total"),
+            "budget_available": worker.get("budget_available"),
+        },
     }

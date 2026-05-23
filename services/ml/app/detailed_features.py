@@ -145,7 +145,7 @@ def compute_detailed_features(
     SELECT match_id, hero_id, kills, deaths, assists, gold_per_min, xp_per_min,
            last_hits, denies, hero_damage, tower_damage, hero_healing,
            duration, player_slot, radiant_win, lane_role, average_rank,
-           is_detailed, start_time, game_mode, obs_placed, sen_placed
+           is_detailed, start_time, game_mode, lobby_type, obs_placed, sen_placed
     FROM player_matches
     WHERE account_id = {account_id}
     ORDER BY start_time DESC NULLS LAST
