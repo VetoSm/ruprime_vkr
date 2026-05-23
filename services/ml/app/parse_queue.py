@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Optional
+from typing import Optional
 
-from sqlalchemy import case, func, text
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.match_clusters import (
@@ -295,8 +295,3 @@ def progress_for_account(db: Session, account_id: int, window: int = ANALYSIS_WI
     }
 
 
-def is_match_in_account(db: Session, account_id: int, match_id: int) -> bool:
-    return db.execute(
-        text("SELECT 1 FROM player_matches WHERE account_id = :a AND match_id = :m LIMIT 1"),
-        {"a": account_id, "m": match_id},
-    ).first() is not None

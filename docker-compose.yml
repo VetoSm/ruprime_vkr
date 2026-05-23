@@ -5,8 +5,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    # Bind to loopback only: psql/pgAdmin from the same host still work
+    # ("localhost"), but the port is not reachable from the public
+    # internet even if a firewall rule slips. To open it for dev across
+    # the LAN, override in docker-compose.override.yml.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -79,8 +83,11 @@ services:
 
   llm:
     build: ./services/llm
+    # Loopback-only port for ops smoke tests (`curl localhost:8004/health`
+    # from inside the server). The browser never talks to LLM directly —
+    # core proxies /ai/chat internally — so no public exposure is needed.
     ports:
-      - "8004:8004"
+      - "127.0.0.1:8004:8004"
     environment:
       DATABASE_URL: ${DATABASE_URL}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}

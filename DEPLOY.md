@@ -345,16 +345,11 @@ server {
         proxy_read_timeout 120s;
     }
 
-    location /ml/ {
-        proxy_pass http://127.0.0.1:8003/ml/;
-        proxy_set_header Host $host;
-        proxy_read_timeout 300s;
-    }
-
-    location /llm/ {
-        proxy_pass http://127.0.0.1:8004/llm/;
-        proxy_set_header Host $host;
-    }
+    # NB: /ml/ and /llm/ are intentionally NOT proxied through nginx
+    # anymore. Both services are reachable only via core (the browser
+    # talks to core, core forwards X-Internal-Token). If you previously
+    # added these locations — remove them so the public surface stays
+    # auth-only + core API.
 
     location /health {
         proxy_pass http://127.0.0.1:8002/health;

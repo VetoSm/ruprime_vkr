@@ -144,7 +144,10 @@ export default function PlayerProfile() {
     (async () => {
       setLinking(true);
       try {
-        await coreApi.post('/player/link-steam', { steam_id: pending });
+        // ``trusted: true`` — pending steam_id was set by the OpenID
+        // callback. Core re-checks the AuthProvider row so we can never
+        // accept an unverified id this way.
+        await coreApi.post('/player/link-steam', { steam_id: pending, trusted: true });
         const syncRes = await coreApi.post('/player/sync-steam').catch(() => null);
         if (syncRes?.data) setSteamData({ linked: true, ...syncRes.data });
         else {

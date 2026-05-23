@@ -219,7 +219,11 @@ export default function PlayerDashboard() {
     const pid = overview.profile.id;
     (async () => {
       try {
-        await coreApi.post('/player/link-steam', { steam_id: pendingSteamId });
+        // ``trusted: true`` — the pending steam_id was written by the
+        // OpenID callback (see SteamAuthCallback.tsx). The core endpoint
+        // re-verifies against /auth/providers/steam, so a stale localStorage
+        // entry can't be abused to claim arbitrary accounts.
+        await coreApi.post('/player/link-steam', { steam_id: pendingSteamId, trusted: true });
         await coreApi.post('/player/sync-steam').catch(() => {});
         localStorage.removeItem(STEAM_PENDING_KEY);
         coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});

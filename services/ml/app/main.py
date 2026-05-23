@@ -18,7 +18,16 @@ from app.routers.analysis import router as analysis_router
 from app.routers.matching import router as matching_router
 from app.routers.data_view import router as data_view_router
 
-app = FastAPI(title="Dota2 Coach - ML Service", version="1.0.0")
+# Hide /docs by default in production. ML is internal-only — there's no
+# legitimate reason for the schema endpoint to be reachable.
+_DOCS_ENABLED = os.getenv("ENABLE_API_DOCS", "false").lower() in ("true", "1", "yes")
+app = FastAPI(
+    title="Dota2 Coach - ML Service",
+    version="1.0.0",
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
+)
 
 cors_origins = [
     o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")

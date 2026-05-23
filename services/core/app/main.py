@@ -22,7 +22,18 @@ from app.routers.sessions import router as sessions_router
 from app.routers.public import router as public_router
 from app.routers.ml_proxy import router as ml_proxy_router
 
-app = FastAPI(title="Dota2 Coach - Core Service", version="1.0.0")
+# Auto-generated /docs and /redoc are great for local dev but leak the
+# full API schema in production. Gate them behind ENABLE_API_DOCS so the
+# default deploy ships without them; flip the env var to debug schemas
+# from the staging box.
+_DOCS_ENABLED = os.getenv("ENABLE_API_DOCS", "false").lower() in ("true", "1", "yes")
+app = FastAPI(
+    title="Dota2 Coach - Core Service",
+    version="1.0.0",
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
+)
 
 cors_origins = [
     o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")

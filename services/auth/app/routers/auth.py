@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -575,10 +576,28 @@ def get_linked_steam(current_user: AuthUser = Depends(get_current_user), db: Ses
 
 
 # ---------- POST /auth/link-steam ----------
+# Stub manual-link path: caller posts a raw SteamID64 and we believe them.
+# It only exists for local development and the legacy "trusted=True" code
+# path in core /player/link-steam. In production users MUST go through
+# the OpenID flow (GET /auth/steam/login → /auth/steam/callback) which
+# proves ownership cryptographically. Guard the stub behind an env flag
+# so the production deploy ships with it disabled.
+_ALLOW_MANUAL_STEAM_LINK = os.getenv(
+    "ALLOW_MANUAL_STEAM_LINK", "false"
+).lower() in ("true", "1", "yes")
+
+
 @router.post("/link-steam", response_model=LinkSteamResponse)
 def link_steam(body: LinkSteamRequest, current_user: AuthUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    # In production, validate steam_token via Steam OpenID / Web API
-    # For now, we treat steam_token as the steam_id directly (stub)
+    if not _ALLOW_MANUAL_STEAM_LINK:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Привязка Steam-аккаунта только через OpenID. "
+                "Используйте /auth/steam/login."
+            ),
+        )
+
     steam_id = body.steam_token.strip()
     if not steam_id:
         raise HTTPException(status_code=400, detail="Invalid steam token")

@@ -8,7 +8,17 @@ from app.internal_auth import require_internal_token
 from app.routers.chat import router as chat_router
 from app.routers.chat import llm_mode
 
-app = FastAPI(title="Dota2 Coach - LLM Service", version="1.0.0")
+# /docs is hidden by default — LLM is internal-only behind core, so the
+# schema endpoint has no legitimate caller. Flip ENABLE_API_DOCS=true to
+# bring it back on staging when debugging.
+_DOCS_ENABLED = os.getenv("ENABLE_API_DOCS", "false").lower() in ("true", "1", "yes")
+app = FastAPI(
+    title="Dota2 Coach - LLM Service",
+    version="1.0.0",
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
+)
 
 cors_origins = [
     o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")

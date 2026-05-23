@@ -8,7 +8,16 @@ from app.models import AuthUser, AuthSession, AuthRole, AuthProvider, RoleEnum  
 from app.routers.auth import router as auth_router
 from app.routers.steam_auth import router as steam_auth_router
 
-app = FastAPI(title="Dota2 Coach - Auth Service", version="1.0.0")
+# /docs hidden by default — auth schema documents every internal route
+# and is not needed in production. Re-enable via ENABLE_API_DOCS=true.
+_DOCS_ENABLED = os.getenv("ENABLE_API_DOCS", "false").lower() in ("true", "1", "yes")
+app = FastAPI(
+    title="Dota2 Coach - Auth Service",
+    version="1.0.0",
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
+)
 
 cors_origins = [
     o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
