@@ -10,7 +10,7 @@ import {
   IconStar,
 } from './Icons';
 import { BrandLogo } from './Primitives';
-import { rankTierToName } from '../api/heroes';
+import { rankTierToName, rankMedalIcon } from '../api/heroes';
 import ConsentGate from './ConsentGate';
 
 type NavItem = { to: string; label: string; icon: (p: any) => JSX.Element };
@@ -101,7 +101,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   // Подтягиваем steam-данные один раз для топбара (аватар/ник из стима + ранг).
   // Тихо игнорируем 401/500 и preview — топбар деградирует до login + роли.
-  const [topbarMeta, setTopbarMeta] = useState<{ avatar?: string; nick?: string; rank?: string }>({});
+  const [topbarMeta, setTopbarMeta] = useState<{
+    avatar?: string; nick?: string; rank?: string; medal?: string;
+  }>({});
   useEffect(() => {
     if (!user || user.role !== 'PLAYER') return;
     let cancelled = false;
@@ -112,6 +114,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         avatar: d.avatar_url || undefined,
         nick: d.personaname || undefined,
         rank: d.rank_tier ? rankTierToName(d.rank_tier) : undefined,
+        // Medal icon URL is computed from the same rank_tier — keep it
+        // alongside the text label so the topbar can render the medal
+        // next to the rank name without an extra prop drill.
+        medal: d.rank_tier ? rankMedalIcon(d.rank_tier) : undefined,
       });
     }).catch(() => {});
     return () => { cancelled = true; };
@@ -236,7 +242,21 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                   }
                   <span className="app-user-meta">
                     <span className="app-user-name">{topbarMeta.nick || user?.login || '—'}</span>
-                    <span className="app-user-role">{topbarMeta.rank || userRoleLabel(user?.role)}</span>
+                    <span className="app-user-role">
+                      {/* Show the rank medal icon inline with the label
+                          so the role line communicates "Divine" both
+                          visually and textually. Falls back to plain
+                          role text for unranked / non-PLAYER users. */}
+                      {topbarMeta.medal && (
+                        <img
+                          src={topbarMeta.medal}
+                          alt=""
+                          className="app-user-rank-medal"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      )}
+                      {topbarMeta.rank || userRoleLabel(user?.role)}
+                    </span>
                   </span>
                   <IconChevronDown size={14} />
                 </button>

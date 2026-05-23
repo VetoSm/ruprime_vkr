@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 import { useAuth } from '../../store/AuthContext';
-import { loadHeroes, heroIcon, heroName, roleName, rankTierToName } from '../../api/heroes';
+import { loadHeroes, heroIcon, heroName, roleName, rankTierToName, rankMedalIcon } from '../../api/heroes';
 import { RankBadge, InfoTooltip } from '../../ui/GameComponents';
 import SkillRing from '../../ui/SkillRing';
 import DotaPrivacyBanner from '../../ui/DotaPrivacyBanner';
@@ -108,17 +108,64 @@ function HeroStat({
 }
 
 function StatTile({
-  label, value, icon, tint,
-}: { label: string; value: React.ReactNode; icon: React.ReactNode; tint: 'cyan' | 'purple' | 'gold' | 'rose' }) {
+  label, value, icon, tint, info, deltaText, deltaTone, deltaContext,
+}: {
+  label: React.ReactNode;
+  value: React.ReactNode;
+  icon: React.ReactNode;
+  tint: 'cyan' | 'purple' | 'gold' | 'rose';
+  /** Optional ℹ︎ tooltip rendered next to the label. */
+  info?: string;
+  /** "+0.42" / "-150" — short delta string already formatted. */
+  deltaText?: string;
+  deltaTone?: 'pos' | 'neg' | 'neutral';
+  /** One-liner under the value explaining what the delta is compared to. */
+  deltaContext?: string;
+}) {
   return (
     <div className={`stat-tile stat-tile--${tint}`}>
       <div className="stat-tile-icon">{icon}</div>
-      <div className="stat-tile-body">
-        <div className="stat-tile-label">{label}</div>
-        <div className="stat-tile-value">{value}</div>
+      <div className="stat-tile-body" style={{ flex: 1 }}>
+        <div className="stat-tile-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {label}
+          {info && <InfoTooltip text={info} />}
+        </div>
+        <div className="stat-tile-value-row">
+          <span className="stat-tile-value">{value}</span>
+          {deltaText && (
+            <span className={`stat-tile-delta ${deltaTone === 'pos' ? 'pos' : deltaTone === 'neg' ? 'neg' : 'neutral'}`}>
+              {deltaText}
+            </span>
+          )}
+        </div>
+        {deltaContext && <div className="stat-tile-delta-context">{deltaContext}</div>}
       </div>
     </div>
   );
+}
+
+/* "Сравни первую и последнюю точку серии" — единая утилита для дельт
+   в плитках. Подходит для KDA/GPM/XPM/overall_score: первая половина
+   окна vs последняя, разница со знаком. */
+function trendDelta(
+  series: any[] | undefined | null,
+  field: string,
+  digits: number = 1,
+  asPercent: boolean = false,
+): { text: string; tone: 'pos' | 'neg' | 'neutral' } {
+  if (!Array.isArray(series) || series.length < 2) return { text: '', tone: 'neutral' };
+  const first = Number(series[0]?.[field]);
+  const last = Number(series[series.length - 1]?.[field]);
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return { text: '', tone: 'neutral' };
+  const diff = (last - first) * (asPercent ? 100 : 1);
+  if (Math.abs(diff) < 10 ** -(digits + 1)) {
+    return { text: `±${(0).toFixed(digits)}${asPercent ? '%' : ''}`, tone: 'neutral' };
+  }
+  const sign = diff > 0 ? '+' : '';
+  return {
+    text: `${sign}${diff.toFixed(digits)}${asPercent ? '%' : ''}`,
+    tone: diff > 0 ? 'pos' : 'neg',
+  };
 }
 
 /* =========================================================
@@ -285,6 +332,25 @@ export default function PlayerDashboard() {
 
   const recentMatches: any[] = Array.isArray(steamData?.recent_matches) ? steamData.recent_matches : [];
 
+  /* Top roles ordered by how often the player actually played them in
+     the recent window, descending. Empty (`0`/`null` `lane_role`) and
+     out-of-range values are dropped. Used in the hero card "Роли" stat
+     to surface real role distribution instead of a single auto-pick. */
+  const popularRoles = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const m of recentMatches) {
+      const role = Number(m?.lane_role);
+      if (Number.isFinite(role) && role >= 1 && role <= 5) {
+        counts.set(role, (counts.get(role) || 0) + 1);
+      }
+    }
+    const total = Array.from(counts.values()).reduce((s, v) => s + v, 0);
+    if (total === 0) return [] as { role: number; count: number; pct: number }[];
+    return Array.from(counts.entries())
+      .map(([role, count]) => ({ role, count, pct: count / total }))
+      .sort((a, b) => b.count - a.count);
+  }, [recentMatches]);
+
   // Дельта GPM матча относительно предыдущего (для колонки GPM ▲)
   const gpmDeltas = useMemo(() => {
     const arr: (number | null)[] = [];
@@ -428,10 +494,21 @@ export default function PlayerDashboard() {
         <div className="player-hero-stat">
           <span className="player-hero-stat-label">Роли</span>
           <div className="player-hero-stat-tags">
-            {effectiveAnalysisRole
-              ? <span className="player-hero-stat-tag">{roleName(effectiveAnalysisRole)}</span>
-              : <span className="player-hero-stat-tag warn">авто</span>
-            }
+            {popularRoles.length > 0 ? (
+              popularRoles.map((r) => (
+                <span
+                  key={r.role}
+                  className={`player-hero-stat-tag ${effectiveAnalysisRole === `POS${r.role}` ? 'active' : ''}`}
+                  title={`${r.count} матч${r.count === 1 ? '' : 'ей'} · ${(r.pct * 100).toFixed(0)}%`}
+                >
+                  {roleName(r.role)} <small>{Math.round(r.pct * 100)}%</small>
+                </span>
+              ))
+            ) : effectiveAnalysisRole ? (
+              <span className="player-hero-stat-tag">{roleName(effectiveAnalysisRole)}</span>
+            ) : (
+              <span className="player-hero-stat-tag warn">авто</span>
+            )}
           </div>
           {accountMmr > 0 && desired_mmr > accountMmr && (
             <span className="player-hero-stat-delta">
@@ -441,29 +518,56 @@ export default function PlayerDashboard() {
         </div>
       </div>
 
-      {/* ============ Quick Stats (4 плитки) ============ */}
+      {/* ============ Quick Stats (4 плитки) ============
+       * Каждая плитка показывает среднее по выбранному окну + дельту
+       * (последняя точка тренда vs первая). Так пользователь сразу видит:
+       *   "KDA 2.45  +0.30  — растёт в последних играх".
+       * Tooltip на «Общий балл» расшифровывает агрегат. */}
+      {(() => {
+        const kdaTileDelta = trendDelta(trends.kda_over_time, 'kda', 2);
+        const gpmTileDelta = trendDelta(trends.gpm_over_time, 'gpm', 0);
+        const xpmTileDelta = trendDelta(trends.xpm_over_time, 'xpm', 0);
+        const deltaCtx = 'к концу окна vs его началу';
+        return (
       <div className="grid-4 dash-quick-stats">
         <StatTile
           label="ОБЩИЙ БАЛЛ" tint="cyan"
           icon={<IconStarOutline />}
           value={typeof detailedFeatures?.overall_score === 'number' ? `${Number(detailedFeatures.overall_score).toFixed(1)} / 10` : '—'}
+          info={
+            'Агрегированный показатель твоей игры от 0 до 10. Среднее по 8 категориям ' +
+            'из «Радара навыков» (farming / combat / vision / objectives / mechanics / ' +
+            'control / survival / consistency), каждая из которых нормирована к диапазону ' +
+            '0-10 относительно эталонов твоего ранга. 10 = на уровне топ-1% твоего MMR-бэнда.'
+          }
         />
         <StatTile
           label="KDA" tint="rose"
           icon={<IconSwordsOutline />}
           value={summary.kda_avg ? Number(summary.kda_avg).toFixed(2) : '—'}
+          deltaText={kdaTileDelta.text}
+          deltaTone={kdaTileDelta.tone}
+          deltaContext={kdaTileDelta.text ? deltaCtx : undefined}
         />
         <StatTile
           label="GPM" tint="gold"
           icon={<IconCoinsOutline />}
           value={summary.gpm_avg || '—'}
+          deltaText={gpmTileDelta.text}
+          deltaTone={gpmTileDelta.tone}
+          deltaContext={gpmTileDelta.text ? deltaCtx : undefined}
         />
         <StatTile
           label="XPM" tint="purple"
           icon={<IconBookOpenOutline />}
           value={summary.xpm_avg || '—'}
+          deltaText={xpmTileDelta.text}
+          deltaTone={xpmTileDelta.tone}
+          deltaContext={xpmTileDelta.text ? deltaCtx : undefined}
         />
       </div>
+        );
+      })()}
 
       {/* ============ 4-col widgets grid (Chart | Rings | Matches | Oracle-tall) ============ */}
       <div className="dash-widgets-grid">

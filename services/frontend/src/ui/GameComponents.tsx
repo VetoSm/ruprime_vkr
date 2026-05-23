@@ -28,22 +28,22 @@ interface RankBadgeProps {
 
 export function RankBadge({ rankTier, rankName, size = 'md' }: RankBadgeProps) {
   let medal = 0;
-  let stars = 0;
 
   if (rankTier && rankTier > 0) {
     medal = Math.floor(rankTier / 10);
-    stars = rankTier % 10;
   } else if (rankName) {
+    // Accept both "Divine" and a legacy "Divine [5]" string — strip the
+    // bracketed star count if it's there, we no longer surface it.
     const upper = rankName.toUpperCase().split(' ')[0].split('[')[0].trim();
     const idx = Object.entries(RANK_DATA).find(([_, v]) => v.name.toUpperCase() === upper);
     if (idx) medal = parseInt(idx[0]);
-    const starMatch = rankName.match(/\[(\d)\]/);
-    if (starMatch) stars = parseInt(starMatch[1]);
   }
 
   const info = RANK_DATA[medal];
   if (!info) return <span className="badge badge-accent">{rankName || 'Без ранга'}</span>;
 
+  // Valve renders the star count inside the medal icon itself, so we
+  // never duplicate "[N]" in text. The icon is the source of truth.
   const iconUrl = `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/rank_icons/rank_icon_${medal}.png`;
   const sizes = { sm: 20, md: 28, lg: 40 };
   const fontSize = { sm: '0.75rem', md: '0.85rem', lg: '1rem' };
@@ -58,7 +58,7 @@ export function RankBadge({ rankTier, rankName, size = 'md' }: RankBadgeProps) {
     }}>
       <img src={iconUrl} alt={info.name} style={{ width: sizes[size], height: sizes[size] }}
         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-      {info.name}{stars > 0 ? ` [${stars}]` : ''}
+      {info.name}
     </span>
   );
 }

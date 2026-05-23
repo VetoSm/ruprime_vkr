@@ -6,7 +6,12 @@ import { IconChevronLeft, IconChevronRight, IconCalendar, IconClose, IconTarget 
 
 const ORACLE_AVATAR = '/decor/oracle-avatar.png';
 
-type EventType = 'session' | 'training' | 'tournament' | 'rest';
+// Event taxonomy was previously {session, training, tournament, rest},
+// but "tournament" and "rest" weren't tied to any feature — no API
+// surface, no real workflow — and they cluttered the legend / add-event
+// modal. Trimmed to the two we actually drive from data: coach sessions
+// (server) and self-training (localStorage).
+type EventType = 'session' | 'training';
 
 interface ScheduleEvent {
   id: string;
@@ -22,15 +27,11 @@ interface ScheduleEvent {
 const TYPE_LABEL: Record<EventType, string> = {
   session:    'Сессия',
   training:   'Тренировка',
-  tournament: 'Турнир',
-  rest:       'Отдых',
 };
 
-const TYPE_TONE: Record<EventType, 'cyan' | 'purple' | 'pink' | 'green'> = {
+const TYPE_TONE: Record<EventType, 'cyan' | 'purple'> = {
   session:    'cyan',
   training:   'purple',
-  tournament: 'pink',
-  rest:       'green',
 };
 
 const SELF_TRAINING_KEY = 'self_training_events_v1';
@@ -175,6 +176,15 @@ export default function PlayerSchedule() {
       return r;
     });
   };
+  const jumpToday = () => setAnchorDate(new Date());
+
+  // Только в текущей неделе/месяце? Тогда кнопка «Сегодня» — без подсветки.
+  const isOnTodaysWindow = useMemo(() => {
+    const now = new Date();
+    if (viewMode === 'week') return sameDay(startOfWeek(anchorDate), startOfWeek(now));
+    return anchorDate.getFullYear() === now.getFullYear()
+      && anchorDate.getMonth() === now.getMonth();
+  }, [anchorDate, viewMode]);
 
   /* Сохранить новое самостоятельное событие */
   const submitAddEvent = () => {
@@ -185,10 +195,7 @@ export default function PlayerSchedule() {
       id: `self-${Date.now()}`,
       type: addType,
       title: addTitle || TYPE_LABEL[addType],
-      subtitle: addType === 'training' ? 'Самостоятельная практика'
-              : addType === 'tournament' ? 'Турниры и матчи'
-              : addType === 'rest' ? 'Восстановление'
-              : undefined,
+      subtitle: addType === 'training' ? 'Самостоятельная практика' : undefined,
       start, end,
     };
     const next = [...selfEvents, ev];
@@ -218,10 +225,19 @@ export default function PlayerSchedule() {
             <button type="button" className={`seg-control-btn ${viewMode === 'month' ? 'active' : ''}`} onClick={() => setViewMode('month')}>Месяц</button>
           </div>
           <div className="schedule-monthnav">
-            <button type="button" className="coaches-pagi-btn" onClick={() => moveAnchor(-1)} aria-label="Назад"><IconChevronLeft size={14} /></button>
+            <button type="button" className="coaches-pagi-btn" onClick={() => moveAnchor(-1)} aria-label={viewMode === 'week' ? 'Предыдущая неделя' : 'Предыдущий месяц'}><IconChevronLeft size={14} /></button>
             <span className="schedule-monthnav-label">{headerLabel}</span>
-            <button type="button" className="coaches-pagi-btn" onClick={() => moveAnchor(1)} aria-label="Вперёд"><IconChevronRight size={14} /></button>
+            <button type="button" className="coaches-pagi-btn" onClick={() => moveAnchor(1)} aria-label={viewMode === 'week' ? 'Следующая неделя' : 'Следующий месяц'}><IconChevronRight size={14} /></button>
           </div>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={jumpToday}
+            disabled={isOnTodaysWindow}
+            title="Вернуться к текущей неделе"
+          >
+            Сегодня
+          </button>
           <button type="button" className="btn btn-primary btn-sm" onClick={() => setAddOpen(true)}>
             + Добавить тренировку
           </button>
@@ -240,17 +256,15 @@ export default function PlayerSchedule() {
             <MonthView days={monthDays} monthStart={monthStart} events={events} />
           )}
 
-          {/* Bottom legend */}
+          {/* Bottom legend — только два типа реальных событий */}
           <div className="schedule-legend">
-            {(['session', 'training', 'tournament', 'rest'] as EventType[]).map((t) => (
+            {(['session', 'training'] as EventType[]).map((t) => (
               <div key={t} className="schedule-legend-item">
                 <span className={`schedule-legend-dot schedule-legend-dot--${TYPE_TONE[t]}`} />
                 <span className="schedule-legend-label">{TYPE_LABEL[t]}</span>
                 <span className="schedule-legend-desc">
-                  {t === 'session'    && 'Сессии с тренером'}
-                  {t === 'training'   && 'Самостоятельная практика'}
-                  {t === 'tournament' && 'Турниры и матчи'}
-                  {t === 'rest'       && 'Восстановление'}
+                  {t === 'session'  && 'Сессии с тренером'}
+                  {t === 'training' && 'Самостоятельная практика'}
                 </span>
               </div>
             ))}
@@ -330,11 +344,11 @@ export default function PlayerSchedule() {
               </button>
             </div>
 
-            {/* Тип тренировки */}
+            {/* Тип события — только «Тренировка» и «Сессия» */}
             <div className="form-group">
               <label>Тип</label>
-              <div className="seg-control" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' }}>
-                {(['training', 'session', 'tournament', 'rest'] as EventType[]).map((t) => (
+              <div className="seg-control" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                {(['training', 'session'] as EventType[]).map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -353,8 +367,6 @@ export default function PlayerSchedule() {
                   </>
                 )}
                 {addType === 'training' && 'Самостоятельная практика — соло-лобби, повторы, разбор реплеев.'}
-                {addType === 'tournament' && 'Турнир, скрим, внутренний матч.'}
-                {addType === 'rest' && 'Восстановление: сон, спорт, прогулка. Тоже часть плана.'}
               </div>
             </div>
 
@@ -365,7 +377,7 @@ export default function PlayerSchedule() {
                 className="form-input"
                 value={addTitle}
                 onChange={(e) => setAddTitle(e.target.value)}
-                placeholder={`Например: ${addType === 'training' ? 'Last-hit drill 30 мин' : addType === 'rest' ? 'Прогулка 1 ч' : addType === 'tournament' ? 'Турнир внутри клана' : 'Разбор с Eclipse'}`}
+                placeholder={`Например: ${addType === 'training' ? 'Last-hit drill 30 мин' : 'Разбор с Eclipse'}`}
               />
             </div>
 

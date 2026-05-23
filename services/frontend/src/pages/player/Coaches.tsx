@@ -30,8 +30,6 @@ const SORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'price-desc', label: 'Дороже' },
   { value: 'mmr',  label: 'По MMR тренера' },
 ];
-const LANG_OPTIONS = ['RU', 'EN'];
-
 const PER_PAGE = 6;
 
 /* Placeholder-слоты — пока нет API. 3 ближайших окна, общие на всех тренеров. */
@@ -87,7 +85,6 @@ export default function PlayerCoaches() {
   const [filterRank, setFilterRank] = useState('');
   const [filterRole, setFilterRole] = useState('');
   const [filterMaxRate, setFilterMaxRate] = useState('');
-  const [filterLang, setFilterLang] = useState('RU');
   const [sortBy, setSortBy] = useState('rating');
   const [page, setPage] = useState(1);
 
@@ -251,12 +248,6 @@ export default function PlayerCoaches() {
           label="Цена"
         />
         <Dropdown
-          value={filterLang}
-          onChange={setFilterLang}
-          options={LANG_OPTIONS.map(l => ({ value: l, label: l }))}
-          label="Язык"
-        />
-        <Dropdown
           value={sortBy}
           onChange={setSortBy}
           options={SORT_OPTIONS.map(s => ({ value: s.value, label: s.label }))}
@@ -306,8 +297,11 @@ export default function PlayerCoaches() {
                     </div>
                     {rank && (
                       <div className="coach-rank">
+                        {/* RankBadge уже рисует медаль + название —
+                            второй текстовый ярлык был дублем (видно
+                            «Divine [5] · Divine»). Оставляем только
+                            бэйдж. */}
                         <RankBadge rankName={rank} size="sm" />
-                        <span className="coach-rank-label">{rank.replace(/_/g, ' ')}</span>
                       </div>
                     )}
                   </div>
