@@ -2487,16 +2487,19 @@ table tr:hover {
   margin-bottom: 14px;
   align-items: stretch;
 }
+/* Ряды 4 и 5 имеют правую колонку фиксированной ширины: так визуально
+   совпадают границы «Топ героев / Игры по ролям» и «Тепловая карта», и
+   тепловая карта чуть шире — как и просили. На узких экранах
+   `minmax` даёт уменьшаться без поломки сетки. */
 .stats-split--even {
-  /* Радар занимает основную часть строки, стек из Топ героев + Игры по
-     ролям — узкая колонка, по ширине ≈ как тепловая карта на следующей
-     строке. */
-  grid-template-columns: minmax(0, 1.7fr) minmax(240px, 1fr);
+  /* Радар (слева, fluid) | стек блоков (Игры по ролям + Топ героев)
+     справа фиксированной ширины. */
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 26vw, 340px);
 }
 .stats-split--wide-left {
-  /* Weak-spots widget на ~60% ширины, тепловая карта чуть шире чем была
-     (40% против прежних 35%). */
-  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 1fr);
+  /* Weak-spots widget (слева, fluid) | Тепловая карта (справа,
+     фикс. шире чем правая колонка ряда 4). */
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 30vw, 400px);
 }
 
 /* Cards inside any stats-split row become flex columns so their inner
@@ -2591,9 +2594,14 @@ table tr:hover {
   min-width: 0;
 }
 .top-heroes-compact-hero img {
-  width: 26px; height: 26px;
-  border-radius: 5px;
+  /* Та же логика, что и в «Последних матчах»: круглый портрет с
+     ориентацией обреза по голове героя. */
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: 50% 30%;
   flex-shrink: 0;
+  border: 1px solid rgba(22, 233, 212, 0.22);
 }
 .top-heroes-compact-name {
   font-size: 0.85rem;
@@ -3663,7 +3671,7 @@ table tr:hover {
   flex-shrink: 0;
   position: relative;
 }
-.coach-hero-disc img { width: 100%; height: 100%; object-fit: cover; }
+.coach-hero-disc img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; }
 .coach-hero-disc span {
   font-size: 0.65rem;
   color: var(--text-muted);
@@ -4722,6 +4730,113 @@ table tr:hover {
   border-top: 1px solid var(--border-color);
 }
 
+/* === Drill-down view in the Dynamics card: progress bars per component
+ *
+ * Replaces the LineChart when a Skill ring is active. Each row is one
+ * component (e.g. "Observer wards / min"), with its current value, the
+ * target, and a horizontal bar. The bar fills to `score / 10` of width
+ * and gets a vertical "target" marker at `target_score / 10` so the
+ * gap to the next milestone is obvious at a glance. */
+.skill-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px 2px;
+}
+.skill-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-bar-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.84rem;
+}
+.skill-bar-name {
+  color: var(--text-secondary);
+}
+.skill-bar-value {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.skill-bar-value.reached { color: var(--accent); }
+.skill-bar-track {
+  position: relative;
+  height: 8px;
+  background: rgba(22, 233, 212, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.skill-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--purple) 0%, rgba(155, 89, 255, 0.65) 100%);
+  transition: width 0.6s ease;
+}
+.skill-bar-fill.reached {
+  background: linear-gradient(90deg, var(--accent-bright) 0%, var(--accent) 100%);
+}
+.skill-bar-track .skill-bar-target {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 6px rgba(155, 89, 255, 0.6);
+  transform: translateX(-1px);
+}
+/* Тихая текстовая ссылка вместо кнопки — «в полную статистику».
+   Не отвлекает от данных, но даёт явный путь дальше. */
+.skill-bars-cta {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-decoration: none;
+  border-bottom: 1px dashed transparent;
+  transition: var(--transition);
+}
+.skill-bars-cta:hover {
+  color: var(--accent);
+  border-bottom-color: rgba(22, 233, 212, 0.4);
+}
+
+/* === Collapsible "Загружаем данные Dota" banner === */
+.sync-alert { padding: 0; }
+.sync-alert-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.sync-alert-body { padding: 0 14px 12px; }
+.sync-alert--collapsed .sync-alert-head { padding: 10px 14px; }
+.sync-alert-toggle {
+  appearance: none;
+  background: transparent;
+  border: 1px solid rgba(22, 233, 212, 0.25);
+  color: var(--text-secondary);
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.sync-alert-toggle:hover {
+  color: var(--accent);
+  border-color: rgba(22, 233, 212, 0.55);
+}
+
 /* --- AI hint card --- */
 .ai-hint-nav {
   display: inline-flex;
@@ -4878,11 +4993,19 @@ table tr:hover {
   min-width: 0;
 }
 .match-hero img {
-  width: 36px;
-  height: 22px;
-  border-radius: 4px;
+  /* Раньше была прямоугольная "карточка" 36×22, теперь — круглый
+     портрет 38×38. У Valve dota_react/heroes/<slug>.png — wide-формат
+     256×144, поэтому используем object-fit: cover + object-position:
+     "вверх посередине" чтобы при квадратном обрезе лицо героя попадало
+     в кадр (у большинства картинок голова смещена выше центра). */
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
   object-fit: cover;
+  object-position: 50% 30%;
   flex-shrink: 0;
+  border: 1px solid rgba(22, 233, 212, 0.25);
+  background: linear-gradient(135deg, rgba(22, 233, 212, 0.08), rgba(155, 89, 255, 0.10));
 }
 .match-result {
   display: inline-flex;

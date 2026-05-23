@@ -10,7 +10,7 @@ import ParseProgressBadge from '../../ui/ParseProgressBadge';
 import { EmptyState } from '../../ui/Primitives';
 import { Dropdown } from '../../ui/Dropdown';
 import {
-  IconChevronRight, IconCalendar, IconTrendUp,
+  IconChevronRight, IconChevronUp, IconChevronDown, IconCalendar, IconTrendUp,
 } from '../../ui/Icons';
 import {
   IconCoinsOutline, IconBookOpenOutline, IconSwordsOutline, IconStarOutline,
@@ -189,6 +189,17 @@ export default function PlayerDashboard() {
   const [selectedAnalysisRole, setSelectedAnalysisRole] = useState('');
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [chartMetric, setChartMetric] = useState<'gpm' | 'xpm' | 'kda' | 'winrate'>('gpm');
+  // Свёрнутый ли баннер «Загружаем данные Dota». Состояние храним в
+  // localStorage, чтобы при обновлении страницы пользователь не
+  // получал баннер обратно развёрнутым каждый раз.
+  const [syncCollapsed, setSyncCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('sync_banner_collapsed') === '1'; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('sync_banner_collapsed', syncCollapsed ? '1' : '0'); }
+    catch {}
+  }, [syncCollapsed]);
 
   // Боковые блоки
   const [aiHistory, setAiHistory] = useState<any[]>([]);
@@ -411,12 +422,30 @@ export default function PlayerDashboard() {
       />
 
       {isLinked && syncStatus?.scheduled && (syncStatus.status === 'queued' || syncStatus.status === 'running') && (
-        <div className="alert mb-20" style={{ background: 'var(--accent-bg)', border: '1px solid var(--accent)', color: 'var(--text-primary)' }}>
-          <strong>Загружаем данные Dota.</strong>{' '}
-          {syncStatus.message || 'Догружаем матчи и детальные события в фоне.'}
-          {typeof syncStatus.fetched_matches === 'number' && (
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-              Загружено матчей: {syncStatus.fetched_matches.toLocaleString('ru-RU')}
+        <div
+          className={`alert sync-alert mb-20 ${syncCollapsed ? 'sync-alert--collapsed' : ''}`}
+          style={{ background: 'var(--accent-bg)', border: '1px solid var(--accent)', color: 'var(--text-primary)' }}
+        >
+          <div className="sync-alert-head">
+            <strong>Загружаем данные Dota.</strong>
+            <button
+              type="button"
+              className="sync-alert-toggle"
+              onClick={() => setSyncCollapsed((v) => !v)}
+              aria-label={syncCollapsed ? 'Развернуть' : 'Свернуть'}
+              title={syncCollapsed ? 'Показать прогресс' : 'Свернуть'}
+            >
+              {syncCollapsed ? <IconChevronDown size={16} /> : <IconChevronUp size={16} />}
+            </button>
+          </div>
+          {!syncCollapsed && (
+            <div className="sync-alert-body">
+              {syncStatus.message || 'Догружаем матчи и детальные события в фоне.'}
+              {typeof syncStatus.fetched_matches === 'number' && (
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                  Загружено матчей: {syncStatus.fetched_matches.toLocaleString('ru-RU')}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -569,26 +598,121 @@ export default function PlayerDashboard() {
         );
       })()}
 
-      {/* ============ 4-col widgets grid (Chart | Rings | Matches | Oracle-tall) ============ */}
+      {/* ============ 4-col widgets grid (Chart | Rings | Matches | Oracle-tall) ============
+       * Карточка слева работает в двух режимах:
+       *   1) `expandedSkill === null` — обычный линейный график по выбранной
+       *      метрике (GPM / XPM / KDA / Винрейт).
+       *   2) `expandedSkill === <key>` — drill-down по выбранной группе из
+       *      «Слабых мест»: список компонентов с прогресс-барами «ты vs
+       *      цель» вместо линии. График визуально превращается в подробный
+       *      breakdown категории.
+       *
+       * Skill rings справа — клик по кольцу включает/выключает второй режим. */}
       <div className="dash-widgets-grid">
-        {/* График: метрика по матчам — без иконки у заголовка */}
+        {(() => {
+          const drillCat = expandedSkill
+            ? categories.find((c: any) => c.key === expandedSkill)
+            : null;
+          const drillComponents = drillCat
+            ? (drillCat.components || []).filter((c: any) => !c.missing)
+            : [];
+          return (
         <div className="card dash-card dash-card--chart">
           <div className="card-head">
-            <div className="card-title">Динамика</div>
-            <Dropdown
-              value={chartMetric}
-              onChange={(v) => setChartMetric(v as any)}
-              options={[
-                { value: 'gpm',     label: 'GPM' },
-                { value: 'xpm',     label: 'XPM' },
-                { value: 'kda',     label: 'KDA' },
-                { value: 'winrate', label: 'Винрейт' },
-              ]}
-              size="sm"
-              align="right"
-            />
+            <div className="card-title">
+              {drillCat ? (
+                <>
+                  Разбор: {drillCat.name}
+                  {FEATURE_TIPS[drillCat.key] && (
+                    <InfoTooltip text={FEATURE_TIPS[drillCat.key]} />
+                  )}
+                </>
+              ) : (
+                'Динамика'
+              )}
+            </div>
+            {drillCat ? (
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={() => setExpandedSkill(null)}
+                title="Вернуться к графику"
+              >
+                ← Динамика
+              </button>
+            ) : (
+              <Dropdown
+                value={chartMetric}
+                onChange={(v) => setChartMetric(v as any)}
+                options={[
+                  { value: 'gpm',     label: 'GPM' },
+                  { value: 'xpm',     label: 'XPM' },
+                  { value: 'kda',     label: 'KDA' },
+                  { value: 'winrate', label: 'Винрейт' },
+                ]}
+                size="sm"
+                align="right"
+              />
+            )}
           </div>
-          {chartData.length > 0 ? (
+
+          {drillCat ? (
+            // === Drill-down mode: прогресс-бары по компонентам ===
+            drillComponents.length > 0 ? (
+              <div className="skill-bars">
+                {drillComponents.map((comp: any) => {
+                  const score = Number(comp.score) || 0;
+                  const target = Number(comp.target_score) || 0;
+                  // Нормируем: score / 10 ⇒ заполнение бара, target_score
+                  // / 10 ⇒ положение «цели». Делаем 100% потолком.
+                  const pct = Math.min(100, Math.max(0, (score / 10) * 100));
+                  const targetPct = Math.min(100, Math.max(0, (target / 10) * 100));
+                  const reached = score >= target;
+                  return (
+                    <div key={comp.key} className="skill-bar-row">
+                      <div className="skill-bar-row-head">
+                        <span className="skill-bar-name">{comp.name}</span>
+                        <span className={`skill-bar-value ${reached ? 'reached' : ''}`}>
+                          {typeof comp.player_value === 'number'
+                            ? comp.player_value.toFixed(1)
+                            : comp.player_value}
+                          {typeof comp.target_value === 'number' && (
+                            <span className="text-muted">
+                              {' → '}{comp.target_value.toFixed(1)}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="skill-bar-track">
+                        <div
+                          className={`skill-bar-fill ${reached ? 'reached' : ''}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                        {targetPct > 0 && (
+                          <span
+                            className="skill-bar-target"
+                            style={{ left: `${targetPct}%` }}
+                            aria-hidden
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Незаметный текст-линк, как и просили — без кнопки */}
+                <Link to="/stats" className="skill-bars-cta">
+                  Перейти в полную статистику <IconChevronRight size={12} />
+                </Link>
+              </div>
+            ) : (
+              <EmptyState
+                title="Нет компонентов"
+                description="Эта категория ещё без данных — нужны parsed-матчи."
+                compact
+              />
+            )
+          ) : chartData.length > 0 ? (
+            // === Default mode: линейный график выбранной метрики ===
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
@@ -608,60 +732,37 @@ export default function PlayerDashboard() {
             />
           )}
         </div>
+          );
+        })()}
 
-        {/* Skill rings: 3 худших */}
+        {/* Skill rings: 3 худших — клик переключает левую карточку в
+            режим разбора этой группы. Inline-drilldown под кольцами
+            больше не нужен (всё содержательное теперь в графике). */}
         <div className="card dash-card dash-card--rings">
           <div className="card-head">
             <div className="card-title">
               Слабые места
-              <InfoTooltip text="Три самых слабых направления в выбранном окне. Жмите кольцо — раскроется детализация и переход в статистику." />
+              <InfoTooltip text="Три самых слабых направления в выбранном окне. Жмите кольцо — слева раскроется детализация в виде прогресс-баров." />
             </div>
             {effectiveAnalysisRole && (
               <span className="badge badge-purple">{roleName(effectiveAnalysisRole)}</span>
             )}
           </div>
           {worstRings.length > 0 ? (
-            <>
-              <div className="skill-rings-row">
-                {worstRings.map((cat: any) => (
-                  <div key={cat.key} className="skill-ring-cell" onClick={() => setExpandedSkill(expandedSkill === cat.key ? null : cat.key)}>
-                    <SkillRing
-                      value={cat.score}
-                      target={cat.target}
-                      label={cat.name}
-                      missing={Boolean(cat.missing)}
-                      onClick={() => setExpandedSkill(expandedSkill === cat.key ? null : cat.key)}
-                      expanded={expandedSkill === cat.key}
-                    />
-                  </div>
-                ))}
-              </div>
-              {expandedSkill && (() => {
-                const cat = categories.find((c: any) => c.key === expandedSkill);
-                if (!cat) return null;
-                const tip = FEATURE_TIPS[cat.key] || '';
-                return (
-                  <div className="skill-drilldown">
-                    <div className="flex-between mb-10">
-                      <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        {cat.name} {tip && <InfoTooltip text={tip} />}
-                      </strong>
-                      <Link to="/stats" className="btn btn-outline btn-sm">
-                        В полную статистику <IconChevronRight size={14} />
-                      </Link>
-                    </div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {(cat.components || []).slice(0, 4).map((comp: any) => (
-                        <span key={comp.key} className="badge badge-accent" style={{ fontSize: '0.72rem' }}>
-                          {comp.name}: {typeof comp.player_value === 'number' ? comp.player_value.toFixed(1) : comp.player_value}
-                          {typeof comp.target_value === 'number' && <> → {comp.target_value.toFixed(1)}</>}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-            </>
+            <div className="skill-rings-row">
+              {worstRings.map((cat: any) => (
+                <div key={cat.key} className="skill-ring-cell" onClick={() => setExpandedSkill(expandedSkill === cat.key ? null : cat.key)}>
+                  <SkillRing
+                    value={cat.score}
+                    target={cat.target}
+                    label={cat.name}
+                    missing={Boolean(cat.missing)}
+                    onClick={() => setExpandedSkill(expandedSkill === cat.key ? null : cat.key)}
+                    expanded={expandedSkill === cat.key}
+                  />
+                </div>
+              ))}
+            </div>
           ) : (
             <EmptyState
               icon={<IconTrendUp size={28} color="var(--accent)" />}
