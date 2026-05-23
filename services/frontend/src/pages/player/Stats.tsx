@@ -328,10 +328,12 @@ export default function PlayerStats() {
         />
       </div>
 
-      {/* ============ Row 1: Динамика (большая, слева) | Колонка справа (WR / Роли / Герои) ============ */}
+      {/* ============ Row 1: Динамика (половинной высоты) | Колонка справа (WR / Роли / Герои) ============ */}
       <div className="stats-split">
-        {/* Большая «Динамика» — выше и шире. */}
-        <div className="card dash-card dash-card--chart-tall">
+        {/* «Динамика» — в половину прежней высоты. Раньше держали 420px,
+            сейчас — 210px (вкл. оси), плюс маленький отступ. Так график
+            визуально равен одной строке боковых блоков. */}
+        <div className="card dash-card dash-card--chart">
           <div className="card-head">
             <div className="card-title">Динамика</div>
             <Dropdown
@@ -345,7 +347,7 @@ export default function PlayerStats() {
             />
           </div>
           {dynamicTrend.length > 0 ? (
-            <ResponsiveContainer width="100%" height={420}>
+            <ResponsiveContainer width="100%" height={210}>
               <LineChart data={dynamicTrend} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="dynamicLineGrad" x1="0" y1="0" x2="1" y2="0">
@@ -462,42 +464,32 @@ export default function PlayerStats() {
         </div>
       </div>
 
-      {/* ============ Row 2: Радар (60%) | Тепловая карта (40%) ============ */}
-      <div className="stats-two-col">
-        <div className="card dash-card">
-          <div className="card-head">
-            <div className="card-title">Радар навыков</div>
-          </div>
-          {radarData.length > 2 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
-                <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={11} />
-                <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.4)" fontSize={9} angle={45} />
-                <Radar name="Ты" dataKey="you" stroke="#16e9d4" fill="#16e9d4" fillOpacity={0.18} />
-                <Radar name="Цель" dataKey="baseline" stroke="#9b59ff" fill="#9b59ff" fillOpacity={0.10} />
-                <Legend verticalAlign="bottom" iconType="line" wrapperStyle={{ fontSize: 11, color: '#a0b1c8' }} />
-                <Tooltip contentStyle={CHART_STYLE} />
-              </RadarChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
-          )}
+      {/* ============ Row 2: Радар навыков (полная ширина — поднят выше) ============
+       * Раньше радар делил ряд с тепловой картой. Хитмап без бэкенда — это
+       * визуальная заглушка, она не должна делить место с реальными данными.
+       * Поэтому радар теперь сам на ряду. */}
+      <div className="card dash-card stats-row">
+        <div className="card-head">
+          <div className="card-title">Радар навыков</div>
+          <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+            твои показатели vs цель для следующего ранга
+          </span>
         </div>
-
-        <div className="card dash-card">
-          <div className="card-head">
-            <div className="card-title">Тепловая карта</div>
-            <span className="badge badge-muted">parsed-данные</span>
-          </div>
-          {/* Хитмап строится только из parsed-матчей с координатами событий.
-              Пока у бэка нет endpoint'а — карточка остаётся в состоянии "ждём данных". */}
-          <EmptyState
-            title="Появится из parsed-матчей"
-            description="Тепловая карта строится по координатам ивентов в матчах после parsed-загрузки. Как только данные подгрузятся — карточка обновится автоматически."
-            compact
-          />
-        </div>
+        {radarData.length > 2 ? (
+          <ResponsiveContainer width="100%" height={320}>
+            <RadarChart data={radarData}>
+              <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
+              <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={12} />
+              <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.4)" fontSize={10} angle={45} />
+              <Radar name="Ты" dataKey="you" stroke="#16e9d4" fill="#16e9d4" fillOpacity={0.18} />
+              <Radar name="Цель" dataKey="baseline" stroke="#9b59ff" fill="#9b59ff" fillOpacity={0.10} />
+              <Legend verticalAlign="bottom" iconType="line" wrapperStyle={{ fontSize: 11, color: '#a0b1c8' }} />
+              <Tooltip contentStyle={CHART_STYLE} />
+            </RadarChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
+        )}
       </div>
 
       {/* ============ Слабые места — circular widget ============ */}
@@ -647,6 +639,24 @@ export default function PlayerStats() {
           <EmptyState title="Недостаточно данных"
             description={isLinked ? 'Слабые направления появятся после загрузки фитчей.' : 'Привяжите Steam.'} compact />
         )}
+      </div>
+
+      {/* ============ Тепловая карта — узкая, в самом низу ============
+       * Это пока заглушка (бэк ещё не отдаёт координаты ивентов из replay
+       * parser). Чтобы не отвлекать от живой статистики выше, сужаем её и
+       * ставим в конец, оставляя explicit empty state. */}
+      <div className="stats-heatmap-wrap">
+        <div className="card dash-card">
+          <div className="card-head">
+            <div className="card-title">Тепловая карта</div>
+            <span className="badge badge-muted">parsed-данные</span>
+          </div>
+          <EmptyState
+            title="Появится из parsed-матчей"
+            description="Тепловая карта строится по координатам ивентов в матчах после parsed-загрузки. Как только данные подгрузятся — карточка обновится автоматически."
+            compact
+          />
+        </div>
       </div>
     </div>
   );
