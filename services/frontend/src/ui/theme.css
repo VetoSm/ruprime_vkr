@@ -2481,10 +2481,11 @@ table tr:hover {
    gracefully (lists space out, empty states stay centered). */
 .stats-split {
   display: grid;
-  /* Динамика слева — основной storytelling-блок страницы, поэтому
-     забирает почти всю ширину. Винрейт по ролям справа — узкая
-     текстовая колонка (5 строк с барами), ей достаточно ~280px. */
-  grid-template-columns: minmax(0, 1fr) clamp(240px, 22vw, 300px);
+  /* 5fr/3fr ≈ 62.5%/37.5% — правый край «Динамики» приходится на
+     середину плитки KDA в верхнем ряду из 4 KPI (4 равных тайла,
+     KDA — третий, его середина = 62.5% ширины страницы).
+     Винрейт по ролям получает остаток справа. */
+  grid-template-columns: minmax(0, 5fr) minmax(240px, 3fr);
   gap: 14px;
   margin-bottom: 14px;
   align-items: stretch;
