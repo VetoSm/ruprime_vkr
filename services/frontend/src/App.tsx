@@ -14,6 +14,7 @@ import Terms from './pages/Terms';
 import PlayerDashboard from './pages/player/Dashboard';
 import PlayerSettings from './pages/player/Profile';
 import PlayerStats from './pages/player/Stats';
+import MatchDetail from './pages/player/MatchDetail';
 import PlayerCoaches from './pages/player/Coaches';
 import PlayerRequests from './pages/player/Requests';
 import PlayerSchedule from './pages/player/Schedule';
@@ -68,10 +69,11 @@ const TITLES: Record<string, string> = {
   '/dashboard': 'Дашборд — RuPrime',
   '/settings': 'Настройки — RuPrime',
   '/stats': 'Статистика — RuPrime',
+  '/match': 'Разбор матча — RuPrime',
   '/coaches': 'Тренеры — RuPrime',
   '/requests': 'Заявки — RuPrime',
   '/schedule': 'Расписание — RuPrime',
-  '/ai-chat': 'AI Тренер — RuPrime',
+  '/ai-chat': 'Оракул Древних — RuPrime',
   '/coach/dashboard': 'Панель тренера — RuPrime',
   '/coach/profile': 'Профиль тренера — RuPrime',
   '/coach/schedule': 'Расписание тренера — RuPrime',
@@ -119,6 +121,7 @@ function AppRoutes() {
         <Route path="/dashboard" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerDashboard /></AppLayout></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute roles={['PLAYER', 'COACH']}><AppLayout><PlayerSettings /></AppLayout></ProtectedRoute>} />
         <Route path="/stats" element={<ProtectedRoute roles={['PLAYER', 'COACH']}><AppLayout><PlayerStats /></AppLayout></ProtectedRoute>} />
+        <Route path="/match/:matchId" element={<ProtectedRoute roles={['PLAYER', 'COACH']}><AppLayout><MatchDetail /></AppLayout></ProtectedRoute>} />
         <Route path="/coaches" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerCoaches /></AppLayout></ProtectedRoute>} />
         <Route path="/requests" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerRequests /></AppLayout></ProtectedRoute>} />
         <Route path="/schedule" element={<ProtectedRoute roles={['PLAYER']}><AppLayout><PlayerSchedule /></AppLayout></ProtectedRoute>} />

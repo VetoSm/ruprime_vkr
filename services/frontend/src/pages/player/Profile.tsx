@@ -1,69 +1,81 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { coreApi, authApi } from '../../api/client';
-import { loadHeroes, heroName, heroIcon } from '../../api/heroes';
-import { RankBadge, RoleBadge, InfoTooltip } from '../../ui/GameComponents';
-import DotaPrivacyBanner from '../../ui/DotaPrivacyBanner';
-import { IconEye, IconEyeOff, IconSettings } from '../../ui/Icons';
+import { RankBadge } from '../../ui/GameComponents';
+import { rankTierToName } from '../../api/heroes';
+import { IconEye, IconEyeOff } from '../../ui/Icons';
+
 const STEAM_PENDING_KEY = 'steam_pending_link_id';
+const AI_SUB_KEY = 'ai_subscription_active_v1';
+const NOTIF_KEY  = 'notification_prefs_v1';
 const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || 'http://localhost:8001';
 
-interface SteamData {
-  linked: boolean;
-  account_id?: number;
-  steam_id?: string;
-  personaname?: string;
-  avatar_url?: string;
-  rank_tier?: number;
-  mmr_estimate?: number;
-  win?: number;
-  lose?: number;
-  total_games?: number;
-  lifetime_games?: number;
-  parsed_games_n?: number;
-  totals?: {
-    avg_gpm?: number;
-    avg_xpm?: number;
-    avg_kills?: number;
-    avg_deaths?: number;
-    avg_assists?: number;
-  };
-  estimated_hours?: number;
-  last_match_time?: string;
-  profile_url?: string;
-  is_public?: boolean;
-  matches_loaded?: number;
-  roles_distribution?: Record<string, number>;
-  recent_matches?: Array<{
-    match_id?: number;
-    hero_id?: number;
-    win?: boolean;
-    kda?: number;
-    gpm?: number;
-    xpm?: number;
-    lane_role?: number;
-  }>;
-  heroes_top?: any[];
-  rankings_top?: any[];
-  error?: string;
-  warning?: string;
-  parse_requested?: number;
-  parse_message?: string;
+const ROLE_OPTIONS = [
+  { id: 'POS1', label: 'Carry' },
+  { id: 'POS2', label: 'Mid' },
+  { id: 'POS3', label: 'Offlane' },
+  { id: 'POS4', label: 'Soft Support' },
+  { id: 'POS5', label: 'Hard Support' },
+];
+
+const RANK_OPTIONS = ['HERALD', 'GUARDIAN', 'CRUSADER', 'ARCHON', 'LEGEND', 'ANCIENT', 'DIVINE', 'IMMORTAL'];
+
+type TabId = 'profile' | 'goals' | 'security' | 'notifications' | 'subscription';
+
+interface NotifPrefs {
+  new_sessions: boolean;
+  coach_messages: boolean;
+  oracle_reports: boolean;
+}
+
+function loadNotifPrefs(): NotifPrefs {
+  try {
+    const raw = localStorage.getItem(NOTIF_KEY);
+    if (!raw) return { new_sessions: true, coach_messages: true, oracle_reports: true };
+    const parsed = JSON.parse(raw);
+    return {
+      new_sessions:    Boolean(parsed?.new_sessions ?? true),
+      coach_messages:  Boolean(parsed?.coach_messages ?? true),
+      oracle_reports:  Boolean(parsed?.oracle_reports ?? true),
+    };
+  } catch { return { new_sessions: true, coach_messages: true, oracle_reports: true }; }
 }
 
 export default function PlayerProfile() {
+  const [tab, setTab] = useState<TabId>('profile');
+
+  /* ---- Data ---- */
   const [profile, setProfile] = useState<any>(null);
-  const [steamData, setSteamData] = useState<SteamData | null>(null);
-  const [desiredRank, setDesiredRank] = useState('');
-  const [desiredRoles, setDesiredRoles] = useState('');
-  const [analysisRole, setAnalysisRole] = useState('');
-  const [goals, setGoals] = useState('');
+  const [steamData, setSteamData] = useState<any>(null);
+  const [features, setFeatures] = useState<any>(null);
+
+  /* ---- Profile fields ---- */
+  const [email, setEmail] = useState('');
+  const [favRole, setFavRole] = useState('');
   const [about, setAbout] = useState('');
+  const [telegram, setTelegram] = useState('');
+  const [desiredRank, setDesiredRank] = useState('');
+  const [profileMsg, setProfileMsg] = useState('');
+  const [profileErr, setProfileErr] = useState('');
+
+  /* ---- Targets per feature ---- */
+  const [targets, setTargets] = useState<Record<string, number>>({});
+
+  /* ---- Notifications ---- */
+  const [notifs, setNotifs] = useState<NotifPrefs>(loadNotifPrefs());
+
+  /* ---- AI subscription (local, until backend) ---- */
+  const [aiSubActive, setAiSubActive] = useState<boolean>(() => {
+    try { return localStorage.getItem(AI_SUB_KEY) === '1'; } catch { return false; }
+  });
+
+  /* ---- Steam linking ---- */
   const [steamId, setSteamId] = useState('');
-  const [msg, setMsg] = useState('');
-  const [error, setError] = useState('');
-  const [showSteamHelp, setShowSteamHelp] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [showManualSteam, setShowManualSteam] = useState(false);
+  const [autoLinkTried, setAutoLinkTried] = useState(false);
+
+  /* ---- Password change ---- */
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
@@ -71,14 +83,15 @@ export default function PlayerProfile() {
   const [showNewPwd, setShowNewPwd] = useState(false);
   const [pwdMsg, setPwdMsg] = useState('');
   const [pwdError, setPwdError] = useState('');
-  const [autoLinkTried, setAutoLinkTried] = useState(false);
-  const [showManualSteam, setShowManualSteam] = useState(false);
-  const [heroesLoaded, setHeroesLoaded] = useState(false);
+
   const [searchParams, setSearchParams] = useSearchParams();
 
+  /* ============================================================
+   * Load
+   * ==========================================================*/
   useEffect(() => {
     if (searchParams.get('linked') === '1') {
-      setMsg('Steam привязан. Статистика обновится за минуту.');
+      setProfileMsg('Steam привязан. Статистика обновится за минуту.');
       coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
       const next = new URLSearchParams(searchParams);
       next.delete('linked');
@@ -87,668 +100,569 @@ export default function PlayerProfile() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
-    loadHeroes().then(() => setHeroesLoaded(true));
     coreApi.get('/player/profile').then((r) => {
       setProfile(r.data);
-      setDesiredRank(r.data.desired_rank_tier || '');
-      setDesiredRoles(Array.isArray(r.data.desired_roles) ? r.data.desired_roles.join(', ') : '');
-      setAnalysisRole(r.data.analysis_role || '');
-      setGoals(Array.isArray(r.data.training_goals) ? r.data.training_goals.join(', ') : '');
+      setEmail(r.data.email || '');
+      setFavRole(r.data.analysis_role || r.data.preferred_role || '');
       setAbout(r.data.about || '');
+      setTelegram(r.data.telegram || '');
+      setDesiredRank(r.data.desired_rank_tier || '');
     }).catch(() => {});
+
     coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
+
+    coreApi.get('/me/overview').then((r) => {
+      const pid = r.data?.profile?.player_profile_id ?? r.data?.profile?.id;
+      if (pid) {
+        coreApi.get(`/player/${pid}/detailed-features`, { params: { mode: 'ranked', period: '50' } })
+          .then((r2) => {
+            setFeatures(r2.data);
+            // init targets from current values, allow editing
+            const initial: Record<string, number> = {};
+            (r2.data?.categories || []).forEach((c: any) => {
+              if (!c.missing) initial[c.key] = c.target ?? Math.min(10, (c.score ?? 0) + 1.5);
+            });
+            setTargets(initial);
+          })
+          .catch(() => {});
+      }
+    }).catch(() => {});
   }, []);
 
+  /* Auto-link Steam from pending value */
   useEffect(() => {
     if (autoLinkTried) return;
     if (steamData?.linked) {
-      localStorage.removeItem(STEAM_PENDING_KEY);
+      try { localStorage.removeItem(STEAM_PENDING_KEY); } catch {}
       setAutoLinkTried(true);
       return;
     }
-    const pendingSteamId = localStorage.getItem(STEAM_PENDING_KEY);
-    if (!pendingSteamId) {
-      setAutoLinkTried(true);
-      return;
-    }
+    let pending: string | null = null;
+    try { pending = localStorage.getItem(STEAM_PENDING_KEY); } catch {}
+    if (!pending) { setAutoLinkTried(true); return; }
     setAutoLinkTried(true);
-
     (async () => {
       setLinking(true);
       try {
-        await coreApi.post('/player/link-steam', { steam_id: pendingSteamId });
+        await coreApi.post('/player/link-steam', { steam_id: pending });
         const syncRes = await coreApi.post('/player/sync-steam').catch(() => null);
-        if (syncRes?.data) {
-          setSteamData({ linked: true, ...syncRes.data });
-        } else {
-          const res = await coreApi.get('/player/steam-data');
-          setSteamData(res.data);
+        if (syncRes?.data) setSteamData({ linked: true, ...syncRes.data });
+        else {
+          const r = await coreApi.get('/player/steam-data');
+          setSteamData(r.data);
         }
-        localStorage.removeItem(STEAM_PENDING_KEY);
-        setMsg('Steam-аккаунт привязан автоматически.');
-        coreApi.get('/player/profile').then((r) => setProfile(r.data)).catch(() => {});
+        try { localStorage.removeItem(STEAM_PENDING_KEY); } catch {}
+        setProfileMsg('Steam-аккаунт привязан автоматически.');
       } catch {
-        setError('Автопривязка Steam не удалась. Можно повторить кнопкой ниже.');
-      } finally {
-        setLinking(false);
-      }
+        setProfileErr('Автопривязка не удалась — попробуйте через Steam ниже.');
+      } finally { setLinking(false); }
     })();
   }, [steamData, autoLinkTried]);
 
+  /* ============================================================
+   * Handlers
+   * ==========================================================*/
   const saveProfile = async () => {
-    setMsg(''); setError('');
+    setProfileMsg(''); setProfileErr('');
     try {
       const res = await coreApi.post('/player/profile', {
-        desired_rank_tier: desiredRank || undefined,
-        desired_roles: desiredRoles ? desiredRoles.split(',').map(s => s.trim()) : undefined,
-        analysis_role: analysisRole || '',
-        training_goals: goals ? goals.split(',').map(s => s.trim()) : undefined,
         about: about || undefined,
+        telegram: telegram || undefined,
+        analysis_role: favRole || '',
+        desired_rank_tier: desiredRank || undefined,
       });
       setProfile(res.data);
-      setMsg('Профиль сохранён!');
+      setProfileMsg('Профиль сохранён.');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Ошибка сохранения');
+      setProfileErr(err?.response?.data?.detail || 'Ошибка сохранения');
+    }
+  };
+
+  const saveTargets = async () => {
+    setProfileMsg(''); setProfileErr('');
+    try {
+      // На бэке нет dedicated targets endpoint — пишем как training_goals (массив строк "key:target").
+      const lines = Object.entries(targets).map(([k, v]) => `${k}:${v}`);
+      await coreApi.post('/player/profile', { training_goals: lines });
+      setProfileMsg('Цели сохранены.');
+    } catch (err: any) {
+      setProfileErr(err?.response?.data?.detail || 'Ошибка сохранения целей');
     }
   };
 
   const linkSteamViaOpenId = async () => {
-    setMsg(''); setError('');
+    setProfileErr('');
     try {
-      // Ask auth to drop the signed link-intent cookie (HttpOnly, same
-      // origin as /auth/steam/login) and then bounce to Steam.
       await authApi.post('/auth/steam/link-intent', {}, { withCredentials: true });
       window.location.href = `${AUTH_URL}/auth/steam/login?mode=link`;
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Не удалось начать привязку через Steam');
+      setProfileErr(err?.response?.data?.detail || 'Не удалось начать привязку через Steam');
     }
   };
 
   const linkSteam = async () => {
-    setMsg(''); setError(''); setLinking(true);
+    setProfileMsg(''); setProfileErr(''); setLinking(true);
     try {
       const res = await coreApi.post('/player/link-steam', { steam_id: steamId, trusted: false });
-      const data = res.data;
-      if (data.error) { setError(data.error); }
-      else {
-        setSteamData({ linked: true, ...data });
-        let successMsg = `Аккаунт ${data.personaname || ''} привязан! Загружено ${data.matches_loaded} матчей.`;
-        if (data.parse_message) successMsg += '\n' + data.parse_message;
-        setMsg(successMsg);
-        coreApi.get('/player/profile').then((r) => setProfile(r.data)).catch(() => {});
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Ошибка привязки');
-    } finally { setLinking(false); }
-  };
-
-  const refreshSteam = async () => {
-    setMsg(''); setError(''); setLinking(true);
-    try {
-      const res = await coreApi.post('/player/sync-steam');
       setSteamData({ linked: true, ...res.data });
-      setMsg('Данные обновлены!');
+      setProfileMsg(`Аккаунт ${res.data.personaname || ''} привязан.`);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Ошибка обновления');
+      setProfileErr(err?.response?.data?.detail || 'Ошибка привязки');
     } finally { setLinking(false); }
   };
 
   const changePassword = async () => {
     setPwdMsg(''); setPwdError('');
     if (newPassword !== confirmNewPassword) { setPwdError('Пароли не совпадают'); return; }
-    if (newPassword.length < 8) { setPwdError('Минимум 8 символов'); return; }
+    if (newPassword.length < 8)              { setPwdError('Минимум 8 символов'); return; }
     try {
-      await authApi.post('/auth/change-password', {
-        old_password: oldPassword,
-        new_password: newPassword,
-      });
-      setPwdMsg('Пароль изменён!');
+      await authApi.post('/auth/change-password', { old_password: oldPassword, new_password: newPassword });
+      setPwdMsg('Пароль изменён.');
       setOldPassword(''); setNewPassword(''); setConfirmNewPassword('');
     } catch (err: any) {
-      setPwdError(err.response?.data?.detail || 'Ошибка смены пароля');
+      setPwdError(err?.response?.data?.detail || 'Ошибка смены пароля');
     }
   };
 
-  const logoutAllSessions = async () => {
-    setPwdMsg(''); setPwdError('');
-    try {
-      await authApi.post('/auth/logout-all');
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      window.location.href = '/login';
-    } catch (err: any) {
-      setPwdError(err.response?.data?.detail || 'Не удалось завершить все сессии');
-    }
+  const toggleNotif = (key: keyof NotifPrefs) => {
+    setNotifs((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem(NOTIF_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
   };
 
+  const toggleAiSub = () => {
+    setAiSubActive((v) => {
+      const next = !v;
+      try { localStorage.setItem(AI_SUB_KEY, next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+
+  /* ============================================================
+   * Render
+   * ==========================================================*/
   const isLinked = steamData?.linked && steamData?.personaname;
-  const totalGames =
-    steamData?.lifetime_games ??
-    steamData?.total_games ??
-    ((steamData?.win || 0) + (steamData?.lose || 0));
-  const winrate = totalGames > 0 ? ((steamData?.win || 0) / totalGames * 100).toFixed(1) : '0';
-  const renderHeroIcon = (heroId?: number, size = 24) => {
-    const icon = heroId && heroesLoaded ? heroIcon(heroId) : '';
-    if (!icon) {
-      return (
-        <span
-          aria-hidden="true"
-          style={{
-            width: size,
-            height: size,
-            borderRadius: 4,
-            border: '1px solid var(--border-color)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: Math.max(9, Math.round(size * 0.38)),
-            color: 'var(--text-muted)',
-            background: 'var(--bg-secondary)',
-            flex: `0 0 ${size}px`,
-          }}
-        >
-          {heroId || '?'}
-        </span>
-      );
-    }
-    return (
-      <img
-        src={icon}
-        alt={heroId ? heroName(heroId) : 'Hero'}
-        style={{ width: size, height: size, borderRadius: 4, border: '1px solid var(--border-color)', flex: `0 0 ${size}px` }}
-        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-      />
-    );
-  };
+  const initials = (steamData?.personaname || profile?.login || '?').slice(0, 2).toUpperCase();
 
   return (
     <div>
-      <div className="page-header">
-        <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <IconSettings size={24} /> Настройки
-        </h1>
-        <p>Привязка Steam, смена пароля, цели и предпочтения</p>
+      {/* Header */}
+      <div className="stats-header">
+        <div className="stats-header-title">
+          <h1>Профиль</h1>
+          <p>Управляй данными аккаунта и предпочтениями</p>
+        </div>
       </div>
 
-      {msg && <div className="toast toast-success" style={{ whiteSpace: 'pre-line' }}>{msg}</div>}
-      {error && <div className="toast toast-error">{error}</div>}
+      {profileMsg && <div className="alert alert-success" style={{ marginBottom: 14 }}>{profileMsg}</div>}
+      {profileErr && <div className="alert alert-error"   style={{ marginBottom: 14 }}>{profileErr}</div>}
 
-      {isLinked ? (
-        <>
-          {/* === Hero Card === */}
-          <div className="hero-card mb-20">
-            <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
-              {steamData.avatar_url && (
-                <img src={steamData.avatar_url} alt="Avatar" className="hero-card-avatar" />
-              )}
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                  <h2 style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>
-                    {steamData.personaname}
-                  </h2>
-                  <RankBadge rankTier={steamData.rank_tier} size="lg" />
+      {/* Tabs */}
+      <div className="seg-control" style={{ marginBottom: 18 }}>
+        {([
+          { id: 'profile',       label: 'Профиль' },
+          { id: 'goals',         label: 'Цели' },
+          { id: 'security',      label: 'Безопасность' },
+          { id: 'notifications', label: 'Уведомления' },
+          { id: 'subscription',  label: 'Подписка' },
+        ] as { id: TabId; label: string }[]).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`seg-control-btn ${tab === t.id ? 'active' : ''}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="profile-layout">
+        {/* ============ Main column ============ */}
+        <div className="profile-main">
+          {tab === 'profile' && (
+            <>
+              <div className="card dash-card">
+                <div className="card-head"><div className="card-title">Личная информация</div></div>
+                <div className="profile-form">
+                  <div className="profile-avatar-block">
+                    {steamData?.avatar_url
+                      ? <img src={steamData.avatar_url} alt="" className="profile-avatar" />
+                      : <span className="profile-avatar profile-avatar--initials">{initials}</span>}
+                    <div className="profile-avatar-meta">
+                      <div className="profile-avatar-name">{steamData?.personaname || profile?.login || '—'}</div>
+                      {steamData?.rank_tier && (
+                        <div className="profile-avatar-rank">
+                          <RankBadge rankTier={steamData.rank_tier} size="sm" />
+                          <span>{rankTierToName(steamData.rank_tier)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid-2 form-grid">
+                    <div className="form-group">
+                      <label>Никнейм</label>
+                      <input type="text" className="form-input" value={profile?.login || ''} readOnly />
+                    </div>
+                    <div className="form-group">
+                      <label>Email</label>
+                      <input type="email" className="form-input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your@mail.ru" />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Любимая роль</label>
+                    <div className="role-toggle" role="tablist" style={{ borderRadius: 10, gridTemplateColumns: 'repeat(5, 1fr)' }}>
+                      {ROLE_OPTIONS.map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={favRole === r.id}
+                          className={`role-toggle-btn ${favRole === r.id ? 'active' : ''}`}
+                          onClick={() => setFavRole(favRole === r.id ? '' : r.id)}
+                          style={{ borderRadius: 8, padding: '8px 6px', fontSize: '0.78rem' }}
+                        >
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Telegram</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={telegram}
+                      onChange={(e) => setTelegram(e.target.value)}
+                      placeholder="@username"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>О себе</label>
+                    <textarea
+                      className="form-input"
+                      value={about}
+                      onChange={(e) => setAbout(e.target.value)}
+                      placeholder="Расскажи немного о себе…"
+                      rows={3}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                    <button className="btn btn-primary btn-sm" onClick={saveProfile}>Сохранить</button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span className="badge badge-accent" style={{ fontSize: '0.8rem' }}>
-                    {totalGames > 0 ? `${winrate}% WR` : '—'}
-                  </span>
-                  <span className="badge badge-purple" style={{ fontSize: '0.8rem' }}>
-                    ~{steamData.estimated_hours} часов
-                  </span>
-                  <span className="badge badge-accent" style={{ fontSize: '0.8rem' }}>
-                    {totalGames.toLocaleString('ru-RU')} игр
-                  </span>
+              </div>
+
+              {/* Linked Steam account */}
+              <div className="card dash-card" style={{ marginTop: 18 }}>
+                <div className="card-head">
+                  <div className="card-title">Привязанный Steam-аккаунт</div>
                 </div>
-              </div>
-              <button className="btn btn-outline btn-sm" onClick={refreshSteam} disabled={linking}
-                style={{ whiteSpace: 'nowrap' }}>
-                {linking ? 'Обновление...' : 'Обновить данные'}
-              </button>
-            </div>
-          </div>
-
-          {steamData?.warning && (
-            <div className="alert alert-error" style={{ fontSize: '0.85rem', whiteSpace: 'pre-line' }}>
-              {steamData.warning}
-            </div>
-          )}
-
-          {steamData?.parse_message && (
-            <div className="alert alert-success" style={{ fontSize: '0.85rem' }}>
-              {steamData.parse_message}
-            </div>
-          )}
-
-          {/* === Stat Pills === */}
-          <div className="stat-pills mb-20">
-            <div className="stat-pill">
-              <span className="stat-pill-label">Ранг</span>
-              <RankBadge rankTier={steamData.rank_tier} size="sm" />
-            </div>
-            <div className="stat-pill">
-              <span className="stat-pill-label">W / L</span>
-              <span className="stat-pill-value">{steamData.win} / {steamData.lose}</span>
-            </div>
-            <div className="stat-pill">
-              <span className="stat-pill-label">MMR (оценка)</span>
-              <span className="stat-pill-value accent">{steamData.mmr_estimate || '—'}</span>
-            </div>
-            <div className="stat-pill">
-              <span className="stat-pill-label">Часы</span>
-              <span className="stat-pill-value accent">{steamData.estimated_hours?.toLocaleString()}</span>
-            </div>
-            <div className="stat-pill">
-              <span className="stat-pill-label">Последняя игра</span>
-              <span className="stat-pill-value" style={{ fontSize: '0.95rem' }}>
-                {steamData.last_match_time
-                  ? new Date(steamData.last_match_time).toLocaleDateString('ru-RU')
-                  : '—'}
-              </span>
-            </div>
-          </div>
-
-          {steamData?.totals && (
-            <div className="card mb-20">
-              <div className="section-header">
-                <h3>Средние показатели</h3>
-                <div className="section-line" />
-              </div>
-              <div className="grid-3">
-                <div className="stat-pill"><span className="stat-pill-label">AVG GPM</span><span className="stat-pill-value">{steamData.totals.avg_gpm ?? '—'}</span></div>
-                <div className="stat-pill"><span className="stat-pill-label">AVG XPM</span><span className="stat-pill-value">{steamData.totals.avg_xpm ?? '—'}</span></div>
-                <div className="stat-pill"><span className="stat-pill-label">AVG KDA</span><span className="stat-pill-value">
-                  {steamData.totals.avg_kills != null && steamData.totals.avg_deaths != null && steamData.totals.avg_assists != null
-                    ? (((steamData.totals.avg_kills + steamData.totals.avg_assists) / Math.max(steamData.totals.avg_deaths, 1)).toFixed(2))
-                    : '—'}
-                </span></div>
-              </div>
-            </div>
-          )}
-
-          {steamData?.recent_matches && steamData.recent_matches.length > 0 && (
-            <div className="mb-20">
-              <div className="section-header">
-                <h3>Последние матчи</h3>
-                <div className="section-line" />
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr><th>Герой</th><th>Итог</th><th>Боевой счёт</th><th>Темп</th></tr>
-                  </thead>
-                  <tbody>
-                    {steamData.recent_matches.slice(0, 8).map((m) => (
-                      <tr key={m.match_id}>
-                        <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {renderHeroIcon(m.hero_id, 24)}
-                          {heroName(m.hero_id)}
-                        </td>
-                        <td>
-                          <span className={`badge ${m.win ? 'badge-accent' : 'badge-danger'}`}>
-                            {m.win ? 'WIN' : 'LOSS'}
-                          </span>
-                        </td>
-                        <td>{m.kda ?? '—'} KDA</td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                            {m.lane_role && <RoleBadge role={m.lane_role} compact />}
-                            <span className="badge badge-purple">{m.gpm ?? '—'} GPM</span>
-                            {m.xpm != null && <span className="badge badge-accent">{m.xpm} XPM</span>}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* === Top Heroes === */}
-          {steamData.heroes_top && steamData.heroes_top.length > 0 && (
-            <div className="mb-20">
-              <div className="section-header">
-                <h3>Топ героев</h3>
-                <div className="section-line" />
-              </div>
-              <div className="grid-3">
-                {steamData.heroes_top.slice(0, 6).map((h: any) => (
-                  <div key={h.hero_id} className="ranking-card">
-                    {renderHeroIcon(h.hero_id, 40)}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {heroName(h.hero_id)}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        {h.games} игр, <span style={{ color: h.winrate >= 0.5 ? 'var(--accent)' : 'var(--danger)' }}>{(h.winrate * 100).toFixed(0)}% WR</span>
+                {isLinked ? (
+                  <div className="profile-steam-row">
+                    <div className="profile-steam-info">
+                      {steamData?.avatar_url
+                        ? <img src={steamData.avatar_url} alt="" className="profile-avatar profile-avatar--sm" />
+                        : <span className="profile-avatar profile-avatar--sm profile-avatar--initials">{initials}</span>}
+                      <div>
+                        <div className="profile-steam-name">{steamData.personaname}</div>
+                        <div className="text-muted" style={{ fontSize: '0.82rem' }}>
+                          {steamData.steam_id || '—'}
+                          {steamData.rank_tier && <> · {rankTierToName(steamData.rank_tier)}</>}
+                          {steamData.estimated_hours && <> · {Math.round(steamData.estimated_hours)} ч</>}
+                        </div>
+                        <div className="text-muted" style={{ fontSize: '0.76rem', marginTop: 4 }}>
+                          Данные обновляются автоматически в фоне.
+                        </div>
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* === Hero Rankings === */}
-          {steamData.rankings_top && steamData.rankings_top.length > 0 && (
-            <div className="mb-20">
-              <div className="section-header">
-                <h3>
-                  Рейтинг по героям
-                  <InfoTooltip text="Перцентиль OpenDota: в каком проценте игроков мира вы находитесь по этому герою." />
-                </h3>
-                <div className="section-line" />
-              </div>
-              <div className="grid-3">
-                {steamData.rankings_top.slice(0, 6).map((r: any) => {
-                  const topPct = ((1 - r.percent_rank) * 100);
-                  const color = topPct <= 5 ? 'var(--accent)' : topPct <= 20 ? 'var(--warning)' : 'var(--text-primary)';
-                  return (
-                    <div key={r.hero_id} className="ranking-card">
-                      {renderHeroIcon(r.hero_id, 36)}
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: 2 }}>{heroName(r.hero_id)}</div>
-                        <div className="progress-bar" style={{ height: 5 }}>
-                          <div className="progress-bar-fill" style={{ width: `${r.percent_rank * 100}%` }} />
-                        </div>
-                      </div>
-                      <span className="ranking-pct" style={{ color }}>
-                        Top {topPct.toFixed(1)}%
-                      </span>
+                ) : (
+                  <div className="profile-steam-empty">
+                    <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: 12 }}>
+                      Steam не привязан. Без привязки не подгружается реальная статистика и не работает подбор тренеров.
+                    </p>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      <button className="btn btn-primary btn-sm" onClick={linkSteamViaOpenId} disabled={linking}>
+                        Привязать через Steam
+                      </button>
+                      <button className="btn btn-outline btn-sm" onClick={() => setShowManualSteam((v) => !v)}>
+                        {showManualSteam ? 'Скрыть' : 'Ввести SteamID вручную'}
+                      </button>
                     </div>
-                  );
-                })}
+                    {showManualSteam && (
+                      <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                        <input
+                          className="form-input"
+                          placeholder="76561198xxxxxxxxx или ссылка на профиль"
+                          value={steamId}
+                          onChange={(e) => setSteamId(e.target.value)}
+                        />
+                        <button className="btn btn-primary btn-sm" disabled={!steamId || linking} onClick={linkSteam}>
+                          {linking ? 'Привязка…' : 'Привязать'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
+            </>
           )}
 
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 24 }}>
-            Account: {steamData.account_id} | Steam: {steamData.steam_id}
-            {steamData.profile_url && <> | <a href={steamData.profile_url} target="_blank" rel="noreferrer">Профиль Steam</a></>}
-          </div>
-
-          <DotaPrivacyBanner
-            steamData={steamData}
-            onRefreshed={(data) => data && setSteamData((prev: any) => ({ ...(prev || {}), ...data, linked: true }))}
-          />
-        </>
-      ) : (
-        /* === Link Steam === */
-        <div className="hero-card mb-20">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontWeight: 700 }}>Подключение Steam / Dota 2</h3>
-            <InfoTooltip text="Рекомендуется вход через Steam: мы проверим владение аккаунтом и подгрузим статистику автоматически." />
-          </div>
-          <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: 14 }}>
-            Нажмите «Привязать через Steam» — откроется официальная страница Steam. После входа вернётесь сюда с подтверждённой привязкой и данными матчей.
-          </p>
-          <button
-            className="btn btn-primary"
-            onClick={linkSteamViaOpenId}
-            disabled={linking}
-            style={{ width: '100%' }}
-          >
-            {linking ? 'Подключаем...' : 'Привязать через Steam'}
-          </button>
-
-          <div style={{ marginTop: 18 }}>
-            <button
-              className="btn btn-outline btn-sm"
-              onClick={() => setShowManualSteam((v) => !v)}
-            >
-              {showManualSteam ? 'Скрыть ручной ввод' : 'Или ввести SteamID64 вручную'}
-            </button>
-          </div>
-
-          {showManualSteam && (
-            <div className="mt-20">
-              <div className="alert" style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning)', fontSize: '0.85rem' }}>
-                <strong>Ручной режим:</strong> мы не проверяем, что указанный SteamID64 принадлежит вам.
-                Используйте только если рекомендованный вход через Steam недоступен.
-              </div>
-              <button className="btn btn-outline btn-sm mb-10" onClick={() => setShowSteamHelp(!showSteamHelp)}>
-                Как найти Steam ID
-              </button>
-              {showSteamHelp && (
-                <div className="alert alert-success" style={{ fontSize: '0.85rem' }}>
-                  <strong>Инструкция:</strong>
-                  <ol style={{ paddingLeft: 18, marginTop: 8, lineHeight: 1.8 }}>
-                    <li>Откройте <strong>Steam</strong> → имя вверху справа → <strong>«Об аккаунте»</strong></li>
-                    <li>SteamID64 — число вида <code>76561198xxxxxxxxx</code></li>
-                    <li>Или <a href="https://steamid.io" target="_blank" rel="noreferrer">steamid.io</a> → вставьте ссылку на профиль</li>
-                    <li>Убедитесь что <strong>история матчей публичная</strong> в настройках Dota 2</li>
-                  </ol>
+          {tab === 'goals' && (
+            <>
+              <div className="card dash-card">
+                <div className="card-head"><div className="card-title">Желаемый ранг</div></div>
+                <div className="role-toggle" role="tablist" style={{ borderRadius: 10, gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                  {RANK_OPTIONS.map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      className={`role-toggle-btn ${desiredRank === r ? 'active' : ''}`}
+                      onClick={() => setDesiredRank(desiredRank === r ? '' : r)}
+                      style={{ borderRadius: 8, padding: '8px 6px', fontSize: '0.78rem' }}
+                    >
+                      {r}
+                    </button>
+                  ))}
                 </div>
-              )}
-              <div className="form-group" style={{ marginTop: 12 }}>
-                <label>Steam ID (SteamID64)</label>
-                <input className="form-input" value={steamId} onChange={(e) => setSteamId(e.target.value)}
-                  placeholder="76561198xxxxxxxxx" />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button className="btn btn-primary btn-sm" onClick={saveProfile}>Сохранить ранг</button>
+                </div>
               </div>
-              <button className="btn btn-outline" onClick={linkSteam} disabled={linking}>
-                {linking ? 'Подключение (~15 сек)...' : 'Привязать вручную'}
+
+              <div className="card dash-card" style={{ marginTop: 18 }}>
+                <div className="card-head">
+                  <div className="card-title">Цели по навыкам</div>
+                </div>
+                {features?.categories?.length > 0 ? (
+                  <>
+                    <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
+                      Текущий балл считается по выборке за последние 50 матчей. Поставь желаемый таргет — он будет видеть Оракул и тренер.
+                    </p>
+                    <div className="goals-list">
+                      {features.categories.filter((c: any) => !c.missing).map((cat: any) => {
+                        const cur = cat.score ?? 0;
+                        const tgt = targets[cat.key] ?? cat.target ?? 0;
+                        return (
+                          <div key={cat.key} className="goal-row">
+                            <div className="goal-row-head">
+                              <span className="goal-row-name">{cat.name}</span>
+                              <span className="goal-row-now">{cur.toFixed(1)} / 10</span>
+                            </div>
+                            <div className="goal-row-bar">
+                              <span style={{ width: `${Math.min(100, (cur / 10) * 100)}%` }} />
+                            </div>
+                            <div className="goal-row-target">
+                              <label>Цель</label>
+                              <input
+                                type="range"
+                                min={0}
+                                max={10}
+                                step={0.1}
+                                value={tgt}
+                                onChange={(e) => setTargets((t) => ({ ...t, [cat.key]: Number(e.target.value) }))}
+                              />
+                              <span className="goal-row-target-val">{Number(tgt).toFixed(1)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                      <button className="btn btn-primary btn-sm" onClick={saveTargets}>Сохранить цели</button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-muted" style={{ fontSize: '0.88rem' }}>
+                    Привяжите Steam — фитчи появятся после загрузки матчей.
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+
+          {tab === 'security' && (
+            <div className="card dash-card">
+              <div className="card-head"><div className="card-title">Смена пароля</div></div>
+              {pwdMsg   && <div className="alert alert-success" style={{ marginBottom: 12 }}>{pwdMsg}</div>}
+              {pwdError && <div className="alert alert-error"   style={{ marginBottom: 12 }}>{pwdError}</div>}
+
+              <div className="form-group">
+                <label>Старый пароль</label>
+                <div className="input-with-icon">
+                  <input
+                    type={showOldPwd ? 'text' : 'password'}
+                    className="form-input"
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
+                  />
+                  <button type="button" className="input-icon-btn" onClick={() => setShowOldPwd(!showOldPwd)} tabIndex={-1}>
+                    {showOldPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div className="form-group">
+                  <label>Новый пароль</label>
+                  <div className="input-with-icon">
+                    <input
+                      type={showNewPwd ? 'text' : 'password'}
+                      className="form-input"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      minLength={8}
+                      placeholder="Минимум 8 символов"
+                    />
+                    <button type="button" className="input-icon-btn" onClick={() => setShowNewPwd(!showNewPwd)} tabIndex={-1}>
+                      {showNewPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
+                    </button>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>Повторите пароль</label>
+                  <input
+                    type={showNewPwd ? 'text' : 'password'}
+                    className="form-input"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={changePassword}
+                  disabled={!oldPassword || !newPassword || !confirmNewPassword}
+                >
+                  Сменить пароль
+                </button>
+              </div>
+            </div>
+          )}
+
+          {tab === 'notifications' && (
+            <div className="card dash-card">
+              <div className="card-head"><div className="card-title">Уведомления</div></div>
+              <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: 14 }}>
+                В уведомления приходят новости платформы и сообщения от тренеров (подтверждение сессии, перенос и т.д.).
+              </p>
+              <div className="notif-list">
+                <NotifRow label="Новые сессии и подтверждения" desc="Когда тренер подтверждает / переносит / отменяет сессию." active={notifs.new_sessions} onToggle={() => toggleNotif('new_sessions')} />
+                <NotifRow label="Сообщения от тренеров"        desc="Когда тренер пишет вам по поводу заявки или подбора слота." active={notifs.coach_messages} onToggle={() => toggleNotif('coach_messages')} />
+                <NotifRow label="Отчёты от Оракула"            desc="Еженедельная сводка, советы по прокачке слабых сторон." active={notifs.oracle_reports} onToggle={() => toggleNotif('oracle_reports')} />
+              </div>
+            </div>
+          )}
+
+          {tab === 'subscription' && (
+            <div className="card dash-card">
+              <div className="card-head">
+                <div className="card-title">Подписка на AI-тренера</div>
+                <span className={`badge ${aiSubActive ? 'badge-accent' : 'badge-muted'}`}>
+                  {aiSubActive ? 'Активна' : 'Не оформлена'}
+                </span>
+              </div>
+              <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: 14 }}>
+                {aiSubActive
+                  ? 'У вас активная подписка Pro. Расширенные разборы, неограниченные запросы Оракулу, доступ к гайдам тренеров.'
+                  : 'С Pro-подпиской открывается доступ к расширенному Оракулу, неограниченным разборам матчей и эксклюзивным гайдам.'}
+              </p>
+              <ul className="profile-sub-features">
+                <li>✓ Неограниченные разборы с Оракулом</li>
+                <li>✓ Расширенная аналитика и таргеты</li>
+                <li>✓ Эксклюзивные гайды от тренеров</li>
+                <li>✓ Приоритетная поддержка</li>
+              </ul>
+              <button className="btn btn-primary btn-sm" onClick={toggleAiSub}>
+                {aiSubActive ? 'Отключить подписку' : 'Оформить Pro'}
               </button>
             </div>
           )}
         </div>
-      )}
 
-      {/* === Goals === */}
-      <div className="card mb-20">
-        <div className="section-header">
-          <h3>Цели и предпочтения</h3>
-          <div className="section-line" />
-        </div>
-        <div className="grid-2">
-          <div className="form-group">
-            <label>Целевой ранг</label>
-            <select className="form-select" value={desiredRank} onChange={(e) => setDesiredRank(e.target.value)}>
-              <option value="">Выберите...</option>
-              <option value="HERALD">Herald (Рекрут)</option>
-              <option value="GUARDIAN">Guardian (Страж)</option>
-              <option value="CRUSADER">Crusader (Рыцарь)</option>
-              <option value="ARCHON">Archon (Герой)</option>
-              <option value="LEGEND">Legend (Легенда)</option>
-              <option value="ANCIENT">Ancient (Властелин)</option>
-              <option value="DIVINE">Divine (Божество)</option>
-              <option value="IMMORTAL">Immortal (Титан)</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label>Целевые позиции</label>
-            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-              {['POS1', 'POS2', 'POS3', 'POS4', 'POS5'].map((r) => {
-                const selected = desiredRoles.includes(r);
-                return (
-                  <button key={r} type="button"
-                    className={`btn btn-sm ${selected ? 'btn-primary' : 'btn-outline'}`}
-                    onClick={() => {
-                      const roles = desiredRoles.split(',').map(s => s.trim()).filter(Boolean);
-                      if (selected) setDesiredRoles(roles.filter(x => x !== r).join(', '));
-                      else setDesiredRoles([...roles, r].join(', '));
-                    }}>
-                    <RoleBadge role={r} compact />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-        <div className="form-group">
-          <label>Основная роль для анализа</label>
-          <p className="text-muted" style={{ fontSize: '0.82rem', margin: '0 0 8px' }}>
-            Используется на дашборде для сравнения фитчей с baseline выбранной роли. Сырые фильтры статистики всё равно строятся по фактическим матчам.
-          </p>
-          <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className={`btn btn-sm ${!analysisRole ? 'btn-primary' : 'btn-outline'}`}
-              onClick={() => setAnalysisRole('')}
-            >
-              Авто
-            </button>
-            {['POS1', 'POS2', 'POS3', 'POS4', 'POS5'].map((r) => (
-              <button
-                key={r}
-                type="button"
-                className={`btn btn-sm ${analysisRole === r ? 'btn-primary' : 'btn-outline'}`}
-                onClick={() => setAnalysisRole(r)}
-              >
-                <RoleBadge role={r} compact />
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="form-group">
-          <label>Цели тренировок</label>
-          <input className="form-input" value={goals} onChange={(e) => setGoals(e.target.value)}
-            placeholder="контроль линии, пул героев, макро, тимфайты" />
-        </div>
-        <div className="form-group">
-          <label>О себе</label>
-          <textarea className="form-input" value={about} onChange={(e) => setAbout(e.target.value)}
-            placeholder="Расскажите о своём стиле игры..." />
-        </div>
-        <button className="btn btn-primary" onClick={saveProfile}>Сохранить профиль</button>
-      </div>
-
-      {/* === Become a coach === */}
-      <CoachUpgradeCard />
-
-      {/* === Password Change === */}
-      <div className="card mb-20">
-        <div className="section-header">
-          <h3>Смена пароля</h3>
-          <div className="section-line" />
-        </div>
-        {pwdMsg && <div className="alert alert-success">{pwdMsg}</div>}
-        {pwdError && <div className="alert alert-error">{pwdError}</div>}
-        <div className="form-group">
-          <label>Текущий пароль</label>
-          <div className="input-with-icon">
-            <input
-              type={showOldPwd ? 'text' : 'password'}
-              className="form-input"
-              value={oldPassword}
-              onChange={(e) => setOldPassword(e.target.value)}
-              placeholder="Введите текущий пароль"
-            />
-            <button
-              type="button"
-              className="input-icon-btn"
-              onClick={() => setShowOldPwd(!showOldPwd)}
-              tabIndex={-1}
-              aria-label={showOldPwd ? 'Скрыть текущий пароль' : 'Показать текущий пароль'}
-            >
-              {showOldPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
-            </button>
-          </div>
-        </div>
-        <div className="grid-2">
-          <div className="form-group">
-            <label>Новый пароль</label>
-            <div className="input-with-icon">
-              <input
-                type={showNewPwd ? 'text' : 'password'}
-                className="form-input"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Минимум 8 символов"
-              />
-              <button
-                type="button"
-                className="input-icon-btn"
-                onClick={() => setShowNewPwd(!showNewPwd)}
-                tabIndex={-1}
-                aria-label={showNewPwd ? 'Скрыть новый пароль' : 'Показать новый пароль'}
-              >
-                {showNewPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
+        {/* ============ Side column (always visible) ============ */}
+        <aside className="profile-side">
+          <div className="card dash-card">
+            <div className="card-head"><div className="card-title">Безопасность</div></div>
+            <div className="profile-side-list">
+              <div className="profile-side-row">
+                <div>
+                  <div className="profile-side-row-title">Авторизация через Steam</div>
+                  <div className="profile-side-row-desc">{isLinked ? 'Привязано' : 'Не привязано'}</div>
+                </div>
+                <span className={`badge ${isLinked ? 'badge-accent' : 'badge-muted'}`}>
+                  {isLinked ? 'on' : 'off'}
+                </span>
+              </div>
+              <button className="btn btn-outline btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={() => setTab('security')}>
+                Сменить пароль
               </button>
             </div>
           </div>
-          <div className="form-group">
-            <label>Подтверждение</label>
-            <input
-              type="password"
-              className="form-input"
-              value={confirmNewPassword}
-              onChange={(e) => setConfirmNewPassword(e.target.value)}
-              placeholder="Повторите новый пароль"
-            />
+
+          <div className="card dash-card">
+            <div className="card-head"><div className="card-title">Уведомления</div></div>
+            <div className="profile-side-list">
+              {([
+                ['new_sessions',    'Новые сессии'],
+                ['coach_messages',  'Сообщения от тренеров'],
+                ['oracle_reports',  'Отчёты от Оракула'],
+              ] as [keyof NotifPrefs, string][]).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  className="profile-side-row profile-side-row--toggle"
+                  onClick={() => toggleNotif(k)}
+                >
+                  <span className="profile-side-row-title">{label}</span>
+                  <span className={`toggle-mini ${notifs[k] ? 'on' : 'off'}`} />
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-          <button className="btn btn-outline" onClick={changePassword}>Сменить пароль</button>
-          <button className="btn btn-danger" onClick={logoutAllSessions}>Выйти на всех устройствах</button>
-        </div>
+
+          <div className="card dash-card">
+            <div className="card-head">
+              <div className="card-title">Подписка</div>
+              <span className={`badge ${aiSubActive ? 'badge-accent' : 'badge-muted'}`}>
+                {aiSubActive ? 'Pro' : 'Free'}
+              </span>
+            </div>
+            <ul className="profile-sub-features" style={{ marginBottom: 12, fontSize: '0.82rem' }}>
+              <li>{aiSubActive ? '✓' : '·'} Неограниченные разборы</li>
+              <li>{aiSubActive ? '✓' : '·'} Расширенная аналитика</li>
+              <li>{aiSubActive ? '✓' : '·'} Гайды от тренеров</li>
+              <li>{aiSubActive ? '✓' : '·'} Доступ к функциям Оракула</li>
+            </ul>
+            <button className="btn btn-outline btn-sm" style={{ width: '100%' }} onClick={() => setTab('subscription')}>
+              Управлять
+            </button>
+          </div>
+        </aside>
       </div>
     </div>
   );
 }
 
-
-function CoachUpgradeCard() {
-  const [status, setStatus] = useState<string>('NONE');
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    authApi.get('/auth/me').then((r) => {
-      setStatus(r.data?.coach_application_status || 'NONE');
-    }).catch(() => {});
-  }, []);
-
-  const apply = async () => {
-    setLoading(true); setMsg(null); setErr(null);
-    try {
-      const r = await authApi.post('/auth/apply-coach');
-      setStatus(r.data?.coach_application_status || 'PENDING');
-      setMsg('Заявка отправлена. Ждите подтверждения тех-аккаунтом.');
-    } catch (e: any) {
-      setErr(e.response?.data?.detail || 'Не удалось отправить заявку');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+/* ============ Helpers ============ */
+function NotifRow({ label, desc, active, onToggle }: { label: string; desc?: string; active: boolean; onToggle: () => void }) {
   return (
-    <div className="card mb-20">
-      <div className="section-header">
-        <h3>Стать тренером</h3>
-        <div className="section-line" />
+    <button type="button" className="notif-row" onClick={onToggle}>
+      <div className="notif-row-text">
+        <div className="notif-row-title">{label}</div>
+        {desc && <div className="notif-row-desc">{desc}</div>}
       </div>
-      {msg && <div className="alert alert-success">{msg}</div>}
-      {err && <div className="alert alert-error">{err}</div>}
-
-      {status === 'PENDING' && (
-        <div
-          className="alert"
-          style={{ background: 'var(--purple-bg)', border: '1px solid var(--purple)' }}
-        >
-          Заявка на роль тренера уже отправлена и рассматривается. Пока вы продолжаете пользоваться сервисом как игрок.
-        </div>
-      )}
-      {status === 'APPROVED' && (
-        <p className="text-muted" style={{ fontSize: '0.9rem' }}>
-          Вы уже подтверждённый тренер. Панель тренера доступна в меню.
-        </p>
-      )}
-      {status === 'REJECTED' && (
-        <div className="alert alert-error">
-          Заявка ранее была отклонена. Обновите профиль и подайте снова.
-        </div>
-      )}
-      {(status === 'NONE' || status === 'REJECTED') && (
-        <>
-          <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: 12 }}>
-            Заявка уходит на тех-аккаунт. После подтверждения ваш профиль появится в каталоге, а у вас откроется панель тренера. До подтверждения роль остаётся «Игрок» и вы продолжаете видеть свою статистику.
-          </p>
-          <button className="btn btn-primary" onClick={apply} disabled={loading}>
-            {loading ? 'Отправляем...' : 'Подать заявку на роль тренера'}
-          </button>
-        </>
-      )}
-    </div>
+      <span className={`toggle-mini ${active ? 'on' : 'off'}`} />
+    </button>
   );
 }

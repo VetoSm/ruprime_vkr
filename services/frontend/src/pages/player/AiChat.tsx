@@ -164,7 +164,7 @@ export default function PlayerAiChat() {
       }]);
     } catch (e: any) {
       const detail = e?.response?.data?.detail;
-      setMessages((prev) => [...prev, { type: 'ai', text: detail || 'ИИ-коуч временно недоступен.' }]);
+      setMessages((prev) => [...prev, { type: 'ai', text: detail || 'Оракул временно недоступен.' }]);
     } finally {
       setLoading(false);
     }
@@ -190,7 +190,7 @@ export default function PlayerAiChat() {
     <div>
       <div className="page-header">
         <h1>Оракул Древних</h1>
-        <p>AI-разбор по вашим матчам, роли и слабым зонам. Отвечает только по Dota 2.</p>
+        <p>Разбор по вашим матчам, роли и слабым зонам. Отвечает только по Dota 2.</p>
       </div>
 
       <div className="card" style={{ minHeight: 500, display: 'flex', flexDirection: 'column' }}>
@@ -211,12 +211,12 @@ export default function PlayerAiChat() {
               letterSpacing: 1,
             }}
           >
-            AI
+            О
           </div>
           <div>
             <div style={{ fontWeight: 800 }}>Оракул Древних</div>
             <div className="text-muted" style={{ fontSize: '0.82rem' }}>
-              Смотрит последние ranked-матчи, скиллы и role-aware baseline.
+              Смотрит последние ranked-матчи, игровые признаки и baseline по вашей позиции.
             </div>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -253,11 +253,19 @@ export default function PlayerAiChat() {
         )}
         <div className="chat-container" style={{ flex: 1 }}>
           {messages.length === 0 && (
-            <div className="text-center text-muted" style={{ marginTop: 40 }}>
-              <p>Спросите Оракула о своей игре в Dota 2.</p>
-              <p style={{ fontSize: '0.85rem', marginTop: 10 }}>
-                Примеры: «Почему просел вижн на Soft Support?» / «Что тренировать в следующих 10 ranked?»
-              </p>
+            <div className="text-center text-muted oracle-empty-state">
+              <p>Выберите быстрый разбор или задайте вопрос по конкретной роли, герою или таймингу.</p>
+              <div className="oracle-preset-row">
+                <button className="btn btn-outline btn-sm" onClick={() => send('Назови главную ошибку моего текущего ranked-среза и как её исправить за 10 игр.')}>
+                  Главная ошибка
+                </button>
+                <button className="btn btn-outline btn-sm" onClick={() => send('Почему просел вижн и какие тайминги вардов мне тренировать?')}>
+                  Vision-тайминги
+                </button>
+                <button className="btn btn-outline btn-sm" onClick={() => send('Составь короткий план тренировки на неделю по моим слабым зонам.')}>
+                  План недели
+                </button>
+              </div>
             </div>
           )}
           {messages.map((msg, i) => (
@@ -271,7 +279,7 @@ export default function PlayerAiChat() {
           ))}
           {loading && (
             <div className="chat-message ai">
-              <span className="text-muted">Думаю...</span>
+              <span className="text-muted">Сверяю ranked-срез, роль и слабые зоны...</span>
             </div>
           )}
         </div>
@@ -285,7 +293,7 @@ export default function PlayerAiChat() {
             placeholder="Спросите Оракула по Dota 2..."
             disabled={loading}
           />
-          <button className="btn btn-primary" onClick={send} disabled={loading}>
+          <button className="btn btn-primary" onClick={() => send()} disabled={loading}>
             Получить разбор
           </button>
         </div>

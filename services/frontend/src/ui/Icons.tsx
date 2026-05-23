@@ -203,3 +203,82 @@ export function IconFilter({ size = 18, color = 'currentColor' }: IconProps) {
     </svg>
   );
 }
+
+export function IconPlayerMask({ size = 18, color = 'currentColor' }: IconProps) {
+  // Стилизованная маска бойца — глаза-щели + рога/выступы. Уникальная иконка для роли PLAYER.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 7c0-1.5 1-3 3-3 1.5 0 2 1 5 1s3.5-1 5-1c2 0 3 1.5 3 3v6c0 4-3.5 7-8 7s-8-3-8-7V7z" fill={color} fillOpacity="0.12" />
+      <path d="M4 7c0-1.5 1-3 3-3 1.5 0 2 1 5 1s3.5-1 5-1c2 0 3 1.5 3 3v6c0 4-3.5 7-8 7s-8-3-8-7V7z" />
+      <line x1="8" y1="11" x2="10" y2="11" />
+      <line x1="14" y1="11" x2="16" y2="11" />
+      <path d="M10 15c0.7 0.5 1.3 0.5 2 0.5s1.3 0 2-0.5" />
+    </svg>
+  );
+}
+
+export function IconCoachWhistle({ size = 18, color = 'currentColor' }: IconProps) {
+  // Свисток с лучами — уникальная иконка для роли COACH.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 12a5 5 0 1010 0 5 5 0 00-10 0z" fill={color} fillOpacity="0.15" />
+      <path d="M4 12a5 5 0 1010 0 5 5 0 00-10 0z" />
+      <path d="M14 10l5-3v10l-5-3" fill={color} fillOpacity="0.15" />
+      <path d="M14 10l5-3v10l-5-3" />
+      <circle cx="9" cy="12" r="1" fill={color} />
+      <line x1="20" y1="4" x2="22" y2="4" />
+      <line x1="20" y1="8" x2="22" y2="7" />
+      <line x1="20" y1="16" x2="22" y2="17" />
+      <line x1="20" y1="20" x2="22" y2="20" />
+    </svg>
+  );
+}
+
+export function IconBell({ size = 18, color = 'currentColor' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 01-3.46 0" />
+    </svg>
+  );
+}
+
+export function IconChevronDown({ size = 18, color = 'currentColor' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+export function IconMenu({ size = 18, color = 'currentColor' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="3" y1="6"  x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
+export function IconClose({ size = 16, color = 'currentColor' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="6" y1="6" x2="18" y2="18" />
+      <line x1="18" y1="6" x2="6" y2="18" />
+    </svg>
+  );
+}
+
+export function IconCrown({ size = 22, color = 'currentColor' }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7l4 9h18l4-9-7 4-6-9-6 9-7-4z" fill={color} fillOpacity="0.18" />
+      <path d="M3 7l4 9h18l4-9-7 4-6-9-6 9-7-4z" />
+      <circle cx="3" cy="7" r="1.2" fill={color} />
+      <circle cx="29" cy="7" r="1.2" fill={color} />
+      <circle cx="16" cy="3" r="1.2" fill={color} />
+      <line x1="7" y1="19" x2="25" y2="19" />
+    </svg>
+  );
+}

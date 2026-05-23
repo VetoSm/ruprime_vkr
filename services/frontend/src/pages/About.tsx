@@ -68,7 +68,7 @@ export default function About() {
             </p>
           </div>
           <div className="card">
-            <div className="card-title">AI Тренер 24/7</div>
+            <div className="card-title">Оракул Древних</div>
             <p className="text-muted">
               Быстрые вопросы о билдах, пулах героев и решениях на линии — с учётом вашего профиля и слабых зон.
             </p>

@@ -6,7 +6,7 @@ export default function CoachLanding() {
     <div className="landing-page">
       <section className="landing-hero">
         <div className="landing-hero-panel">
-          <div className="landing-badge">For Dota Coaches</div>
+          <div className="landing-badge">Для тренеров Dota 2</div>
           <h1 className="landing-title">
             Монетизируйте экспертизу в <span>RuPrime</span> и ведите учеников в одном месте
           </h1>
@@ -21,7 +21,7 @@ export default function CoachLanding() {
           <div className="landing-social-proof">
             <div className="landing-proof-card">
               <div className="landing-proof-value">Top-5</div>
-              <div className="landing-proof-label">Мэтчей на игрока по навыкам</div>
+              <div className="landing-proof-label">Совпадений на игрока по навыкам</div>
             </div>
             <div className="landing-proof-card">
               <div className="landing-proof-value">1 панель</div>
@@ -39,11 +39,11 @@ export default function CoachLanding() {
           <div className="landing-mock-shell">
             <aside className="landing-mock-sidebar">
               <div className="landing-mock-logo">RUPRIME</div>
-              <div className="landing-mock-nav-item landing-mock-nav-item--active">Dashboard</div>
-              <div className="landing-mock-nav-item">Students</div>
-              <div className="landing-mock-nav-item">Schedule</div>
-              <div className="landing-mock-nav-item">Finances</div>
-              <div className="landing-mock-nav-item">Settings</div>
+              <div className="landing-mock-nav-item landing-mock-nav-item--active">Штаб</div>
+              <div className="landing-mock-nav-item">Ученики</div>
+              <div className="landing-mock-nav-item">Расписание</div>
+              <div className="landing-mock-nav-item">Доход</div>
+              <div className="landing-mock-nav-item">Настройки</div>
             </aside>
             <div className="landing-mock-main">
               <div className="landing-mock-grid">
@@ -65,9 +65,9 @@ export default function CoachLanding() {
                 </div>
               </div>
               <div className="landing-skill-rings">
-                <LandingSkillRing label="Students" value={7.6} />
-                <LandingSkillRing label="Sessions" value={8.2} />
-                <LandingSkillRing label="Rating" value={9.4} />
+                <LandingSkillRing label="Ученики" value={7.6} />
+                <LandingSkillRing label="Сессии" value={8.2} />
+                <LandingSkillRing label="Рейтинг" value={9.4} />
               </div>
             </div>
           </div>
@@ -95,7 +95,7 @@ export default function CoachLanding() {
         <div className="landing-screen">
           <div className="landing-screen-top">
             <div className="landing-screen-dots"><i /><i /><i /></div>
-            <span className="text-muted" style={{ fontSize: '0.78rem' }}>Coach Workspace</span>
+            <span className="text-muted" style={{ fontSize: '0.78rem' }}>Тренерский штаб</span>
           </div>
           <div className="landing-screen-body">
             <div className="grid-3">

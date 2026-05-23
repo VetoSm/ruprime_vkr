@@ -40,11 +40,11 @@ export default function SkillRing({ value, target, label, size = 110, onClick, e
           strokeDasharray={circumference} strokeDashoffset={strokeDashoffset}
           style={{ transition: 'stroke-dashoffset 1s ease', transform: 'rotate(-90deg)', transformOrigin: 'center' }} />
         <text x={size / 2} y={size / 2 - 4} textAnchor="middle" fill={color}
-          fontSize="1.4rem" fontWeight="800" fontFamily="Inter, sans-serif">
+          fontSize="1.4rem" fontWeight="800" fontFamily="var(--font-display)">
           {missing ? '—' : value.toFixed(1)}
         </text>
         <text x={size / 2} y={size / 2 + 14} textAnchor="middle" fill="var(--text-muted)"
-          fontSize="0.7rem" fontWeight="600" fontFamily="Inter, sans-serif">
+          fontSize="0.7rem" fontWeight="600" fontFamily="var(--font-body)">
           {missing ? 'нет данных' : '/10'}
         </text>
       </svg>

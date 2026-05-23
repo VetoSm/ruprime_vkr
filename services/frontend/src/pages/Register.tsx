@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
-import { IconEye, IconEyeOff } from '../ui/Icons';
+import { authApi } from '../api/client';
+import { IconEye, IconEyeOff, IconPlayerMask, IconCoachWhistle, IconClose } from '../ui/Icons';
+import { BrandLogo, SteamLoginButton } from '../ui/Primitives';
 import { TERMS_VERSION } from './Terms';
 
 type Persona = 'PLAYER' | 'COACH';
 
-const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || 'http://localhost:8001';
+const AUTH_URL = (authApi.defaults.baseURL as string) || 'http://localhost:8001';
 
 export default function Register() {
   const { register } = useAuth();
@@ -15,38 +17,28 @@ export default function Register() {
   const [loginVal, setLoginVal] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
+  const [steamIdInput, setSteamIdInput] = useState('');
+  const [consent, setConsent] = useState(false);
+  const [coachNoticeOpen, setCoachNoticeOpen] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [consent, setConsent] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!consent) {
-      setError('Чтобы зарегистрироваться, нужно принять условия и политику конфиденциальности');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError('Пароли не совпадают');
-      return;
-    }
+    if (!consent) { setError('Примите условия и политику конфиденциальности'); return; }
     setLoading(true);
     try {
-      // Even when persona is COACH we send 'COACH' to the API; the backend
-      // always creates the account as PLAYER and records a PENDING coach
-      // application that the tech account must approve.
-      await register(loginVal, email, password, confirmPassword, persona, {
+      await register(loginVal, email, password, password, persona, {
         consent_accepted: true,
         consent_version: TERMS_VERSION,
       });
-      if (persona === 'COACH') {
-        navigate('/login?coach_pending=1');
-      } else {
-        navigate('/login');
+      // Запомним введённый Steam ID — подтянем при первом входе на странице настроек.
+      if (steamIdInput.trim()) {
+        try { localStorage.setItem('pending_steam_link', steamIdInput.trim()); } catch {}
       }
+      navigate(persona === 'COACH' ? '/login?coach_pending=1' : '/login');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Ошибка регистрации');
     } finally {
@@ -55,218 +47,158 @@ export default function Register() {
   };
 
   const consentQs = `consent=${encodeURIComponent(TERMS_VERSION)}`;
-  const steamHref = !consent
-    ? '#'
-    : persona === 'COACH'
-      ? `${AUTH_URL}/auth/steam/login?signup=coach&${consentQs}`
-      : `${AUTH_URL}/auth/steam/login?${consentQs}`;
-
-  const steamLabel =
-    persona === 'COACH' ? 'Тренер: войти через Steam' : 'Игрок: войти через Steam';
+  const steamHref = persona === 'COACH'
+    ? `${AUTH_URL}/auth/steam/login?signup=coach&${consentQs}`
+    : `${AUTH_URL}/auth/steam/login?${consentQs}`;
 
   return (
     <div className="auth-page">
+      <div className="auth-glow-left"  aria-hidden />
+      <div className="auth-glow-right" aria-hidden />
       <div className="auth-card">
-        <h2><span>Создать боевой профиль</span></h2>
-        <p className="text-center text-muted" style={{ fontSize: '0.84rem', marginTop: -8, marginBottom: 14 }}>
-          Выберите роль, примите правила штаба и откройте доступ к персональному разбору Dota 2.
-        </p>
+        <BrandLogo size="lg" />
 
-        <div
-          className="landing-persona-switch"
-          role="tablist"
-          aria-label="Тип аккаунта"
-          style={{ margin: '0 auto 14px', display: 'flex' }}
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={persona === 'PLAYER'}
-            className={`landing-persona-btn ${persona === 'PLAYER' ? 'active' : ''}`}
-            onClick={() => setPersona('PLAYER')}
-          >
-            Игрок
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={persona === 'COACH'}
-            className={`landing-persona-btn ${persona === 'COACH' ? 'active' : ''}`}
-            onClick={() => setPersona('COACH')}
-          >
-            Тренер
-          </button>
-        </div>
-
-        {persona === 'COACH' && (
-          <div
-            className="alert"
-            style={{
-              background: 'var(--purple-bg)',
-              border: '1px solid var(--purple)',
-              color: 'var(--text-primary)',
-              fontSize: '0.85rem',
-              marginBottom: 14,
-            }}
-          >
-            Заявка тренера уходит в тех-штаб RuPrime. До подтверждения вы видите сервис как игрок: профиль, матчи, статистику и AI-разбор.
-          </div>
-        )}
+        <h2 style={{ textAlign: 'center', marginTop: 4, marginBottom: 22, fontSize: '1.55rem', fontWeight: 800 }}>
+          Регистрация
+        </h2>
 
         {error && <div className="alert alert-error">{error}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>Игровой ник / логин</label>
+            <label>НИКНЕЙМ</label>
             <input
               type="text"
               className="form-input"
               value={loginVal}
-              onChange={(e) => setLoginVal(e.target.value)}
-              required
-              placeholder="Ваш никнейм"
+              onChange={e => setLoginVal(e.target.value)}
+              required minLength={3}
+              placeholder="Введите никнейм"
             />
           </div>
+
           <div className="form-group">
-            <label>Email для входа</label>
+            <label>EMAIL</label>
             <input
               type="email"
               className="form-input"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={e => setEmail(e.target.value)}
               required
-              placeholder="your@email.com"
+              placeholder="Введите email"
             />
           </div>
+
           <div className="form-group">
-            <label>Пароль штаба</label>
+            <label>ПАРОЛЬ</label>
             <div className="input-with-icon">
               <input
                 type={showPwd ? 'text' : 'password'}
                 className="form-input"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                placeholder="Минимум 8 символов"
+                onChange={e => setPassword(e.target.value)}
+                required minLength={8}
+                placeholder="Введите пароль"
               />
               <button
                 type="button"
                 className="input-icon-btn"
                 onClick={() => setShowPwd(!showPwd)}
                 tabIndex={-1}
-                aria-label={showPwd ? 'Скрыть пароль' : 'Показать пароль'}
+                aria-label={showPwd ? 'Скрыть' : 'Показать'}
               >
                 {showPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
               </button>
             </div>
           </div>
+
           <div className="form-group">
-            <label>Подтвердите пароль</label>
-            <div className="input-with-icon">
-              <input
-                type={showConfirm ? 'text' : 'password'}
-                className="form-input"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                placeholder="Повторите пароль"
-              />
-              <button
-                type="button"
-                className="input-icon-btn"
-                onClick={() => setShowConfirm(!showConfirm)}
-                tabIndex={-1}
-                aria-label={showConfirm ? 'Скрыть пароль' : 'Показать пароль'}
-              >
-                {showConfirm ? <IconEyeOff size={18} /> : <IconEye size={18} />}
-              </button>
-            </div>
+            <label>STEAM ID (ОПЦИОНАЛЬНО)</label>
+            <input
+              type="text"
+              className="form-input"
+              value={steamIdInput}
+              onChange={e => setSteamIdInput(e.target.value)}
+              placeholder="Ваш Steam ID или профильная ссылка"
+            />
           </div>
 
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 10,
-              padding: '12px 14px',
-              border: '1px solid var(--border-color)',
-              borderRadius: 10,
-              background: 'rgba(5, 16, 36, 0.6)',
-              marginBottom: 14,
-              cursor: 'pointer',
-              fontSize: '0.82rem',
-              color: 'var(--text-secondary)',
-              lineHeight: 1.55,
-            }}
-          >
+          <div className="form-group">
+            <label>ВАША РОЛЬ</label>
+            <div className="role-toggle" role="tablist" aria-label="Тип аккаунта">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={persona === 'PLAYER'}
+                className={`role-toggle-btn ${persona === 'PLAYER' ? 'active' : ''}`}
+                onClick={() => { setPersona('PLAYER'); }}
+              >
+                <IconPlayerMask size={16} /> Я игрок
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={persona === 'COACH'}
+                className={`role-toggle-btn ${persona === 'COACH' ? 'active' : ''}`}
+                onClick={() => { setPersona('COACH'); setCoachNoticeOpen(true); }}
+              >
+                <IconCoachWhistle size={16} /> Я тренер
+              </button>
+            </div>
+
+            {persona === 'COACH' && coachNoticeOpen && (
+              <div className="coach-notice" role="status">
+                <button
+                  type="button"
+                  className="coach-notice-close"
+                  onClick={() => setCoachNoticeOpen(false)}
+                  aria-label="Закрыть уведомление"
+                >
+                  <IconClose size={14} />
+                </button>
+                <span>
+                  <strong>Заявка уйдёт в админ-штаб RuPrime.</strong> До подтверждения вы пользуетесь сервисом как игрок: профиль, матчи, статистика и AI-разбор.
+                </span>
+              </div>
+            )}
+          </div>
+
+          <label className="auth-consent">
             <input
               type="checkbox"
               checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-              style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }}
+              onChange={e => setConsent(e.target.checked)}
             />
             <span>
-              Я принимаю <Link to="/terms" target="_blank" rel="noreferrer">пользовательское соглашение</Link>{' '}и{' '}
-              <Link to="/privacy" target="_blank" rel="noreferrer">политику конфиденциальности</Link>.
-              Соглашаюсь на обработку моих данных, получение через Steam Web API публичного профиля (SteamID, ник, аватар, часы в Dota 2)
-              и через OpenDota — матчевой статистики, если она открыта в настройках Dota 2.
+              Согласен с <Link to="/terms" target="_blank" rel="noreferrer">условиями</Link>
             </span>
           </label>
 
           <button
             type="submit"
             className="btn btn-primary"
-            style={{ width: '100%' }}
+            style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}
             disabled={loading || !consent}
           >
-            {loading
-              ? 'Создаём профиль...'
-              : persona === 'COACH'
-                ? 'Подать заявку в тренерский штаб'
-                : 'Создать профиль игрока'}
+            {loading ? 'Создаём профиль...' : (persona === 'COACH' ? 'Подать заявку тренера →' : 'Создать аккаунт →')}
           </button>
         </form>
 
-        <div style={{ margin: '20px 0', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-          или
-        </div>
-        <a
-          href={steamHref}
-          className="btn btn-outline"
-          aria-disabled={!consent}
-          onClick={(e) => {
-            if (!consent) {
-              e.preventDefault();
-              setError('Чтобы войти через Steam, примите условия и политику конфиденциальности');
-            }
-          }}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            opacity: consent ? 1 : 0.5,
-            pointerEvents: 'auto',
-            cursor: consent ? 'pointer' : 'not-allowed',
+        <div className="auth-divider">или войти через</div>
+
+        <SteamLoginButton
+          variant="outline"
+          href={consent ? steamHref : '#'}
+          onClick={() => {
+            if (!consent) setError('Чтобы войти через Steam, примите условия и политику');
           }}
         >
-          {steamLabel}
-        </a>
-        <p className="text-center mt-12 text-muted" style={{ fontSize: '0.78rem' }}>
-          {persona === 'COACH'
-            ? 'Steam-вход создаёт заявку тренера. Каталог откроется после подтверждения тех-аккаунтом.'
-            : 'Steam-вход сразу создаёт боевой профиль и запускает загрузку открытых Dota-матчей.'}
-        </p>
+          {null}
+        </SteamLoginButton>
 
-        <p className="text-center mt-20 text-muted">
+        <p className="text-center mt-20 text-muted" style={{ fontSize: '0.88rem' }}>
           Уже есть аккаунт? <Link to="/login">Войти</Link>
         </p>
-        {persona === 'COACH' && (
-          <p className="text-center mt-12 text-muted" style={{ fontSize: '0.82rem' }}>
-            Хотите посмотреть презентацию для тренеров? <Link to="/coach-landing">Открыть</Link>
-          </p>
-        )}
       </div>
     </div>
   );

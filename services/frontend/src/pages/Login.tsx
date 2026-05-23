@@ -1,13 +1,18 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
+import { authApi } from '../api/client';
 import { IconEye, IconEyeOff } from '../ui/Icons';
+import { BrandLogo, SteamLoginButton } from '../ui/Primitives';
+
+const AUTH_URL = (authApi.defaults.baseURL as string) || 'http://localhost:8001';
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const coachPending = searchParams.get('coach_pending') === '1';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
@@ -25,6 +30,8 @@ export default function Login() {
       const status = err?.response?.status;
       if (status === 401) {
         setError('Логин или пароль введены неверно');
+      } else if (status === 429) {
+        setError('Слишком много попыток входа. Попробуйте позже.');
       } else {
         setError(err.response?.data?.detail || 'Ошибка входа. Попробуйте ещё раз.');
       }
@@ -35,37 +42,45 @@ export default function Login() {
 
   return (
     <div className="auth-page">
+      <div className="auth-glow-left"  aria-hidden />
+      <div className="auth-glow-right" aria-hidden />
       <div className="auth-card">
-        <h2><span>Вход</span></h2>
+        <BrandLogo size="lg" />
+
+        <h2 style={{ textAlign: 'center', marginTop: 4, marginBottom: 6, fontSize: '1.55rem', fontWeight: 800 }}>
+          Вход в RuPrime
+        </h2>
+        <p className="text-center text-muted" style={{ marginTop: 0, marginBottom: 24, fontSize: '0.88rem' }}>
+          С возвращением
+        </p>
+
         {coachPending && (
-          <div
-            className="alert"
-            style={{
-              background: 'var(--purple-bg)',
-              border: '1px solid var(--purple)',
-              color: 'var(--text-primary)',
-              fontSize: '0.85rem',
-              marginBottom: 14,
-            }}
-          >
-            Заявка на роль тренера отправлена. До подтверждения тех-аккаунтом вы пользуетесь сервисом как игрок и видите свою статистику.
+          <div className="alert" style={{
+            background: 'var(--purple-bg)',
+            border: '1px solid var(--purple)',
+            color: 'var(--text-primary)',
+            fontSize: '0.85rem',
+            marginBottom: 14,
+          }}>
+            Заявка на роль тренера отправлена. До подтверждения админом вы пользуетесь сервисом как игрок.
           </div>
         )}
         {error && <div className="alert alert-error">{error}</div>}
+
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>Email</label>
+            <label>EMAIL</label>
             <input
               type="email"
               className="form-input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              placeholder="your@email.com"
+              placeholder="Введите email"
             />
           </div>
           <div className="form-group">
-            <label>Пароль</label>
+            <label>ПАРОЛЬ</label>
             <div className="input-with-icon">
               <input
                 type={showPwd ? 'text' : 'password'}
@@ -73,39 +88,39 @@ export default function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                placeholder="Минимум 8 символов"
+                minLength={8}
+                placeholder="Введите пароль"
               />
-              <button type="button" className="input-icon-btn" onClick={() => setShowPwd(!showPwd)}
-                tabIndex={-1} aria-label={showPwd ? 'Скрыть пароль' : 'Показать пароль'}>
+              <button
+                type="button"
+                className="input-icon-btn"
+                onClick={() => setShowPwd(!showPwd)}
+                tabIndex={-1}
+                aria-label={showPwd ? 'Скрыть пароль' : 'Показать пароль'}
+              >
                 {showPwd ? <IconEyeOff size={18} /> : <IconEye size={18} />}
               </button>
             </div>
           </div>
+          <Link to="/contacts" className="auth-forgot">Забыли пароль?</Link>
+
           <button
             type="submit"
             className="btn btn-primary"
-            style={{ width: '100%', display: 'flex', justifyContent: 'center', margin: '0 auto' }}
+            style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}
             disabled={loading}
           >
-            {loading ? 'Входим...' : 'Войти'}
+            {loading ? 'Входим...' : 'Войти →'}
           </button>
         </form>
 
-        <div style={{ margin: '20px 0', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-          или
-        </div>
-        <a
-          href={`${import.meta.env.VITE_AUTH_API_URL || 'http://localhost:8001'}/auth/steam/login`}
-          className="btn btn-outline"
-          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        >
-          Войти через Steam
-        </a>
-        <p className="text-center mt-12 text-muted" style={{ fontSize: '0.78rem' }}>
-          Через Steam профиль и матчи подтягиваются автоматически.
-        </p>
+        <div className="auth-divider">или войти через</div>
 
-        <p className="text-center mt-20 text-muted">
+        <SteamLoginButton variant="outline" href={`${AUTH_URL}/auth/steam/login`}>
+          {null}
+        </SteamLoginButton>
+
+        <p className="text-center mt-20 text-muted" style={{ fontSize: '0.88rem' }}>
           Нет аккаунта? <Link to="/register">Зарегистрироваться</Link>
         </p>
       </div>

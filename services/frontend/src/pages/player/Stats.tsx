@@ -1,651 +1,610 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { coreApi } from '../../api/client';
 import { loadHeroes, heroName, heroIcon, roleName } from '../../api/heroes';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
-import { ComponentBar } from '../../ui/SkillRing';
-import { RoleBadge, InfoTooltip } from '../../ui/GameComponents';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Legend,
+} from 'recharts';
+import { EmptyState } from '../../ui/Primitives';
+import { IconChevronLeft, IconChevronRight } from '../../ui/Icons';
+import { IconListOutline, IconTargetOutline, IconSwordsOutline, IconCoinsOutline } from '../../ui/StatIcons';
+import { Dropdown } from '../../ui/Dropdown';
 
-const CHART_STYLE = { background: '#151c2e', border: '1px solid #1e2a45', color: '#e8edf5' };
-const COLORS = ['#00d4aa', '#7c5cfc', '#ffa502', '#ff4757', '#1e90ff', '#ff6b81'];
-const DEFAULT_FILTERS = { mode: 'ranked', period: '50', role: '', hero_id: '' };
-const MODE_LABELS: Record<string, string> = { ranked: 'Рейтинговые', turbo: 'Turbo', all: 'Все режимы' };
-const PERIOD_LABELS: Record<string, string> = { '20': '20 игр', '50': '50 игр', month: '30 дней', all: 'Вся история' };
-const PERIOD_OPTIONS = [
-  { value: '20', label: '20 игр' },
-  { value: '50', label: '50 игр' },
-  { value: 'month', label: '30 дней' },
-  { value: 'all', label: 'Вся история' },
+const CHART_STYLE = { background: '#0d1a35', border: '1px solid rgba(22, 233, 212, 0.20)', color: '#e8edf5', borderRadius: 8 };
+
+const PERIOD_OPTIONS: { id: string; label: string; backend: string }[] = [
+  { id: '7d',  label: '7 дней',  backend: '20' },
+  { id: '30d', label: '30 дней', backend: 'month' },
+  { id: '90d', label: '90 дней', backend: 'all' },
+  { id: 'all', label: 'Сезон',   backend: 'all' },
 ];
-const ROLE_OPTIONS = [
-  { value: '1', label: 'Позиция 1', short: 'Carry' },
-  { value: '2', label: 'Позиция 2', short: 'Mid' },
-  { value: '3', label: 'Позиция 3', short: 'Offlane' },
-  { value: '4', label: 'Позиция 4', short: 'Soft Support' },
-  { value: '5', label: 'Позиция 5', short: 'Hard Support' },
+
+const ROLE_DROPDOWN_OPTIONS = [
+  { value: '',  label: 'Все роли' },
+  { value: '1', label: 'Carry' },
+  { value: '2', label: 'Mid' },
+  { value: '3', label: 'Offlane' },
+  { value: '4', label: 'Soft Support' },
+  { value: '5', label: 'Hard Support' },
 ];
 
 const FEATURE_TIPS: Record<string, string> = {
-  farming: 'Эффективность фарма: золото в минуту, крипов в минуту.',
+  farming: 'Эффективность фарма: золото в минуту, добивание крипов.',
   combat: 'Эффективность в боях: урон, убийства, ассисты.',
   survival: 'Выживание: смерти и вклад в команду.',
-  vision: 'Контроль карты: варды, dewarding.',
+  vision: 'Контроль карты: варды, дюварды (по parsed-матчам).',
   objectives: 'Давление на объекты: башни и Рошан.',
   mechanics: 'Механический скилл: APM, набор опыта.',
   consistency: 'Стабильность показателей от матча к матчу.',
   control: 'Контроль противников: станы и инициация.',
 };
 
+function fmtDelta(curr?: number | null, prev?: number | null, digits = 1, suffix = '') {
+  if (typeof curr !== 'number' || typeof prev !== 'number' || !Number.isFinite(curr - prev)) {
+    return { text: '—', tone: 'neutral' as const };
+  }
+  const d = curr - prev;
+  if (Math.abs(d) < 0.001) return { text: `±${(0).toFixed(digits)}${suffix}`, tone: 'neutral' as const };
+  const sign = d > 0 ? '+' : '';
+  const tone = d > 0 ? 'pos' as const : 'neg' as const;
+  return { text: `${sign}${d.toFixed(digits)}${suffix}`, tone };
+}
+
+/* ============ Stat tile ============ */
+function StatTile({
+  label, value, icon, tint, deltaText, deltaTone, deltaContext,
+}: {
+  label: string;
+  value: React.ReactNode;
+  icon: React.ReactNode;
+  tint: 'cyan' | 'purple' | 'gold' | 'rose';
+  deltaText?: string;
+  deltaTone?: 'pos' | 'neg' | 'neutral';
+  deltaContext?: string;
+}) {
+  return (
+    <div className={`stat-tile stat-tile--${tint}`}>
+      <div className="stat-tile-icon">{icon}</div>
+      <div className="stat-tile-body" style={{ flex: 1 }}>
+        <div className="stat-tile-label">{label}</div>
+        <div className="stat-tile-value-row">
+          <span className="stat-tile-value">{value}</span>
+          {deltaText && (
+            <span className={`stat-tile-delta ${deltaTone === 'pos' ? 'pos' : deltaTone === 'neg' ? 'neg' : 'neutral'}`}>
+              {deltaText}
+            </span>
+          )}
+        </div>
+        {deltaContext && <div className="stat-tile-delta-context">{deltaContext}</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ============ Главный компонент ============ */
 export default function PlayerStats() {
+  const [pid, setPid] = useState<number | null>(null);
   const [stats, setStats] = useState<any>(null);
   const [features, setFeatures] = useState<any>(null);
-  const [tab, setTab] = useState('trends');
-  const [pid, setPid] = useState<number | null>(null);
-  const [retried, setRetried] = useState(false);
-  const [filters, setFilters] = useState(DEFAULT_FILTERS);
-  const [heroOptions, setHeroOptions] = useState<any[]>([]);
   const [steamData, setSteamData] = useState<any>(null);
-  const [showFilterNotes, setShowFilterNotes] = useState(false);
+  const [heroOptions, setHeroOptions] = useState<any[]>([]);
 
-  const apiParams = {
-    mode: filters.mode,
-    period: filters.period,
-    ...(filters.role ? { role: Number(filters.role) } : {}),
-    ...(filters.hero_id ? { hero_id: Number(filters.hero_id) } : {}),
-  };
+  const [period, setPeriod] = useState<typeof PERIOD_OPTIONS[number]['id']>('30d');
+  const [selectedRole, setSelectedRole] = useState<string>('');
+  const [selectedHero, setSelectedHero] = useState<string>('');
+  const [chartMetric, setChartMetric] = useState<'gpm' | 'xpm' | 'kda' | 'winrate'>('kda');
+
+  // Активная фитча для widget "Слабые места"
+  const [activeFeatureIdx, setActiveFeatureIdx] = useState(0);
+
+  const backendPeriod = PERIOD_OPTIONS.find(p => p.id === period)?.backend || '50';
 
   useEffect(() => {
     loadHeroes().then((heroes) => {
       setHeroOptions(Object.values(heroes).sort((a: any, b: any) => a.localized_name.localeCompare(b.localized_name)));
     });
     coreApi.get('/me/overview').then((r) => {
-      // For COACH role overview.profile.id is coach_profile_id, while
-      // overview.profile.player_profile_id holds the linked player profile.
-      // Use whichever is present so this page works for both roles.
       const profileId = r.data?.profile?.player_profile_id ?? r.data?.profile?.id;
-      if (profileId) {
-        setPid(profileId);
-      }
+      if (profileId) setPid(profileId);
     }).catch(() => {});
     coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!pid) return;
-    const featurePeriod = filters.period === '20' ? '20' : '50';
-    const featureParams = { ...apiParams, period: featurePeriod };
-    coreApi.get(`/player/${pid}/stats/overview`, { params: apiParams }).then((r2) => setStats(r2.data)).catch(() => {});
-    coreApi.get(`/player/${pid}/detailed-features`, { params: featureParams }).then((r2) => setFeatures(r2.data)).catch(() => {});
-  }, [pid, filters.mode, filters.period, filters.role, filters.hero_id]);
+    const params: any = { mode: 'ranked', period: backendPeriod };
+    if (selectedRole)  params.role = Number(selectedRole);
+    if (selectedHero)  params.hero_id = Number(selectedHero);
+    coreApi.get(`/player/${pid}/stats/overview`, { params }).then((r) => setStats(r.data)).catch(() => {});
+    coreApi.get(`/player/${pid}/detailed-features`, { params }).then((r) => setFeatures(r.data)).catch(() => {});
+  }, [pid, backendPeriod, selectedRole, selectedHero]);
+
+  /* ---- Вычисляемые ---- */
+  const summary = stats?.summary || {};
+  const trends  = stats?.trends || {};
+  const topHeroes = stats?.heroes?.top_heroes || [];
+  const matchesCount = summary.filters_applied?.matches_count ?? summary.games_analyzed ?? 0;
+  const winrate = summary.winrate ?? null;
+  const kdaAvg  = summary.kda_avg ?? null;
+  const gpmAvg  = summary.gpm_avg ?? null;
+  const isLinked = steamData?.linked && steamData?.personaname;
+
+  const wrDelta = useMemo(() => {
+    const arr = trends.winrate_over_time;
+    if (!Array.isArray(arr) || arr.length < 2) return { text: '', tone: 'neutral' as const };
+    const cur  = arr[arr.length - 1]?.winrate;
+    const prev = arr[0]?.winrate;
+    return fmtDelta(typeof cur === 'number' ? cur * 100 : null, typeof prev === 'number' ? prev * 100 : null, 1, '%');
+  }, [trends]);
+
+  const kdaDelta = useMemo(() => {
+    const arr = trends.kda_over_time;
+    if (!Array.isArray(arr) || arr.length < 2) return { text: '', tone: 'neutral' as const };
+    return fmtDelta(arr[arr.length - 1]?.kda, arr[0]?.kda, 1, '');
+  }, [trends]);
+
+  const gpmDelta = useMemo(() => {
+    const arr = trends.gpm_over_time;
+    if (!Array.isArray(arr) || arr.length < 2) return { text: '', tone: 'neutral' as const };
+    return fmtDelta(arr[arr.length - 1]?.gpm, arr[0]?.gpm, 0, '');
+  }, [trends]);
+
+  /* WR по ролям + KDA + GPM (avg) из recent_matches */
+  const roleStats = useMemo(() => {
+    const rm = steamData?.recent_matches || [];
+    return [1, 2, 3, 4, 5].map((r) => {
+      const matches = rm.filter((m: any) => m.lane_role === r);
+      const wins = matches.filter((m: any) => m.win).length;
+      const avg = (key: 'kda' | 'gpm') => {
+        const arr = matches.map((m: any) => Number(m[key]) || 0).filter((n: number) => Number.isFinite(n) && n > 0);
+        return arr.length > 0 ? arr.reduce((s: number, n: number) => s + n, 0) / arr.length : null;
+      };
+      return {
+        role: r,
+        label: roleName(r),
+        total: matches.length,
+        wins,
+        winrate: matches.length > 0 ? wins / matches.length : null,
+        kda: avg('kda'),
+        gpm: avg('gpm'),
+      };
+    });
+  }, [steamData]);
+
+  /* Радар */
+  const radarData = useMemo(() => {
+    const cats = features?.categories || [];
+    return cats.filter((c: any) => !c.missing).map((c: any) => ({
+      category: c.name,
+      you: Number((c.score ?? 0).toFixed(1)),
+      baseline: Number((c.target ?? 0).toFixed(1)),
+    }));
+  }, [features]);
+
+  /* Все слабые места отсортированные от худшего к лучшему */
+  const weakFeaturesSorted = useMemo(() => {
+    const cats = features?.categories || [];
+    return [...cats]
+      .filter((c: any) => !c.missing && typeof c.score === 'number')
+      .sort((a: any, b: any) => a.score - b.score);
+  }, [features]);
 
   useEffect(() => {
-    if (retried || !pid) return;
-    const hasNoRoles = !stats?.roles?.actual_roles_distribution || Object.keys(stats.roles.actual_roles_distribution).length === 0;
-    const hasNoStats = !stats?.summary?.games_analyzed;
-    if (hasNoRoles && hasNoStats) return;
-    if (hasNoRoles && !hasNoStats) {
-      setRetried(true);
-      coreApi.post('/player/sync-steam').then(() => {
-        coreApi.get(`/player/${pid}/stats/overview`, { params: apiParams }).then((r2) => setStats(r2.data)).catch(() => {});
-      }).catch(() => {});
-    }
-  }, [stats, pid, retried]);
+    if (activeFeatureIdx >= weakFeaturesSorted.length) setActiveFeatureIdx(0);
+  }, [weakFeaturesSorted.length, activeFeatureIdx]);
 
-  const summary = stats?.summary || {};
-  const trends = stats?.trends || {};
-  const heroes = stats?.heroes?.top_heroes || [];
-  const comparisons = stats?.comparisons?.vs_same_tier || {};
-  const roles = stats?.roles?.actual_roles_distribution || {};
-  const categories = features?.categories || [];
-  const applied = summary.filters_applied || features?.filters_applied || {};
-  const scopeLabel = applied.label || `${PERIOD_LABELS[filters.period]}, ${MODE_LABELS[filters.mode]}`;
-  const matchesCount = applied.matches_count ?? summary.games_analyzed ?? 0;
-  const metricCounts = summary.metric_counts || {};
-  const sampleQuality = summary.sample_quality || {};
-  const dataFreshness = summary.data_freshness;
-  const roleCounts = applied.role_counts || {};
-  const unknownRoleCount = applied.unknown_role_count ?? 0;
-  const modeCounts = applied.mode_counts || {};
-  const reportBaseCount = applied.base_report_count ?? applied.after_period_count ?? applied.before_period_count ?? matchesCount;
-  const narrowingApplied = Boolean(applied.narrowing_applied);
-  const totalGames =
-    steamData?.lifetime_games
-    ?? steamData?.total_games
-    ?? ((steamData?.win || 0) + (steamData?.lose || 0));
-  const accountMmr = steamData?.mmr_estimate ?? summary.estimated_mmr;
-  const accountWinrate = totalGames > 0 ? (steamData?.win || 0) / totalGames : null;
-  const selectedHeroId = filters.hero_id ? Number(filters.hero_id) : null;
-  const selectedHero = selectedHeroId ? heroOptions.find((h: any) => Number(h.hero_id) === selectedHeroId) : null;
-  const hasFilterNotes = Boolean(
-    (dataFreshness && dataFreshness !== 'fresh') ||
-    summary.notice ||
-    matchesCount === 0 ||
-    metricCounts.gpm === 0 ||
-    modeCounts.other > 0 ||
-    modeCounts.unknown > 0 ||
-    (unknownRoleCount > 0 && !filters.role)
-  );
-  const roleContext = applied.role
-    ? `${applied.role_source === 'auto' ? 'основная роль' : 'роль'} ${roleName(applied.role)}`
-    : 'все позиции';
+  const activeFeature = weakFeaturesSorted[activeFeatureIdx];
 
-  const rolesData = Object.entries(roles)
-    .map(([k, v]: [string, any]) => ({ name: roleName(k.replace('POS', '')), key: k, value: Math.round(v * 100) }))
-    .filter(r => r.value > 0)
-    .sort((a, b) => b.value - a.value);
+  /* График: трендовая метрика */
+  const dynamicTrend = useMemo(() => {
+    const key = `${chartMetric}_over_time`;
+    const arr = (trends as any)[key];
+    if (!Array.isArray(arr)) return [];
+    return arr.map((p: any) => {
+      const raw = p[chartMetric];
+      const value = chartMetric === 'winrate' && typeof raw === 'number'
+        ? Number((raw * 100).toFixed(1))
+        : Number(raw);
+      return { ts: p.ts, value: Number.isFinite(value) ? value : 0 };
+    });
+  }, [trends, chartMetric]);
+
+  const dynamicLabel = chartMetric === 'gpm' ? 'GPM'
+                     : chartMetric === 'xpm' ? 'XPM'
+                     : chartMetric === 'kda' ? 'KDA'
+                     : 'Винрейт, %';
 
   return (
     <div>
-      <div className="page-header">
-        <h1>Разбор игры</h1>
-        <p>Матчевая сводка: {scopeLabel}</p>
+      {/* ============ Header (без экспорта) ============ */}
+      <div className="stats-header">
+        <div className="stats-header-title">
+          <h1>Аналитика</h1>
+          <p>Глубокий разбор твоей игры по последним матчам</p>
+        </div>
+
+        <div className="stats-header-filters">
+          {/* Period — оставлен сегментированным контролем */}
+          <div className="seg-control">
+            {PERIOD_OPTIONS.map(p => (
+              <button
+                key={p.id}
+                type="button"
+                className={`seg-control-btn ${period === p.id ? 'active' : ''}`}
+                onClick={() => setPeriod(p.id as any)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Role — кастомный Dropdown */}
+          <Dropdown
+            value={selectedRole}
+            onChange={setSelectedRole}
+            options={ROLE_DROPDOWN_OPTIONS}
+            label="Роль"
+          />
+
+          {/* Hero — кастомный Dropdown с поиском */}
+          <Dropdown
+            value={selectedHero}
+            onChange={setSelectedHero}
+            options={[
+              { value: '', label: 'Все герои' },
+              ...heroOptions.map((h: any) => ({
+                value: String(h.hero_id),
+                label: h.localized_name || h.name,
+              })),
+            ]}
+            label="Герой"
+            searchable
+            maxHeight={320}
+          />
+        </div>
       </div>
 
-      {steamData?.linked && (
-        <div className="card mb-20">
-          <div className="flex-between" style={{ gap: 12, flexWrap: 'wrap' }}>
-            <div>
-              <h3 style={{ margin: 0 }}>Данные аккаунта</h3>
-              <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
-                Это общие данные Steam/OpenDota. Они не меняются от фильтров отчёта ниже.
-              </p>
+      {/* ============ 4 stat tiles ============ */}
+      <div className="grid-4 stats-tiles">
+        <StatTile
+          label="МАТЧЕЙ" tint="rose"
+          icon={<IconListOutline />}
+          value={matchesCount || '—'}
+        />
+        <StatTile
+          label="ВИНРЕЙТ" tint="cyan"
+          icon={<IconTargetOutline />}
+          value={typeof winrate === 'number' ? `${(winrate * 100).toFixed(1)}%` : '—'}
+          deltaText={wrDelta.text}
+          deltaTone={wrDelta.tone as any}
+          deltaContext={wrDelta.text ? `vs первой части периода` : undefined}
+        />
+        <StatTile
+          label="KDA" tint="purple"
+          icon={<IconSwordsOutline />}
+          value={typeof kdaAvg === 'number' ? Number(kdaAvg).toFixed(2) : '—'}
+          deltaText={kdaDelta.text}
+          deltaTone={kdaDelta.tone as any}
+          deltaContext={kdaDelta.text ? `vs первой части периода` : undefined}
+        />
+        <StatTile
+          label="GPM" tint="gold"
+          icon={<IconCoinsOutline />}
+          value={typeof gpmAvg === 'number' ? Number(gpmAvg).toFixed(0) : '—'}
+          deltaText={gpmDelta.text}
+          deltaTone={gpmDelta.tone as any}
+          deltaContext={gpmDelta.text ? `vs первой части периода` : undefined}
+        />
+      </div>
+
+      {/* ============ Row 1: Динамика | Тепловая карта ============ */}
+      <div className="stats-two-col">
+        <div className="card dash-card">
+          <div className="card-head">
+            <div className="card-title">Динамика</div>
+            <div className="seg-control" style={{ padding: 2 }}>
+              {(['gpm', 'xpm', 'kda', 'winrate'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`seg-control-btn ${chartMetric === m ? 'active' : ''}`}
+                  onClick={() => setChartMetric(m)}
+                  style={{ padding: '5px 10px', fontSize: '0.78rem' }}
+                >
+                  {m === 'gpm' ? 'GPM' : m === 'xpm' ? 'XPM' : m === 'kda' ? 'KDA' : 'WR'}
+                </button>
+              ))}
             </div>
-            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-              <span className="badge badge-accent">MMR: {accountMmr || '—'}</span>
-              <span className="badge badge-purple">Игр аккаунта: {totalGames ? totalGames.toLocaleString('ru-RU') : '—'}</span>
-              <span className="badge">
-                WR аккаунта: {accountWinrate != null ? `${(accountWinrate * 100).toFixed(1)}%` : '—'}
+          </div>
+          {dynamicTrend.length > 0 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={dynamicTrend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(22, 233, 212, 0.12)" />
+                <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={11} />
+                <YAxis stroke="#7b8ba5" fontSize={11} />
+                <Tooltip contentStyle={CHART_STYLE} formatter={(v: any) => [v, dynamicLabel]} />
+                <Line type="monotone" dataKey="value" stroke="#16e9d4" strokeWidth={2.5}
+                  dot={{ fill: '#16e9d4', r: 3 }} activeDot={{ r: 5, fill: '#00ffc8' }}
+                  name={dynamicLabel} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyState title="Данных пока нет" description={isLinked ? 'Подгружаем матчи.' : 'Привяжите Steam.'} compact />
+          )}
+        </div>
+
+        <div className="card dash-card">
+          <div className="card-head">
+            <div className="card-title">Тепловая карта</div>
+            <span className="badge badge-muted">parsed-данные</span>
+          </div>
+          {/* Хитмап строится только из parsed-матчей с координатами событий.
+              Пока у бэка нет endpoint'а — карточка остаётся в состоянии "ждём данных". */}
+          <EmptyState
+            title="Появится из parsed-матчей"
+            description="Тепловая карта строится по координатам ивентов в матчах после parsed-загрузки. Как только данные подгрузятся — карточка обновится автоматически."
+            compact
+          />
+        </div>
+      </div>
+
+      {/* ============ Row 2: Винрейт по ролям (full width) ============ */}
+      <div className="card dash-card stats-row">
+        <div className="card-head">
+          <div className="card-title">Винрейт по ролям</div>
+          <span className="text-muted" style={{ fontSize: '0.78rem' }}>по последним {steamData?.recent_matches?.length || 0} матчам</span>
+        </div>
+        <div className="role-wr-list">
+          {roleStats.map((r) => (
+            <div key={r.role} className="role-wr-row">
+              <span className="role-wr-label">{r.label}</span>
+              <div className="role-wr-bar">
+                <div
+                  className="role-wr-bar-fill"
+                  style={{
+                    width: r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '0%',
+                    background: r.winrate != null && r.winrate >= 0.5
+                      ? 'linear-gradient(90deg, var(--accent-bright) 0%, var(--accent) 100%)'
+                      : 'linear-gradient(90deg, var(--purple) 0%, rgba(155, 89, 255, 0.6) 100%)',
+                  }}
+                />
+              </div>
+              <span className="role-wr-value">
+                {r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}
+                {r.total > 0 && <small> · {r.total}</small>}
               </span>
             </div>
-          </div>
+          ))}
         </div>
-      )}
+      </div>
 
-      <div className="card mb-20">
-        <div className="flex-between" style={{ gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <h3 style={{ margin: 0 }}>Фильтры боевого отчёта</h3>
-            <p className="text-muted" style={{ margin: '4px 0 0' }}>
-              Отчёт считается только по выбранному срезу: {scopeLabel}. База среза: {reportBaseCount} матчей.
-              {narrowingApplied ? ` После фильтра позиции/героя осталось: ${matchesCount}.` : ` В отчёте: ${matchesCount}.`}
-              Сравнение строится с игроками того же ранга
-              {applied.role ? ` и ${roleContext}` : ''}{filters.hero_id ? ` на герое ${heroName(Number(filters.hero_id))}` : ''}.
-            </p>
+      {/* ============ Row 3: Радар | Игры по ролям ============ */}
+      <div className="stats-two-col">
+        <div className="card dash-card">
+          <div className="card-head">
+            <div className="card-title">Радар навыков</div>
           </div>
-          <button className="btn btn-outline btn-sm" onClick={() => setFilters(DEFAULT_FILTERS)}>Сбросить</button>
+          {radarData.length > 2 ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
+                <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={11} />
+                <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.4)" fontSize={9} angle={45} />
+                <Radar name="Ты" dataKey="you" stroke="#16e9d4" fill="#16e9d4" fillOpacity={0.18} />
+                <Radar name="Цель" dataKey="baseline" stroke="#9b59ff" fill="#9b59ff" fillOpacity={0.10} />
+                <Legend verticalAlign="bottom" iconType="line" wrapperStyle={{ fontSize: 11, color: '#a0b1c8' }} />
+                <Tooltip contentStyle={CHART_STYLE} />
+              </RadarChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
+          )}
         </div>
-        {hasFilterNotes && (
-          <div className="card mt-20" style={{ padding: 12, borderStyle: 'dashed' }}>
-            <div className="flex-between" style={{ gap: 10, flexWrap: 'wrap' }}>
-              <div>
-                <strong>Пояснения к данным и фильтрам</strong>
-                <div className="text-muted" style={{ fontSize: '0.78rem' }}>
-                  Качество выборки, недостающие поля и распределение режимов.
+
+        <div className="card dash-card">
+          <div className="card-head">
+            <div className="card-title">Игры по ролям</div>
+            <span className="text-muted" style={{ fontSize: '0.78rem' }}>средние</span>
+          </div>
+          <div className="role-stats-grid">
+            {roleStats.map((r) => (
+              <div key={r.role} className="role-stat-cell">
+                <div className="role-stat-cell-head">
+                  <span className="role-stat-cell-name">{r.label}</span>
+                  <span className="role-stat-cell-count">{r.total} м</span>
+                </div>
+                <div className="role-stat-cell-metrics">
+                  <span><span className="role-stat-cell-metric-label">WR</span> <strong>{r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}</strong></span>
+                  <span><span className="role-stat-cell-metric-label">KDA</span> <strong>{r.kda != null ? r.kda.toFixed(2) : '—'}</strong></span>
+                  <span><span className="role-stat-cell-metric-label">GPM</span> <strong>{r.gpm != null ? r.gpm.toFixed(0) : '—'}</strong></span>
                 </div>
               </div>
-              <button className="btn btn-outline btn-sm" onClick={() => setShowFilterNotes((v) => !v)}>
-                {showFilterNotes ? 'Свернуть' : 'Развернуть'}
-              </button>
-            </div>
-            {showFilterNotes && (
-              <div style={{ marginTop: 10 }}>
-                {dataFreshness && dataFreshness !== 'fresh' && (
-                  <div className="alert mb-10" style={{ fontSize: '0.86rem' }}>
-                    {dataFreshness === 'stale' && 'Последние доступные матчи давно не обновлялись. Отчёт показывает последнюю известную форму, а не текущую.'}
-                    {dataFreshness === 'low_sample' && 'В выбранном срезе мало матчей, поэтому оценка предварительная.'}
-                    {dataFreshness === 'no_matches' && 'В выбранном срезе нет матчей. Попробуйте другой период или обновите данные Steam.'}
-                    {sampleQuality.latest_match_at && (
-                      <div className="text-muted" style={{ marginTop: 6 }}>
-                        Последний матч: {new Date(sampleQuality.latest_match_at).toLocaleDateString('ru-RU')}.
-                      </div>
-                    )}
-                  </div>
-                )}
-                {(summary.notice || matchesCount === 0 || metricCounts.gpm === 0) && (
-                  <div className="alert mb-10" style={{ fontSize: '0.86rem' }}>
-                    {summary.notice || (
-                      metricCounts.gpm === 0
-                        ? 'В выбранном срезе есть матчи, но GPM/XPM ещё не загружены для этих строк. Нажмите «Обновить данные» в настройках и дождитесь фоновой догрузки.'
-                        : 'По выбранным фильтрам нет матчей. Проверьте режим, роль, героя или период.'
-                    )}
-                    {applied.total_available != null && (
-                      <div className="text-muted" style={{ marginTop: 6 }}>
-                        Загружено в базе: {applied.total_available}; после режима: {applied.after_mode_count ?? '—'};
-                        после периода: {applied.after_period_count ?? '—'}.
-                      </div>
-                    )}
-                  </div>
-                )}
-                {(modeCounts.other > 0 || modeCounts.unknown > 0) && (
-                  <div className="alert mb-10" style={{ fontSize: '0.86rem' }}>
-                    Распределение режимов в загруженной истории: ranked {modeCounts.ranked || 0}, turbo {modeCounts.turbo || 0}
-                    {modeCounts.other > 0 ? `, другие режимы ${modeCounts.other}` : ''}
-                    {modeCounts.unknown > 0 ? `, режим не определён ${modeCounts.unknown}` : ''}.
-                    Режим «Все» включает все эти категории.
-                  </div>
-                )}
-                {unknownRoleCount > 0 && !filters.role && (
-                  <div className="alert" style={{ fontSize: '0.86rem' }}>
-                    У {unknownRoleCount} матчей в текущем отчёте позиция ещё не определена OpenDota.
-                    Поэтому суммы по POS могут быть меньше, чем {reportBaseCount} матчей отчёта.
-                    После parsed-догрузки эти матчи постепенно распределятся по позициям.
-                  </div>
-                )}
-              </div>
-            )}
+            ))}
           </div>
-        )}
-        {features?.filters_applied?.label && features.filters_applied.label !== scopeLabel && (
-          <div className="text-muted" style={{ fontSize: '0.78rem', marginTop: 10 }}>
-            Фитчи ниже считаются по свежему срезу: {features.filters_applied.label}. Статистика выше может смотреть более длинный период.
-          </div>
-        )}
-        <div className="grid-4 mt-20">
-          <label>
-            <div className="form-label">Режим</div>
-            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-              {[
-                { value: 'ranked', label: 'Рейтинговые', count: (modeCounts.ranked || 0) + (modeCounts.unknown || 0) },
-                { value: 'turbo', label: 'Turbo', count: modeCounts.turbo || 0 },
-                { value: 'all', label: 'Все', count: modeCounts.all || 0 },
-              ].map((m) => (
-                <button
-                  key={m.value}
-                  type="button"
-                  className={`btn btn-sm ${filters.mode === m.value ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setFilters((f) => ({ ...f, mode: m.value }))}
-                >
-                  {m.label} {m.count ? `(${m.count})` : ''}
-                </button>
-              ))}
+        </div>
+      </div>
+
+      {/* ============ Row 4: Топ героев (full width) ============ */}
+      <div className="card dash-card stats-row">
+        <div className="card-head">
+          <div className="card-title">Топ героев</div>
+        </div>
+        {topHeroes.length > 0 ? (
+          <div className="top-heroes-table">
+            <div className="top-heroes-head">
+              <span>Герой</span>
+              <span>Матчей</span>
+              <span>Винрейт</span>
+              <span>KDA</span>
             </div>
-            {modeCounts.unknown > 0 && (
-              <div className="text-muted" style={{ fontSize: '0.76rem', marginTop: 6 }}>
-                {modeCounts.unknown} матчей без режима считаются в ranked-срезе, чтобы не терять старую историю.
+            {topHeroes.slice(0, 6).map((h: any) => (
+              <div key={h.hero_id} className="top-heroes-row">
+                <span className="match-hero">
+                  <img src={heroIcon(h.hero_id)} alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  <span>{heroName(h.hero_id)}</span>
+                </span>
+                <span className="text-muted">{h.games}</span>
+                <span className="top-heroes-wr">
+                  <span className="top-heroes-wr-value">{(h.winrate * 100).toFixed(0)}%</span>
+                  <span className="top-heroes-wr-bar"><span style={{ width: `${Math.min(100, h.winrate * 100)}%` }} /></span>
+                </span>
+                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(h.avg_kda).toFixed(1)}</span>
               </div>
-            )}
-          </label>
-          <label>
-            <div className="form-label">Период</div>
-            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-              {PERIOD_OPTIONS.map((p) => (
-                <button
-                  key={p.value}
-                  type="button"
-                  className={`btn btn-sm ${filters.period === p.value ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setFilters((f) => ({ ...f, period: p.value }))}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </label>
-          <label>
-            <div className="form-label">Позиция</div>
-            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="Героев пока нет" description={isLinked ? 'Подгружаем матчи.' : 'Привяжите Steam.'} compact />
+        )}
+      </div>
+
+      {/* ============ Слабые места — circular widget ============ */}
+      <div className="card dash-card stats-row weak-card">
+        <div className="card-head">
+          <div className="card-title">Слабые места — над чем работать</div>
+          {weakFeaturesSorted.length > 0 && (
+            <div className="weak-pager">
               <button
                 type="button"
-                className={`btn btn-sm ${filters.role === '' ? 'btn-primary' : 'btn-outline'}`}
-                onClick={() => setFilters((f) => ({ ...f, role: '' }))}
+                className="weak-pager-btn"
+                onClick={() => setActiveFeatureIdx((i) => Math.max(0, i - 1))}
+                disabled={activeFeatureIdx === 0}
+                aria-label="Предыдущая"
               >
-                Все ({reportBaseCount})
+                <IconChevronLeft size={14} />
               </button>
-              {ROLE_OPTIONS.map((r) => {
-                const count = roleCounts[r.value] || 0;
+              <span>{activeFeatureIdx + 1} / {weakFeaturesSorted.length}</span>
+              <button
+                type="button"
+                className="weak-pager-btn"
+                onClick={() => setActiveFeatureIdx((i) => Math.min(weakFeaturesSorted.length - 1, i + 1))}
+                disabled={activeFeatureIdx >= weakFeaturesSorted.length - 1}
+                aria-label="Следующая"
+              >
+                <IconChevronRight size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {activeFeature ? (
+          <div className="weak-circle-layout">
+            {/* Большое кольцо с фитчей */}
+            <div className="weak-circle">
+              {(() => {
+                const score = activeFeature.score ?? 0;
+                const target = activeFeature.target ?? 0;
+                const pct = Math.min(100, (score / 10) * 100);
+                const targetPct = Math.min(100, (target / 10) * 100);
+                const size = 200;
+                const r = (size - 16) / 2;
+                const c = 2 * Math.PI * r;
+                const offset = c - (pct / 100) * c;
+                const targetOffset = c - (targetPct / 100) * c;
                 return (
-                  <button
-                    key={r.value}
-                    type="button"
-                    className={`btn btn-sm ${filters.role === r.value ? 'btn-primary' : 'btn-outline'}`}
-                    onClick={() => setFilters((f) => ({ ...f, role: r.value }))}
-                    title={r.label}
-                  >
-                    {r.short} ({count})
-                  </button>
+                  <svg width={size} height={size}>
+                    <defs>
+                      <linearGradient id="weakRingGrad" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%"   stopColor="#16e9d4" />
+                        <stop offset="100%" stopColor="#9b59ff" />
+                      </linearGradient>
+                    </defs>
+                    {/* Track */}
+                    <circle cx={size/2} cy={size/2} r={r} stroke="rgba(22, 233, 212, 0.12)" strokeWidth="14" fill="none" />
+                    {/* Target ghost */}
+                    <circle
+                      cx={size/2} cy={size/2} r={r}
+                      stroke="rgba(155, 89, 255, 0.35)"
+                      strokeWidth="3" fill="none"
+                      strokeDasharray={c}
+                      strokeDashoffset={targetOffset}
+                      transform={`rotate(-90 ${size/2} ${size/2})`}
+                      strokeLinecap="round"
+                    />
+                    {/* Score arc */}
+                    <circle
+                      cx={size/2} cy={size/2} r={r}
+                      stroke="url(#weakRingGrad)"
+                      strokeWidth="14"
+                      fill="none"
+                      strokeDasharray={c}
+                      strokeDashoffset={offset}
+                      transform={`rotate(-90 ${size/2} ${size/2})`}
+                      strokeLinecap="round"
+                      style={{ filter: 'drop-shadow(0 0 8px rgba(22, 233, 212, 0.4))' }}
+                    />
+                    <text x={size/2} y={size/2 - 6} textAnchor="middle"
+                      fill="var(--accent-bright)" fontSize="36" fontWeight="800" fontFamily="var(--font-display)">
+                      {score.toFixed(1)}
+                    </text>
+                    <text x={size/2} y={size/2 + 22} textAnchor="middle"
+                      fill="var(--text-muted)" fontSize="11" fontFamily="var(--font-body)">
+                      / 10
+                    </text>
+                  </svg>
                 );
-              })}
+              })()}
             </div>
-            {unknownRoleCount > 0 && (
-              <div className="text-muted" style={{ fontSize: '0.76rem', marginTop: 6 }}>
-                Не определено: {unknownRoleCount}
+
+            {/* Подробности */}
+            <div className="weak-circle-details">
+              <h3 className="weak-circle-title">{activeFeature.name}</h3>
+              <p className="weak-circle-desc">{FEATURE_TIPS[activeFeature.key] || 'Игровая категория, влияет на исход матча.'}</p>
+
+              <div className="weak-circle-row">
+                <span className="weak-circle-row-label">Текущий балл</span>
+                <strong>{(activeFeature.score ?? 0).toFixed(1)} / 10</strong>
               </div>
-            )}
-          </label>
-          <label>
-            <div className="form-label">Герой</div>
-            <div className="flex gap-10" style={{ flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className={`btn btn-sm ${filters.hero_id === '' ? 'btn-primary' : 'btn-outline'}`}
-                onClick={() => setFilters((f) => ({ ...f, hero_id: '' }))}
-              >
-                Все герои
-              </button>
-              {selectedHero && (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => setFilters((f) => ({ ...f, hero_id: '' }))}
-                  title="Нажмите, чтобы сбросить героя"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
-                >
-                  <img
-                    src={heroIcon(selectedHero.hero_id)}
-                    alt=""
-                    style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover' }}
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
-                  {selectedHero.localized_name || heroName(selectedHero.hero_id)}
-                </button>
+              <div className="weak-circle-row">
+                <span className="weak-circle-row-label">Цель</span>
+                <strong style={{ color: 'var(--purple)' }}>{(activeFeature.target ?? 0).toFixed(1)} / 10</strong>
+              </div>
+              <div className="weak-circle-row">
+                <span className="weak-circle-row-label">Разрыв</span>
+                <strong style={{ color: 'var(--warning)' }}>
+                  −{Math.max(0, (activeFeature.target ?? 0) - (activeFeature.score ?? 0)).toFixed(1)}
+                </strong>
+              </div>
+
+              {(activeFeature.components || []).length > 0 && (
+                <div className="weak-circle-components">
+                  <div className="text-muted" style={{ fontSize: '0.78rem', marginBottom: 6 }}>Компоненты</div>
+                  <div className="weak-circle-components-list">
+                    {(activeFeature.components || []).slice(0, 5).map((c: any) => (
+                      <div key={c.key} className="weak-circle-comp-row">
+                        <span className="weak-circle-comp-name">{c.name}</span>
+                        <span className="weak-circle-comp-value">
+                          {typeof c.player_value === 'number' ? c.player_value.toFixed(1) : c.player_value}
+                          {typeof c.target_value === 'number' && <span className="text-muted"> → {c.target_value.toFixed(1)}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-                gap: 8,
-                maxHeight: 220,
-                overflowY: 'auto',
-                marginTop: 10,
-                paddingRight: 4,
-              }}
-            >
-              {heroOptions.map((h: any) => {
-                const active = filters.hero_id === String(h.hero_id);
-                return (
-                  <button
-                    key={h.hero_id}
-                    type="button"
-                    className={`btn btn-sm ${active ? 'btn-primary' : 'btn-outline'}`}
-                    onClick={() => setFilters((f) => ({ ...f, hero_id: String(h.hero_id) }))}
-                    style={{
-                      justifyContent: 'flex-start',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      minWidth: 0,
-                    }}
-                    title={h.localized_name || h.name}
-                  >
-                    <img
-                      src={heroIcon(h.hero_id)}
-                      alt=""
-                      style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover', flex: '0 0 24px' }}
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                    />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {h.localized_name || heroName(h.hero_id)}
-                    </span>
-                  </button>
-                );
-              })}
+
+            {/* Список всех слабых мест сбоку — clickable list */}
+            <div className="weak-list">
+              <div className="text-muted" style={{ fontSize: '0.78rem', marginBottom: 8 }}>Все направления (от худших)</div>
+              {weakFeaturesSorted.map((cat: any, i: number) => (
+                <button
+                  key={cat.key}
+                  type="button"
+                  className={`weak-list-row ${i === activeFeatureIdx ? 'active' : ''}`}
+                  onClick={() => setActiveFeatureIdx(i)}
+                >
+                  <span className="weak-list-rank">{i + 1}</span>
+                  <span className="weak-list-name">{cat.name}</span>
+                  <span className="weak-list-score">{(cat.score ?? 0).toFixed(1)}</span>
+                </button>
+              ))}
             </div>
-          </label>
-        </div>
-      </div>
-
-      <div className="grid-4 mb-20">
-        <div className="stat-card">
-          <div className="stat-card-label">База среза <InfoTooltip text="Сколько матчей попало в отчёт после выбора режима и периода, до позиции/героя." /></div>
-          <div className="stat-card-value">{reportBaseCount}</div>
-          {narrowingApplied && <div className="text-muted" style={{ fontSize: '0.78rem' }}>после фильтров: {matchesCount}</div>}
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Игр аккаунта <InfoTooltip text="Общее число игр из профиля OpenDota/Steam. Это не то же самое, что текущий отчёт." /></div>
-          <div className="stat-card-value">{totalGames ? totalGames.toLocaleString('ru-RU') : '—'}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Результативность <InfoTooltip text={`Доля побед в выборке: ${scopeLabel}.`} /></div>
-          <div className="stat-card-value">{summary.winrate !== null && summary.winrate !== undefined ? `${(summary.winrate * 100).toFixed(1)}%` : '—'}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-label">MMR аккаунта <InfoTooltip text="Единая оценка аккаунта из Steam/OpenDota ранга. Фильтры отчёта её не меняют." /></div>
-          <div className="stat-card-value text-accent">{accountMmr || '—'}</div>
-        </div>
-      </div>
-
-      <div className="grid-4 mb-20">
-        <div className="stat-card">
-          <div className="stat-card-label">Матчей после всех фильтров <InfoTooltip text="Итоговая выборка после режима, периода, позиции и героя." /></div>
-          <div className="stat-card-value">{matchesCount}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Боевой счёт <InfoTooltip text="KDA: (убийства + ассисты) / смерти." /></div>
-          <div className="stat-card-value">{summary.kda_avg || '—'}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Фарм-темп <InfoTooltip text="GPM: золото в минуту в итоговой выборке." /></div>
-          <div className="stat-card-value">{summary.gpm_avg || '—'}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-label">Темп опыта <InfoTooltip text="XPM: опыт в минуту в итоговой выборке." /></div>
-          <div className="stat-card-value">{summary.xpm_avg || '—'}</div>
-        </div>
-      </div>
-
-      <div className="tabs">
-        <div className={`tab ${tab === 'trends' ? 'active' : ''}`} onClick={() => setTab('trends')}>Темп</div>
-        <div className={`tab ${tab === 'heroes' ? 'active' : ''}`} onClick={() => setTab('heroes')}>Герои</div>
-        <div className={`tab ${tab === 'roles' ? 'active' : ''}`} onClick={() => setTab('roles')}>Позиции</div>
-        <div className={`tab ${tab === 'features' ? 'active' : ''}`} onClick={() => setTab('features')}>Скиллы</div>
-        <div className={`tab ${tab === 'compare' ? 'active' : ''}`} onClick={() => setTab('compare')}>Сравнение</div>
-      </div>
-
-      {tab === 'trends' && (
-        <div>
-          {trends.gpm_over_time && trends.gpm_over_time.length > 0 ? (
-            <>
-              <div className="card mb-20">
-                <div className="section-header">
-                  <h3>Фарм-темп по отрезкам <InfoTooltip text="Как менялось ваше золото в минуту от матча к матчу." /></h3>
-                  <div className="section-line" />
-                </div>
-                {metricCounts.gpm === 0 ? (
-                  <p className="text-muted text-center" style={{ padding: 30 }}>
-                    Для выбранных матчей нет загруженного GPM. Это не нулевой фарм, а отсутствующая метрика.
-                  </p>
-                ) : (
-                  <ResponsiveContainer width="100%" height={280}>
-                    <LineChart data={trends.gpm_over_time}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
-                      <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={11} />
-                      <YAxis stroke="#7b8ba5" fontSize={11} />
-                      <Tooltip contentStyle={CHART_STYLE} />
-                      <Line type="monotone" dataKey="gpm" stroke="#00d4aa" strokeWidth={2.5}
-                        connectNulls={false}
-                        dot={{ fill: '#00d4aa', r: 3 }} activeDot={{ r: 5, fill: '#00ffc8' }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-              <div className="grid-2">
-                <div className="card mb-20">
-                  <div className="section-header">
-                    <h3>Результативность</h3>
-                    <div className="section-line" />
-                  </div>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <LineChart data={trends.winrate_over_time?.map((d: any) => ({ ...d, wr: +(d.winrate * 100).toFixed(1) }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
-                      <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={10} />
-                      <YAxis stroke="#7b8ba5" fontSize={10} domain={[0, 100]} />
-                      <Tooltip contentStyle={CHART_STYLE} />
-                      <Line type="monotone" dataKey="wr" stroke="#ffa502" strokeWidth={2} name="Винрейт %" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="card mb-20">
-                  <div className="section-header">
-                    <h3>Боевой счёт KDA</h3>
-                    <div className="section-line" />
-                  </div>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <LineChart data={trends.kda_over_time}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
-                      <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={10} />
-                      <YAxis stroke="#7b8ba5" fontSize={10} />
-                      <Tooltip contentStyle={CHART_STYLE} />
-                      <Line type="monotone" dataKey="kda" stroke="#7c5cfc" strokeWidth={2} name="KDA" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="card"><p className="text-muted text-center" style={{ padding: 30 }}>Нет данных трендов.</p></div>
-          )}
-        </div>
-      )}
-
-      {tab === 'heroes' && (
-        <div className="card">
-          <div className="section-header">
-            <h3>Пул героев</h3>
-            <div className="section-line" />
           </div>
-          {heroes.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={heroes.map((h: any) => ({ ...h, name: heroName(h.hero_id) }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
-                  <XAxis dataKey="name" stroke="#7b8ba5" fontSize={10} angle={-20} textAnchor="end" height={60} />
-                  <YAxis stroke="#7b8ba5" fontSize={11} />
-                  <Tooltip contentStyle={CHART_STYLE} />
-                  <Bar dataKey="games" fill="#00d4aa" name="Игр" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-              <div className="table-wrap mt-20">
-                <table>
-                  <thead><tr><th>Герой</th><th>Игр</th><th>WR</th><th>Боевой счёт</th></tr></thead>
-                  <tbody>
-                    {heroes.map((h: any) => (
-                      <tr key={h.hero_id}>
-                        <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <img src={heroIcon(h.hero_id)} alt="" style={{ width: 28, height: 28, borderRadius: 4 }}
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                          <strong>{heroName(h.hero_id)}</strong>
-                        </td>
-                        <td>{h.games}</td>
-                        <td style={{ color: h.winrate >= 0.5 ? 'var(--accent)' : 'var(--danger)' }}>
-                          {(h.winrate * 100).toFixed(1)}%
-                        </td>
-                        <td>{h.avg_kda}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <p className="text-muted text-center" style={{ padding: 30 }}>Нет данных по героям.</p>
-          )}
-        </div>
-      )}
-
-      {tab === 'roles' && (
-        <div className="card">
-          <div className="section-header">
-            <h3>Роли в матчах</h3>
-            <div className="section-line" />
-          </div>
-          {rolesData.length > 0 ? (
-            <div className="grid-2">
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie data={rolesData} dataKey="value" nameKey="name" cx="50%" cy="50%"
-                    outerRadius={110} innerRadius={60}
-                    label={({ name, value }) => `${name}: ${value}%`}>
-                    {rolesData.map((_: any, i: number) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={CHART_STYLE} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div>
-                {rolesData.map((r: any, i: number) => (
-                  <div key={r.key} style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    padding: '10px 0', borderBottom: '1px solid var(--border-color)',
-                  }}>
-                    <div className="flex gap-10" style={{ alignItems: 'center' }}>
-                      <div style={{ width: 12, height: 12, borderRadius: 3, background: COLORS[i % COLORS.length] }} />
-                      <RoleBadge role={r.key.replace('POS', '')} />
-                    </div>
-                    <strong>{r.value}%</strong>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-muted text-center" style={{ padding: 30 }}>
-              Данные по позициям загружаются...
-            </p>
-          )}
-        </div>
-      )}
-
-      {tab === 'features' && (
-        <div>
-          {categories.length > 0 ? (
-            categories.map((cat: any) => (
-              <div key={cat.key} className="card mb-20">
-                <div className="flex-between mb-10">
-                  <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
-                    {cat.name}
-                    <InfoTooltip text={FEATURE_TIPS[cat.key] || 'Категория навыков.'} />
-                  </h3>
-                  <div className="flex gap-10">
-                    <span className="badge badge-accent">Текущий: {cat.score}/10</span>
-                    <span className="badge badge-warning">Цель: {cat.target}/10</span>
-                  </div>
-                </div>
-                {cat.components.map((comp: any) => (
-                  <ComponentBar key={comp.key} name={comp.name} playerValue={comp.player_value}
-                    targetValue={comp.target_value} baselineValue={comp.baseline_value}
-                    score={comp.score} targetScore={comp.target_score}
-                    missing={Boolean(comp.missing)} />
-                ))}
-              </div>
-            ))
-          ) : (
-            <div className="card"><p className="text-muted text-center" style={{ padding: 30 }}>Навыки рассчитываются после загрузки матчей.</p></div>
-          )}
-        </div>
-      )}
-
-      {tab === 'compare' && (
-        <div className="card">
-          <div className="section-header">
-            <h3>
-              Сравнение с игроками того же ранга и роли
-              <InfoTooltip text="Насколько ваши метрики отличаются от среднего для вашего ранга. 100% = на уровне." />
-            </h3>
-            <div className="section-line" />
-          </div>
-          {Object.keys(comparisons).length > 0 ? (
-            <div className="grid-3">
-              {Object.entries(comparisons).map(([key, val]: [string, any]) => {
-                const pct = Math.round(val * 100);
-                const color = pct >= 100 ? 'var(--accent)' : pct >= 80 ? 'var(--warning)' : 'var(--danger)';
-                return (
-                  <div key={key} className="stat-card">
-                    <div className="stat-card-label">{key.replace(/_/g, ' ')}</div>
-                    <div className="stat-card-value" style={{ color }}>{pct}%</div>
-                    <div className="progress-bar" style={{ marginTop: 8 }}>
-                      <div className="progress-bar-fill" style={{
-                        width: `${Math.min(pct, 100)}%`,
-                        background: color,
-                      }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-muted text-center" style={{ padding: 30 }}>Нет данных для сравнения.</p>
-          )}
-        </div>
-      )}
+        ) : (
+          <EmptyState title="Недостаточно данных"
+            description={isLinked ? 'Слабые направления появятся после загрузки фитчей.' : 'Привяжите Steam.'} compact />
+        )}
+      </div>
     </div>
   );
 }
