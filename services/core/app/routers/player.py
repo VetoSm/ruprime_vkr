@@ -399,6 +399,122 @@ async def player_sync_status(
     return {"scheduled": False}
 
 
+def _owned_match_account_id(
+    db: Session, current_user: CurrentUser, match_id: int
+) -> int:
+    """Confirm ``match_id`` is in the current player's match history.
+
+    ``player_matches`` lives in the shared DB (written by ML), so core
+    can probe it directly via raw SQL without owning the model.
+    """
+    from sqlalchemy import text
+
+    profile = db.query(PlayerProfile).filter(
+        PlayerProfile.core_user_id == current_user.user_id
+    ).first()
+    if not profile or not profile.dota_account_id:
+        raise HTTPException(status_code=400, detail="Сначала привяжите Steam аккаунт")
+    try:
+        account_id = int(profile.dota_account_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Некорректный dota_account_id в профиле")
+
+    row = db.execute(
+        text("SELECT 1 FROM player_matches WHERE account_id = :acc AND match_id = :mid LIMIT 1"),
+        {"acc": account_id, "mid": match_id},
+    ).first()
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="Этот матч не найден в истории вашего аккаунта",
+        )
+    return account_id
+
+
+@router.get("/parse-progress")
+async def get_parse_progress(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Сколько из последних ~200 матчей уже распарсено."""
+    profile = db.query(PlayerProfile).filter(
+        PlayerProfile.core_user_id == current_user.user_id
+    ).first()
+    if not profile or not profile.dota_account_id:
+        return {"linked": False}
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                f"{settings.ML_SERVICE_URL}/ml/parse-progress/{profile.dota_account_id}",
+                headers=ml_headers(),
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            data["linked"] = True
+            return data
+    except httpx.RequestError:
+        pass
+    return {"linked": True, "error": "ML недоступен"}
+
+
+@router.get("/match/{match_id}")
+async def get_player_match_detail(
+    match_id: int,
+    refresh: bool = False,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Карточка одного матча текущего игрока.
+
+    Проверяет, что в этом матче играл именно этот аккаунт, и только
+    тогда проксирует в ML. Сторонние матчи (например, скопированный из
+    чата ID) не отдаём, чтобы не превращать сервис в открытый прокси
+    к OpenDota.
+    """
+    account_id = _owned_match_account_id(db, current_user, match_id)
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{settings.ML_SERVICE_URL}/ml/match-detail/{match_id}",
+                params={"account_id": account_id, "refresh": str(refresh).lower()},
+                headers=ml_headers(),
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"ML сервис недоступен: {e}")
+
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail=resp.json().get("detail", "Матч не найден"))
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"ML вернул {resp.status_code}: {resp.text[:300]}")
+
+    return resp.json()
+
+
+@router.post("/match/{match_id}/request-parse")
+async def request_player_match_parse(
+    match_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Пнуть OpenDota распарсить матч принудительно (когда ``is_parsed=false``).
+
+    Те же ownership-проверки, что и для GET — ничего чужого пнуть нельзя.
+    """
+    _owned_match_account_id(db, current_user, match_id)
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{settings.ML_SERVICE_URL}/ml/match-detail/{match_id}/request-parse",
+                headers=ml_headers(),
+            )
+        return resp.json() if resp.status_code == 200 else {"status": "error", "code": resp.status_code}
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"ML сервис недоступен: {e}")
+
+
 @router.get("/steam-data")
 async def get_steam_data(
     current_user: CurrentUser = Depends(get_current_user),

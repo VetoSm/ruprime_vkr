@@ -8,6 +8,11 @@ previously unauthenticated ML endpoints.
 
 Routes:
 - ``GET /ml/heroes`` — catalog of Dota heroes, authenticated users only.
+- ``GET /ml/player-account/{account_id}`` — cached Steam-side profile
+  (avatar, personaname, rank, lifetime games). Frontend uses it for the
+  coach catalog avatars and for player meta on a player profile page.
+  Authenticated users only — we don't expose this to anonymous traffic
+  to avoid turning the proxy into a free Steam scraper.
 - ``<ADMIN> /admin/ml/*``                     — proxied ML admin actions.
 - ``<ADMIN> GET /admin/ml/import-progress``   — SSE stream, proxied as-is.
 """
@@ -59,6 +64,19 @@ async def _forward_json(method: str, path: str, *, params=None, json=None):
 async def proxy_ml_heroes(_: CurrentUser = Depends(get_current_user)):
     """Hero catalog used by the frontend cache."""
     return await _forward_json("GET", "/ml/heroes")
+
+
+@router.get("/ml/player-account/{account_id}")
+async def proxy_ml_player_account(
+    account_id: int,
+    _: CurrentUser = Depends(get_current_user),
+):
+    """Cached player_accounts row (Steam avatar/personaname/rank).
+
+    Used by the frontend to render coach catalog avatars without exposing
+    the ML service directly.
+    """
+    return await _forward_json("GET", f"/ml/player-account/{account_id}")
 
 
 # ---------- Admin imports / training ----------

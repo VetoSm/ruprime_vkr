@@ -52,6 +52,13 @@ class CoachProfileResponse(BaseModel):
     experience_years: Optional[int] = None
     about: Optional[str] = None
     is_verified: bool = False
+    # Coach's linked Dota account id (as string — Dota account_id values can
+    # exceed 32-bit when serialised across JSON in some contexts). The
+    # frontend uses this to fetch the cached Steam avatar/personaname via
+    # `/ml/player-account/{account_id}` so coach cards render with a real
+    # avatar instead of initials. ``None`` when the coach has no linked
+    # Steam (catalog falls back to initials).
+    dota_account_id: Optional[str] = None
     # Auto-derived fallbacks: filled from the coach's own linked Steam history
     # when their profile is empty. Frontend uses these when the manual field
     # is null so a fresh coach still shows a meaningful card.

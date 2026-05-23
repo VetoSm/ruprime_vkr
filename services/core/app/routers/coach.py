@@ -1,5 +1,6 @@
 import os
 import logging
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -43,6 +44,23 @@ TEST_COACH_AUTH_IDS = {
 }
 
 
+def _coach_dota_account_id(c: CoachProfile, db: Session) -> Optional[str]:
+    """Look up the coach's linked Dota account_id, if any.
+
+    We surface this in the public coach catalog so the frontend can pull
+    the cached Steam avatar without an extra round-trip through admin
+    endpoints. Returns the raw ``dota_account_id`` string from the linked
+    ``PlayerProfile`` (same ``core_user_id``) — or ``None`` when the coach
+    hasn't linked Steam yet.
+    """
+    profile = db.query(PlayerProfile).filter(
+        PlayerProfile.core_user_id == c.core_user_id
+    ).first()
+    if profile and profile.dota_account_id:
+        return profile.dota_account_id
+    return None
+
+
 @router.get("/coach/profile", response_model=CoachProfileResponse)
 def get_coach_profile(
     current_user: CurrentUser = Depends(get_current_user),
@@ -54,7 +72,20 @@ def get_coach_profile(
     ).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Coach profile not found. Create one first.")
-    return profile
+    return CoachProfileResponse(
+        id=profile.id,
+        core_user_id=profile.core_user_id,
+        mmr_estimate=profile.mmr_estimate,
+        rank_tier=profile.rank_tier,
+        main_roles=profile.main_roles,
+        hero_pool=profile.hero_pool,
+        hourly_rate=profile.hourly_rate,
+        experience_years=profile.experience_years,
+        about=profile.about,
+        is_verified=bool(profile.is_verified),
+        dota_account_id=_coach_dota_account_id(profile, db),
+        profile_complete=bool(profile.about and profile.hourly_rate and (profile.mmr_estimate or profile.rank_tier)),
+    )
 
 
 @router.post("/coach/profile", response_model=CoachProfileResponse)
@@ -96,7 +127,20 @@ def create_or_update_coach_profile(
     log_action(db, current_user.user_id, current_user.role, "UPDATE_COACH_PROFILE",
                "COACH_PROFILE", profile.id)
 
-    return profile
+    return CoachProfileResponse(
+        id=profile.id,
+        core_user_id=profile.core_user_id,
+        mmr_estimate=profile.mmr_estimate,
+        rank_tier=profile.rank_tier,
+        main_roles=profile.main_roles,
+        hero_pool=profile.hero_pool,
+        hourly_rate=profile.hourly_rate,
+        experience_years=profile.experience_years,
+        about=profile.about,
+        is_verified=bool(profile.is_verified),
+        dota_account_id=_coach_dota_account_id(profile, db),
+        profile_complete=bool(profile.about and profile.hourly_rate and (profile.mmr_estimate or profile.rank_tier)),
+    )
 
 
 @router.get("/coaches", response_model=list[CoachProfileResponse])
@@ -151,6 +195,7 @@ def list_coaches(
             "experience_years": c.experience_years,
             "about": c.about,
             "is_verified": bool(c.is_verified),
+            "dota_account_id": _coach_dota_account_id(c, db),
             "auto_main_roles": auto.get("main_roles"),
             "auto_hero_pool": auto.get("hero_pool"),
             "auto_rank_tier": auto.get("rank_tier"),
