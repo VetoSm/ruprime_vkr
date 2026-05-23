@@ -997,7 +997,12 @@ def analyze_player_from_account(
         "last_match_at": sample_quality.get("latest_match_at"),
     }
 
-    # Trends by time periods (group by batches of 20 games)
+    # Trends by time periods (group by batches of 20 games).
+    # ``trends`` feeds the frontend "Динамика" chart on /stats. Keep the
+    # metric set wide enough that users can flip through their growth in
+    # different dimensions (combat / farm / consistency), but only emit
+    # series for metrics where the underlying column was present — otherwise
+    # the chart would show a flat zero line and look like a bug.
     df_sorted = df.sort_values("start_time", ascending=True).reset_index(drop=True)
     batch_size = max(len(df_sorted) // 5, 1)
     trends_data = []
@@ -1008,17 +1013,39 @@ def analyze_player_from_account(
         decidable = batch["win"].dropna()
         trends_data.append({
             "batch": f"Матчи {i+1}-{min(i+batch_size, len(df_sorted))}",
-            "gpm": _mean_present(batch["gold_per_min"], 1, default=None),
-            "xpm": _mean_present(batch["xp_per_min"], 1, default=None),
-            "winrate": round(float(decidable.mean()), 3) if len(decidable) > 0 else None,
-            "kda": round(batch["kda"].mean(), 2),
+            "gpm":       _mean_present(batch["gold_per_min"], 1, default=None),
+            "xpm":       _mean_present(batch["xp_per_min"], 1, default=None),
+            "winrate":   round(float(decidable.mean()), 3) if len(decidable) > 0 else None,
+            "kda":       round(batch["kda"].mean(), 2),
+            "kills":     _mean_present(batch["kills"], 1, default=None),
+            "deaths":    _mean_present(batch["deaths"], 1, default=None),
+            "assists":   _mean_present(batch["assists"], 1, default=None),
+            "last_hits": _mean_present(batch["last_hits"], 0, default=None),
+            "cs_per_min": _mean_present(batch["cs_per_min"], 2, default=None),
+            "hero_damage_per_min": _mean_present(batch["hero_damage_per_min"], 0, default=None),
+            "tower_damage": _mean_present(batch["tower_damage"], 0, default=None),
         })
 
+    def _series(metric: str) -> list:
+        out = []
+        for t in trends_data:
+            v = t.get(metric)
+            if v is not None:
+                out.append({"ts": t["batch"], metric: v})
+        return out
+
     trends = {
-        "gpm_over_time": [{"ts": t["batch"], "gpm": t["gpm"]} for t in trends_data],
-        "xpm_over_time": [{"ts": t["batch"], "xpm": t["xpm"]} for t in trends_data],
-        "winrate_over_time": [{"ts": t["batch"], "winrate": t["winrate"]} for t in trends_data],
-        "kda_over_time": [{"ts": t["batch"], "kda": t["kda"]} for t in trends_data],
+        "gpm_over_time":            _series("gpm"),
+        "xpm_over_time":            _series("xpm"),
+        "winrate_over_time":        _series("winrate"),
+        "kda_over_time":            _series("kda"),
+        "kills_over_time":          _series("kills"),
+        "deaths_over_time":         _series("deaths"),
+        "assists_over_time":        _series("assists"),
+        "last_hits_over_time":      _series("last_hits"),
+        "cs_per_min_over_time":     _series("cs_per_min"),
+        "hero_damage_per_min_over_time": _series("hero_damage_per_min"),
+        "tower_damage_over_time":   _series("tower_damage"),
     }
 
     # Roles distribution — filter out 0 (unknown) lane_role

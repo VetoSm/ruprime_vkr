@@ -28,6 +28,25 @@ const ROLE_DROPDOWN_OPTIONS = [
   { value: '5', label: 'Hard Support' },
 ];
 
+/* ============ Метрики для графика "Динамика"
+ * Ключ — имя серии в trends (без `_over_time`), `field` — имя свойства
+ * внутри точек серии (например, `gpm`/`winrate`). `decimals` контролирует
+ * формат подписи на тултипе/осях. `pct` — серия идёт в %.
+ * ===========================================================*/
+const METRIC_OPTIONS: { value: string; label: string; field: string; decimals: number; pct?: boolean; group?: string }[] = [
+  { value: 'kda',     label: 'KDA',              field: 'kda',     decimals: 2, group: 'Бой' },
+  { value: 'kills',   label: 'Убийства',         field: 'kills',   decimals: 1, group: 'Бой' },
+  { value: 'deaths',  label: 'Смерти',           field: 'deaths',  decimals: 1, group: 'Бой' },
+  { value: 'assists', label: 'Ассисты',          field: 'assists', decimals: 1, group: 'Бой' },
+  { value: 'gpm',     label: 'GPM',              field: 'gpm',     decimals: 0, group: 'Экономика' },
+  { value: 'xpm',     label: 'XPM',              field: 'xpm',     decimals: 0, group: 'Экономика' },
+  { value: 'last_hits', label: 'Last-hits',      field: 'last_hits', decimals: 0, group: 'Лейн' },
+  { value: 'cs_per_min', label: 'CS / мин',      field: 'cs_per_min', decimals: 2, group: 'Лейн' },
+  { value: 'hero_damage_per_min', label: 'Урон / мин', field: 'hero_damage_per_min', decimals: 0, group: 'Бой' },
+  { value: 'tower_damage', label: 'Урон по строениям', field: 'tower_damage', decimals: 0, group: 'Объекты' },
+  { value: 'winrate', label: 'Винрейт, %',       field: 'winrate', decimals: 1, pct: true, group: 'Итог' },
+];
+
 const FEATURE_TIPS: Record<string, string> = {
   farming: 'Эффективность фарма: золото в минуту, добивание крипов.',
   combat: 'Эффективность в боях: урон, убийства, ассисты.',
@@ -92,7 +111,7 @@ export default function PlayerStats() {
   const [period, setPeriod] = useState<typeof PERIOD_OPTIONS[number]['id']>('30d');
   const [selectedRole, setSelectedRole] = useState<string>('');
   const [selectedHero, setSelectedHero] = useState<string>('');
-  const [chartMetric, setChartMetric] = useState<'gpm' | 'xpm' | 'kda' | 'winrate'>('kda');
+  const [chartMetric, setChartMetric] = useState<string>('kda');
 
   // Активная фитча для widget "Слабые места"
   const [activeFeatureIdx, setActiveFeatureIdx] = useState(0);
@@ -195,24 +214,36 @@ export default function PlayerStats() {
 
   const activeFeature = weakFeaturesSorted[activeFeatureIdx];
 
-  /* График: трендовая метрика */
+  /* График: трендовая метрика. Берём конфиг из METRIC_OPTIONS — это
+     единственное место, где знаем как обрабатывать pct/decimals. */
+  const activeMetric = useMemo(
+    () => METRIC_OPTIONS.find((m) => m.value === chartMetric) || METRIC_OPTIONS[0],
+    [chartMetric],
+  );
+
   const dynamicTrend = useMemo(() => {
-    const key = `${chartMetric}_over_time`;
+    const key = `${activeMetric.value}_over_time`;
     const arr = (trends as any)[key];
     if (!Array.isArray(arr)) return [];
     return arr.map((p: any) => {
-      const raw = p[chartMetric];
-      const value = chartMetric === 'winrate' && typeof raw === 'number'
-        ? Number((raw * 100).toFixed(1))
-        : Number(raw);
-      return { ts: p.ts, value: Number.isFinite(value) ? value : 0 };
+      const raw = p[activeMetric.field];
+      let value = typeof raw === 'number' ? raw : Number(raw);
+      if (activeMetric.pct && Number.isFinite(value)) value = value * 100;
+      if (!Number.isFinite(value)) value = 0;
+      return { ts: p.ts, value: Number(value.toFixed(activeMetric.decimals)) };
     });
-  }, [trends, chartMetric]);
+  }, [trends, activeMetric]);
 
-  const dynamicLabel = chartMetric === 'gpm' ? 'GPM'
-                     : chartMetric === 'xpm' ? 'XPM'
-                     : chartMetric === 'kda' ? 'KDA'
-                     : 'Винрейт, %';
+  const dynamicLabel = activeMetric.label;
+  const dynamicGroupedOptions = useMemo(() => {
+    /* Отсортированы по группам, но возвращаем плоский массив с
+       group prefix в label — наш Dropdown не умеет в optgroup. */
+    return METRIC_OPTIONS.map((m) => ({
+      value: m.value,
+      label: m.label,
+      description: m.group,
+    }));
+  }, []);
 
   return (
     <div>
@@ -297,95 +328,148 @@ export default function PlayerStats() {
         />
       </div>
 
-      {/* ============ Row 1: Динамика | Тепловая карта ============ */}
-      <div className="stats-two-col">
-        <div className="card dash-card">
+      {/* ============ Row 1: Динамика (большая, слева) | Колонка справа (WR / Роли / Герои) ============ */}
+      <div className="stats-split">
+        {/* Большая «Динамика» — выше и шире. */}
+        <div className="card dash-card dash-card--chart-tall">
           <div className="card-head">
             <div className="card-title">Динамика</div>
-            <div className="seg-control" style={{ padding: 2 }}>
-              {(['gpm', 'xpm', 'kda', 'winrate'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  className={`seg-control-btn ${chartMetric === m ? 'active' : ''}`}
-                  onClick={() => setChartMetric(m)}
-                  style={{ padding: '5px 10px', fontSize: '0.78rem' }}
-                >
-                  {m === 'gpm' ? 'GPM' : m === 'xpm' ? 'XPM' : m === 'kda' ? 'KDA' : 'WR'}
-                </button>
-              ))}
-            </div>
+            <Dropdown
+              value={chartMetric}
+              onChange={setChartMetric}
+              options={dynamicGroupedOptions}
+              label="Метрика"
+              size="sm"
+              align="right"
+              maxHeight={360}
+            />
           </div>
           {dynamicTrend.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={dynamicTrend}>
+            <ResponsiveContainer width="100%" height={420}>
+              <LineChart data={dynamicTrend} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="dynamicLineGrad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%"   stopColor="#16e9d4" />
+                    <stop offset="100%" stopColor="#9b59ff" />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(22, 233, 212, 0.12)" />
                 <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={11} />
                 <YAxis stroke="#7b8ba5" fontSize={11} />
                 <Tooltip contentStyle={CHART_STYLE} formatter={(v: any) => [v, dynamicLabel]} />
-                <Line type="monotone" dataKey="value" stroke="#16e9d4" strokeWidth={2.5}
-                  dot={{ fill: '#16e9d4', r: 3 }} activeDot={{ r: 5, fill: '#00ffc8' }}
-                  name={dynamicLabel} />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke="url(#dynamicLineGrad)"
+                  strokeWidth={2.6}
+                  dot={{ fill: '#16e9d4', r: 3 }}
+                  activeDot={{ r: 6, fill: '#00ffc8' }}
+                  name={dynamicLabel}
+                />
               </LineChart>
             </ResponsiveContainer>
           ) : (
-            <EmptyState title="Данных пока нет" description={isLinked ? 'Подгружаем матчи.' : 'Привяжите Steam.'} compact />
+            <EmptyState
+              title="Данных пока нет"
+              description={isLinked ? 'Подгружаем матчи — здесь появится твоя кривая прогресса.' : 'Привяжите Steam, чтобы построить динамику.'}
+              compact
+            />
           )}
         </div>
 
-        <div className="card dash-card">
-          <div className="card-head">
-            <div className="card-title">Тепловая карта</div>
-            <span className="badge badge-muted">parsed-данные</span>
-          </div>
-          {/* Хитмап строится только из parsed-матчей с координатами событий.
-              Пока у бэка нет endpoint'а — карточка остаётся в состоянии "ждём данных". */}
-          <EmptyState
-            title="Появится из parsed-матчей"
-            description="Тепловая карта строится по координатам ивентов в матчах после parsed-загрузки. Как только данные подгрузятся — карточка обновится автоматически."
-            compact
-          />
-        </div>
-      </div>
-
-      {/* ============ Row 2: Винрейт по ролям (full width) ============ */}
-      <div className="card dash-card stats-row">
-        <div className="card-head">
-          <div className="card-title">Винрейт по ролям</div>
-          <span className="text-muted" style={{ fontSize: '0.78rem' }}>по последним {steamData?.recent_matches?.length || 0} матчам</span>
-        </div>
-        <div className="role-wr-list">
-          {roleStats.map((r) => (
-            <div key={r.role} className="role-wr-row">
-              <span className="role-wr-label">{r.label}</span>
-              <div className="role-wr-bar">
-                <div
-                  className="role-wr-bar-fill"
-                  style={{
-                    width: r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '0%',
-                    background: r.winrate != null && r.winrate >= 0.5
-                      ? 'linear-gradient(90deg, var(--accent-bright) 0%, var(--accent) 100%)'
-                      : 'linear-gradient(90deg, var(--purple) 0%, rgba(155, 89, 255, 0.6) 100%)',
-                  }}
-                />
-              </div>
-              <span className="role-wr-value">
-                {r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}
-                {r.total > 0 && <small> · {r.total}</small>}
+        {/* Узкая колонка: 3 блока друг под другом */}
+        <div className="stats-side-stack">
+          {/* Винрейт по ролям */}
+          <div className="card dash-card">
+            <div className="card-head">
+              <div className="card-title">Винрейт по ролям</div>
+              <span className="text-muted" style={{ fontSize: '0.72rem' }}>
+                {steamData?.recent_matches?.length || 0} м
               </span>
             </div>
-          ))}
+            <div className="role-wr-list role-wr-list--compact">
+              {roleStats.map((r) => (
+                <div key={r.role} className="role-wr-row role-wr-row--compact">
+                  <span className="role-wr-label">{r.label}</span>
+                  <div className="role-wr-bar">
+                    <div
+                      className="role-wr-bar-fill"
+                      style={{
+                        width: r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '0%',
+                        background: r.winrate != null && r.winrate >= 0.5
+                          ? 'linear-gradient(90deg, var(--accent-bright) 0%, var(--accent) 100%)'
+                          : 'linear-gradient(90deg, var(--purple) 0%, rgba(155, 89, 255, 0.6) 100%)',
+                      }}
+                    />
+                  </div>
+                  <span className="role-wr-value">
+                    {r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Игры по ролям */}
+          <div className="card dash-card">
+            <div className="card-head">
+              <div className="card-title">Игры по ролям</div>
+              <span className="text-muted" style={{ fontSize: '0.72rem' }}>средние</span>
+            </div>
+            <div className="role-stats-grid role-stats-grid--compact">
+              {roleStats.map((r) => (
+                <div key={r.role} className="role-stat-cell role-stat-cell--compact">
+                  <div className="role-stat-cell-head">
+                    <span className="role-stat-cell-name">{r.label}</span>
+                    <span className="role-stat-cell-count">{r.total} м</span>
+                  </div>
+                  <div className="role-stat-cell-metrics">
+                    <span><span className="role-stat-cell-metric-label">WR</span> <strong>{r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}</strong></span>
+                    <span><span className="role-stat-cell-metric-label">KDA</span> <strong>{r.kda != null ? r.kda.toFixed(2) : '—'}</strong></span>
+                    <span><span className="role-stat-cell-metric-label">GPM</span> <strong>{r.gpm != null ? r.gpm.toFixed(0) : '—'}</strong></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Топ героев — компактный вертикальный список */}
+          <div className="card dash-card">
+            <div className="card-head">
+              <div className="card-title">Топ героев</div>
+              <span className="text-muted" style={{ fontSize: '0.72rem' }}>{topHeroes.length} в пуле</span>
+            </div>
+            {topHeroes.length > 0 ? (
+              <div className="top-heroes-compact">
+                {topHeroes.slice(0, 6).map((h: any) => (
+                  <div key={h.hero_id} className="top-heroes-compact-row">
+                    <span className="top-heroes-compact-hero">
+                      <img src={heroIcon(h.hero_id)} alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      <span className="top-heroes-compact-name">{heroName(h.hero_id)}</span>
+                    </span>
+                    <span className="top-heroes-compact-meta">
+                      <span className="top-heroes-compact-games">{h.games} м</span>
+                      <span className="top-heroes-compact-wr">{(h.winrate * 100).toFixed(0)}%</span>
+                      <span className="top-heroes-compact-kda">{Number(h.avg_kda).toFixed(1)}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="Героев пока нет" description={isLinked ? 'Подгружаем матчи.' : 'Привяжите Steam.'} compact />
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ============ Row 3: Радар | Игры по ролям ============ */}
+      {/* ============ Row 2: Радар (60%) | Тепловая карта (40%) ============ */}
       <div className="stats-two-col">
         <div className="card dash-card">
           <div className="card-head">
             <div className="card-title">Радар навыков</div>
           </div>
           {radarData.length > 2 ? (
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={300}>
               <RadarChart data={radarData}>
                 <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
                 <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={11} />
@@ -403,58 +487,17 @@ export default function PlayerStats() {
 
         <div className="card dash-card">
           <div className="card-head">
-            <div className="card-title">Игры по ролям</div>
-            <span className="text-muted" style={{ fontSize: '0.78rem' }}>средние</span>
+            <div className="card-title">Тепловая карта</div>
+            <span className="badge badge-muted">parsed-данные</span>
           </div>
-          <div className="role-stats-grid">
-            {roleStats.map((r) => (
-              <div key={r.role} className="role-stat-cell">
-                <div className="role-stat-cell-head">
-                  <span className="role-stat-cell-name">{r.label}</span>
-                  <span className="role-stat-cell-count">{r.total} м</span>
-                </div>
-                <div className="role-stat-cell-metrics">
-                  <span><span className="role-stat-cell-metric-label">WR</span> <strong>{r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}</strong></span>
-                  <span><span className="role-stat-cell-metric-label">KDA</span> <strong>{r.kda != null ? r.kda.toFixed(2) : '—'}</strong></span>
-                  <span><span className="role-stat-cell-metric-label">GPM</span> <strong>{r.gpm != null ? r.gpm.toFixed(0) : '—'}</strong></span>
-                </div>
-              </div>
-            ))}
-          </div>
+          {/* Хитмап строится только из parsed-матчей с координатами событий.
+              Пока у бэка нет endpoint'а — карточка остаётся в состоянии "ждём данных". */}
+          <EmptyState
+            title="Появится из parsed-матчей"
+            description="Тепловая карта строится по координатам ивентов в матчах после parsed-загрузки. Как только данные подгрузятся — карточка обновится автоматически."
+            compact
+          />
         </div>
-      </div>
-
-      {/* ============ Row 4: Топ героев (full width) ============ */}
-      <div className="card dash-card stats-row">
-        <div className="card-head">
-          <div className="card-title">Топ героев</div>
-        </div>
-        {topHeroes.length > 0 ? (
-          <div className="top-heroes-table">
-            <div className="top-heroes-head">
-              <span>Герой</span>
-              <span>Матчей</span>
-              <span>Винрейт</span>
-              <span>KDA</span>
-            </div>
-            {topHeroes.slice(0, 6).map((h: any) => (
-              <div key={h.hero_id} className="top-heroes-row">
-                <span className="match-hero">
-                  <img src={heroIcon(h.hero_id)} alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  <span>{heroName(h.hero_id)}</span>
-                </span>
-                <span className="text-muted">{h.games}</span>
-                <span className="top-heroes-wr">
-                  <span className="top-heroes-wr-value">{(h.winrate * 100).toFixed(0)}%</span>
-                  <span className="top-heroes-wr-bar"><span style={{ width: `${Math.min(100, h.winrate * 100)}%` }} /></span>
-                </span>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(h.avg_kda).toFixed(1)}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState title="Героев пока нет" description={isLinked ? 'Подгружаем матчи.' : 'Привяжите Steam.'} compact />
-        )}
       </div>
 
       {/* ============ Слабые места — circular widget ============ */}

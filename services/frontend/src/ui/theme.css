@@ -2455,6 +2455,107 @@ table tr:hover {
 }
 @media (max-width: 1100px) { .stats-two-col { grid-template-columns: 1fr; } }
 
+/* Split row: wide chart on the left, narrow stack on the right.
+   The right column holds three smaller cards (WR by role / role stats /
+   top heroes) stacked one under another. */
+.stats-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 1fr);
+  gap: 18px;
+  margin-bottom: 18px;
+  align-items: stretch;
+}
+.stats-side-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.stats-side-stack > .card { margin: 0; }
+@media (max-width: 1100px) {
+  .stats-split { grid-template-columns: 1fr; }
+}
+
+/* Tall chart card — used for the "Динамика" tile inside .stats-split.
+   The card sizes itself to the chart's own ResponsiveContainer height
+   (~420px) plus padding, so the right column ends up roughly the same
+   tall and the three side cards fill it neatly without an awkward gap
+   below. */
+.dash-card--chart-tall {
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+}
+.dash-card--chart-tall > .recharts-responsive-container,
+.dash-card--chart-tall > div:has(> .recharts-responsive-container) {
+  flex: 1;
+}
+
+/* Compact variants for the side stack. Same look, just denser:
+   smaller gaps, smaller numbers, single column for the role grid. */
+.role-wr-list--compact { gap: 8px; }
+.role-wr-row--compact {
+  grid-template-columns: 70px 1fr 42px;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+.role-wr-row--compact .role-wr-label { font-size: 0.78rem; }
+.role-wr-row--compact .role-wr-value { font-size: 0.78rem; }
+
+.role-stats-grid--compact { grid-template-columns: 1fr 1fr; gap: 6px; }
+.role-stat-cell--compact { padding: 8px 10px; gap: 6px; }
+.role-stat-cell--compact .role-stat-cell-name { font-size: 0.82rem; }
+.role-stat-cell--compact .role-stat-cell-metrics strong { font-size: 0.88rem; }
+.role-stat-cell--compact .role-stat-cell-metric-label { font-size: 0.62rem; }
+.role-stat-cell--compact .role-stat-cell-count { font-size: 0.66rem; }
+
+/* Compact top heroes list — vertical, one hero per row, key numbers
+   on the right. Used inside the narrow side column on /stats. */
+.top-heroes-compact { display: flex; flex-direction: column; gap: 4px; }
+.top-heroes-compact-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  transition: var(--transition);
+}
+.top-heroes-compact-row:hover {
+  background: rgba(22, 233, 212, 0.05);
+  border-color: var(--border-color);
+}
+.top-heroes-compact-hero {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.top-heroes-compact-hero img {
+  width: 26px; height: 26px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+.top-heroes-compact-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.top-heroes-compact-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+}
+.top-heroes-compact-games { color: var(--text-muted); }
+.top-heroes-compact-wr    { color: var(--accent); font-weight: 700; }
+.top-heroes-compact-kda   { color: var(--text-primary); font-weight: 600; }
+
 .stats-badge-delta {
   background: rgba(22, 233, 212, 0.12);
   color: var(--accent);
@@ -4301,6 +4402,11 @@ table tr:hover {
  * =========================================================== */
 .dropdown { position: relative; display: inline-block; }
 .dropdown--md { width: 100%; max-width: 320px; }
+.dropdown--md .dropdown-trigger { width: 100%; }
+/* When the dropdown lives inside a .form-group (label above, control below),
+   it should fill the available width like form-input does. */
+.form-group > .dropdown { display: block; width: 100%; }
+.form-group > .dropdown > .dropdown-trigger { width: 100%; }
 
 .dropdown-trigger {
   display: inline-flex;
