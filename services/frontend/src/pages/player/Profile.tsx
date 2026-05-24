@@ -63,6 +63,7 @@ export default function PlayerProfile() {
   /* ---- Data ---- */
   const [profile, setProfile] = useState<any>(null);
   const [steamData, setSteamData] = useState<any>(null);
+  const [syncStatus, setSyncStatus] = useState<any>(null);
   const [features, setFeatures] = useState<any>(null);
 
   /* ---- Profile fields ---- */
@@ -114,6 +115,25 @@ export default function PlayerProfile() {
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!steamData?.linked) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await coreApi.get('/player/sync-status');
+        if (cancelled) return;
+        setSyncStatus(r.data);
+        if (r.data?.status === 'queued' || r.data?.status === 'running') {
+          window.setTimeout(tick, 5000);
+        }
+      } catch {
+        if (!cancelled) setSyncStatus(null);
+      }
+    };
+    tick();
+    return () => { cancelled = true; };
+  }, [steamData?.linked]);
 
   useEffect(() => {
     coreApi.get('/player/profile').then((r) => {
@@ -436,6 +456,17 @@ export default function PlayerProfile() {
                         <div className="text-muted" style={{ fontSize: '0.76rem', marginTop: 4 }}>
                           Данные обновляются автоматически в фоне.
                         </div>
+                        {syncStatus && (
+                          <div className="profile-sync-pill">
+                            {syncStatus.status === 'queued' || syncStatus.status === 'running' ? 'Догружаем' : 'Синхронизация'}
+                            {typeof syncStatus.fetched_matches === 'number' && typeof syncStatus.planned_fetch_matches === 'number' && (
+                              <> · {syncStatus.fetched_matches.toLocaleString('ru-RU')} / {syncStatus.planned_fetch_matches.toLocaleString('ru-RU')} матчей</>
+                            )}
+                            {typeof syncStatus.parse_requested === 'number' && syncStatus.parse_requested > 0 && (
+                              <> · parsed: {syncStatus.parse_requested.toLocaleString('ru-RU')}</>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

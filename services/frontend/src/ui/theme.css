@@ -2575,10 +2575,14 @@ table tr:hover {
   margin: 0;
 }
 .stats-equal-card {
+  display: flex;
+  flex-direction: column;
   min-height: 320px;
+  overflow: hidden;
 }
 .stats-side-stack > .stats-equal-card {
-  min-height: 0;
+  flex: 0 0 320px;
+  min-height: 320px;
 }
 @media (max-width: 1100px) {
   .stats-split,
@@ -2625,10 +2629,18 @@ table tr:hover {
 
 /* Compact top heroes list — vertical, one hero per row, key numbers
    on the right. Used inside the narrow side column on /stats. */
-.top-heroes-compact { display: flex; flex-direction: column; gap: 4px; }
+.top-heroes-compact {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
 .top-heroes-compact-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(86px, auto);
   align-items: center;
   gap: 10px;
   padding: 7px 9px;
@@ -2645,6 +2657,7 @@ table tr:hover {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  overflow: hidden;
 }
 .top-heroes-compact-hero img {
   /* Та же логика, что и в «Последних матчах»: круглый портрет с
@@ -2667,9 +2680,12 @@ table tr:hover {
 .top-heroes-compact-meta {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-end;
+  gap: 7px;
   font-variant-numeric: tabular-nums;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
+  min-width: 0;
+  white-space: nowrap;
 }
 .top-heroes-compact-games { color: var(--text-muted); }
 .top-heroes-compact-wr    { color: var(--accent); font-weight: 700; }
@@ -5174,14 +5190,20 @@ table tr:hover {
 .app-sidebar.collapsed { padding: 18px 8px 14px; align-items: center; }
 
 .app-sidebar-brand {
-  padding: 4px 8px 18px;
+  padding: 6px 6px 18px;
   border-bottom: 1px solid rgba(22, 233, 212, 0.10);
   margin-bottom: 14px;
   width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
-.app-sidebar-brand > div { margin-bottom: 0 !important; max-width: 100%; }
-.app-sidebar-brand span { max-width: 100%; white-space: nowrap; }
+.app-sidebar-brand > div { margin-bottom: 0 !important; max-width: 100%; overflow: visible; }
+.app-sidebar-brand span {
+  display: inline-block;
+  line-height: 1.18;
+  max-width: 100%;
+  padding: 2px 3px 3px 0;
+  white-space: nowrap;
+}
 
 .oracle-answer-widget {
   margin: 0 0 14px;
@@ -5191,6 +5213,34 @@ table tr:hover {
   background:
     radial-gradient(260px 160px at 12% 0%, rgba(22, 233, 212, 0.12), transparent 70%),
     rgba(8, 16, 38, 0.62);
+}
+.oracle-message-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 10px;
+}
+.oracle-message-head div {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.oracle-message-head span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+.oracle-message-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid rgba(22, 233, 212, 0.22);
+  box-shadow: 0 0 14px rgba(125, 94, 255, 0.20);
+}
+.oracle-message-avatar--lg {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
 }
 .oracle-answer-widget-head,
 .oracle-answer-widget-kpis {
@@ -5248,6 +5298,19 @@ table tr:hover {
 .oracle-mini-radar-row strong {
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
+}
+.profile-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(22, 233, 212, 0.22);
+  background: rgba(22, 233, 212, 0.08);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 .app-sidebar.collapsed .app-sidebar-brand {
   padding: 4px 0 14px;
@@ -5748,7 +5811,7 @@ table tr:hover {
 .hero-role-pill.active {
   border-color: rgba(22, 233, 212, 0.55);
   background: linear-gradient(135deg, rgba(22, 233, 212, 0.18), rgba(155, 89, 255, 0.16));
-  box-shadow: 0 0 0 1px rgba(22, 233, 212, 0.2) inset;
+  box-shadow: 0 0 0 1px rgba(22, 233, 212, 0.45) inset, 0 0 12px rgba(22, 233, 212, 0.16);
 }
 .hero-role-pill small {
   font-size: 0.7rem;

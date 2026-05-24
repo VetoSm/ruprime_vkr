@@ -339,7 +339,6 @@ export default function PlayerDashboard() {
 
   const categories = detailedFeatures?.categories || [];
   const topGaps = detailedFeatures?.top_gaps || [];
-  const effectiveAnalysisRole = selectedAnalysisRole || (detailedFeatures?.baseline_role ? `POS${detailedFeatures.baseline_role}` : '');
 
   // 3 худших ринга для правой части skill блока
   const worstRings = useMemo(() => {
@@ -371,6 +370,11 @@ export default function PlayerDashboard() {
       .map(([role, count]) => ({ role, count, pct: count / total }))
       .sort((a, b) => b.count - a.count);
   }, [recentMatches]);
+
+  const effectiveAnalysisRole = selectedAnalysisRole
+    || (detailedFeatures?.baseline_role ? `POS${detailedFeatures.baseline_role}` : '')
+    || (popularRoles[0]?.role ? `POS${popularRoles[0].role}` : '');
+  const effectiveAnalysisRoleAuto = !selectedAnalysisRole && Boolean(effectiveAnalysisRole);
 
   // Дельта GPM матча относительно предыдущего (для колонки GPM ▲)
   const gpmDeltas = useMemo(() => {
@@ -856,7 +860,9 @@ export default function PlayerDashboard() {
               <InfoTooltip text="Три самых слабых направления в выбранном окне. Жмите кольцо — слева раскроется детализация в виде прогресс-баров." />
             </div>
             {effectiveAnalysisRole && (
-              <span className="badge badge-purple">{roleName(effectiveAnalysisRole)}</span>
+              <span className="badge badge-purple">
+                {roleName(effectiveAnalysisRole)}{effectiveAnalysisRoleAuto ? ' · авто' : ''}
+              </span>
             )}
           </div>
           {worstRings.length > 0 ? (

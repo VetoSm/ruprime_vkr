@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 
+const ORACLE_AVATAR = '/decor/oracle-avatar.png';
+
 interface ChatEntry {
   type: 'user' | 'ai';
   text: string;
@@ -26,6 +28,8 @@ function stripAnswerMeta(raw: string) {
     .replace(/^#+\s*(Вопрос|Ваш вопрос|Повтор вопроса)\s*[:\n][\s\S]*?(?=\n#+\s+|$)/i, '')
     .replace(/^#\s+Советы тренера\s*\n+/i, '')
     .replace(/##\s+Резюме[\s\S]*?(?=\n##\s+|$)/i, '')
+    .replace(/##\s+Тренировочный контекст[\s\S]*?(?=\n##\s+|$)/i, '')
+    .replace(/##\s+Общие советы[\s\S]*?(?=\n##\s+|$)/i, '')
     .trim();
 }
 
@@ -133,6 +137,13 @@ function OracleMessage({ text, contextBasis, showWidget }: { text: string; conte
 
   return (
     <div className="oracle-message">
+      <div className="oracle-message-head">
+        <img src={ORACLE_AVATAR} alt="" className="oracle-message-avatar" />
+        <div>
+          <strong>Оракул</strong>
+          <span>разбор по текущему срезу</span>
+        </div>
+      </div>
       {showWidget && <OracleContextWidget basis={contextBasis} />}
       {blocks}
       {meta.length > 0 && (
@@ -158,9 +169,6 @@ export default function PlayerAiChat() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
-  const [contextBasis, setContextBasis] = useState<any>(null);
-  const [showContextRadar, setShowContextRadar] = useState(false);
-  const [showBasis, setShowBasis] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
@@ -179,6 +187,7 @@ export default function PlayerAiChat() {
   const send = async (preset?: string) => {
     const userMsg = preset || input;
     if (!userMsg.trim()) return;
+    const shouldShowWidget = !messages.some((m) => m.type === 'ai' && m.contextBasis);
     setMessages((prev) => [...prev, { type: 'user', text: userMsg }]);
     setInput('');
     setLoading(true);
@@ -201,14 +210,12 @@ export default function PlayerAiChat() {
       if (res.data.llm_error && res.data.llm_status !== 'generated') {
         meta.push(`Причина: ${res.data.llm_error}`);
       }
-      setContextBasis(res.data.context_basis || null);
-      setShowContextRadar(Boolean(res.data.show_context_radar));
       const metaText = meta.length ? `\n\n---\n${meta.join('\n')}` : '';
       setMessages((prev) => [...prev, {
         type: 'ai',
         text: `${res.data.advice_full || res.data.advice_summary || 'Нет ответа'}${metaText}`,
         contextBasis: res.data.context_basis || null,
-        showWidget: Boolean(res.data.show_context_radar),
+        showWidget: shouldShowWidget && Boolean(res.data.context_basis),
       }]);
     } catch (e: any) {
       const detail = e?.response?.data?.detail;
@@ -231,8 +238,6 @@ export default function PlayerAiChat() {
     await coreApi.delete('/ai/history').catch(() => {});
     setMessages([]);
     setHistory([]);
-    setContextBasis(null);
-    setShowContextRadar(false);
   };
 
   return (
@@ -244,24 +249,7 @@ export default function PlayerAiChat() {
 
       <div className="card" style={{ minHeight: 500, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-          <div
-            aria-hidden="true"
-            style={{
-              width: 52,
-              height: 52,
-              borderRadius: 14,
-              border: '1px solid var(--border-color)',
-              background: 'var(--purple-bg)',
-              color: 'var(--accent-bright)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 900,
-              letterSpacing: 1,
-            }}
-          >
-            О
-          </div>
+          <img src={ORACLE_AVATAR} alt="" className="oracle-message-avatar oracle-message-avatar--lg" />
           <div>
             <div style={{ fontWeight: 800 }}>Оракул Древних</div>
             <div className="text-muted" style={{ fontSize: '0.82rem' }}>
@@ -273,49 +261,6 @@ export default function PlayerAiChat() {
             <Link to="/dashboard" className="btn btn-outline btn-sm">К дашборду</Link>
           </div>
         </div>
-        {contextBasis && showContextRadar && (
-          <div className="card mb-20" style={{ padding: 12, borderStyle: 'dashed' }}>
-            <div className="flex-between" style={{ gap: 10, flexWrap: 'wrap' }}>
-              <div>
-                <strong>Текущий срез игрока</strong>
-                <div className="text-muted" style={{ fontSize: '0.78rem' }}>
-                  Показывается один раз в начале диалога: выборка, матчей и слабые категории.
-                </div>
-              </div>
-              <button className="btn btn-outline btn-sm" onClick={() => setShowBasis((v) => !v)}>
-                {showBasis ? 'Свернуть' : 'Развернуть'}
-              </button>
-            </div>
-            {showBasis && (
-              <div style={{ marginTop: 10, fontSize: '0.86rem' }}>
-                <div className="text-muted">Выборка: {contextBasis.scope || '—'} · Матчей: {contextBasis.matches ?? '—'} · Общий балл: {contextBasis.overall_score ?? '—'}</div>
-                {contextBasis.top_gaps?.length > 0 && (
-                  <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-                    {contextBasis.top_gaps.slice(0, 5).map((g: any, idx: number) => (
-                      <li key={idx}>{g.component}: {g.player_value} → {g.target_value}</li>
-                    ))}
-                  </ul>
-                )}
-                {contextBasis.weak_categories?.length > 0 && (
-                  <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
-                    {contextBasis.weak_categories.slice(0, 4).map((c: any) => {
-                      const pct = Math.max(0, Math.min(100, Number(c.score || 0) * 10));
-                      return (
-                        <div key={c.key || c.name} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 42px', gap: 8, alignItems: 'center' }}>
-                          <span className="text-muted">{c.name || c.key}</span>
-                          <span style={{ height: 6, borderRadius: 999, background: 'rgba(22, 233, 212, 0.10)', overflow: 'hidden' }}>
-                            <span style={{ display: 'block', width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, #f6c463, #ff4757)' }} />
-                          </span>
-                          <strong>{Number(c.score || 0).toFixed(1)}</strong>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
         <div className="chat-container" style={{ flex: 1 }}>
           {messages.length === 0 && (
             <div className="text-center text-muted oracle-empty-state">

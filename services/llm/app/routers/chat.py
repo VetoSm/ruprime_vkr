@@ -366,6 +366,7 @@ def _build_llm_messages(message: str, context: dict | None) -> list[dict[str, st
             "В full_text дай разбор по top_gaps: текущий показатель, цель, почему это важно, что делать.",
             "Дай 3-5 практических шагов на ближайшие 10 игр.",
             "Если в player_context.training есть тренировки или цели, привяжи рекомендации к ним.",
+            "Не пересказывай сырые поля профиля, список целей или слово 'проблема' как отдельные метки; превращай их в короткие игровые действия.",
             "Не добавляй общие советы без привязки к feature_gaps/categories.",
             "Не повторяй вопрос пользователя отдельным блоком.",
             "Не добавляй в full_text раздел Резюме: summary уже выводится отдельно в UI.",
@@ -478,18 +479,11 @@ def _generate_template_response(message: str, context: dict = None) -> tuple[str
     # Build full text
     full_text = f"# Советы тренера\n\n"
     full_text += f"Сравниваю с целью: **{target_rank}**. Если включены роль/герой, советы относятся именно к этой выборке.\n\n"
-    if training_profile or training_sessions:
-        role_hint = _human_role_names(training_profile.get("analysis_role") or ", ".join(training_profile.get("desired_roles") or []) or "не выбрана")
-        goals = training_profile.get("training_goals") or []
-        full_text += "## Тренировочный контекст\n\n"
+    if training_sessions and (training_sessions.get("planned_count", 0) or training_sessions.get("completed_count", 0)):
         full_text += (
-            f"- Роль/фокус из профиля: **{role_hint}**\n"
-            f"- Запланировано тренировок: **{training_sessions.get('planned_count', 0)}**, "
-            f"завершено: **{training_sessions.get('completed_count', 0)}**\n"
+            f"Учитываю тренировки: запланировано {training_sessions.get('planned_count', 0)}, "
+            f"завершено {training_sessions.get('completed_count', 0)}. Ниже — только игровые действия, без пересказа профиля.\n\n"
         )
-        if goals:
-            full_text += f"- Цели игрока: {', '.join(map(str, goals[:4]))}\n"
-        full_text += "\n"
     snapshot = _category_snapshot(categories)
     if snapshot:
         full_text += "## Самые слабые категории\n\n"
