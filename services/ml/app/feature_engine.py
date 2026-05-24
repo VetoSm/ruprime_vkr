@@ -839,23 +839,11 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
         unknown_role_count = int(after_period - len(valid_roles_for_counts))
 
     explicit_role = filters["role"]
-    role_source = "explicit" if explicit_role else "auto"
+    role_source = "explicit" if explicit_role else "none"
     auto_role = None
     role_pool = result.copy()
     if explicit_role and role_col in result.columns:
         result = result[result[role_col] == explicit_role]
-    elif not explicit_role and role_col in result.columns:
-        valid_roles = result[role_col].dropna()
-        valid_roles = valid_roles[(valid_roles >= 1) & (valid_roles <= 5)]
-        # Auto-role now uses exact + inferred roles, so every match belongs to
-        # a bucket. Still only auto-narrow when the leading role is meaningful.
-        if not valid_roles.empty and len(valid_roles) >= 10 and len(valid_roles) >= 0.3 * max(len(result), 1):
-            candidate = int(valid_roles.mode().iloc[0])
-            kept = int((result[role_col] == candidate).sum())
-            if kept >= 10:
-                auto_role = candidate
-                filters["role"] = auto_role
-                result = result[result[role_col] == auto_role]
 
     if filters["hero_id"] and "hero_id" in result.columns:
         result = result[result["hero_id"] == filters["hero_id"]]
@@ -1195,45 +1183,51 @@ def analyze_player_from_account(
         "last_match_at": sample_quality.get("latest_match_at"),
     }
 
-    # Trends by time periods (group by batches of 20 games).
-    # ``trends`` feeds the frontend "Динамика" chart on /stats. Keep the
-    # metric set wide enough that users can flip through their growth in
-    # different dimensions (combat / farm / consistency), but only emit
-    # series for metrics where the underlying column was present — otherwise
-    # the chart would show a flat zero line and look like a bug.
+    def _json_int(value, default=None):
+        try:
+            if value is None or pd.isna(value):
+                return default
+            return int(value)
+        except Exception:
+            return default
+
+    def _safe_round(v, digits):
+        try:
+            if v is None or pd.isna(v):
+                return None
+            return round(float(v), digits)
+        except Exception:
+            return None
+
+    # Trends by match, oldest -> newest. The UI may hide most X-axis labels,
+    # but the line itself must contain every match event in the filtered
+    # window. GPM/XPM/KDA are per-match values; winrate is cumulative up to
+    # that match so it still reads as a curve rather than 0/100 spikes.
     df_sorted = df.sort_values("start_time", ascending=True).reset_index(drop=True)
-    batch_size = max(len(df_sorted) // 5, 1)
     trends_data = []
-    for i in range(0, len(df_sorted), batch_size):
-        batch = df_sorted.iloc[i:i + batch_size]
-        if len(batch) == 0:
-            continue
-        decidable = batch["win"].dropna()
-        # Surface batch positional bounds + a representative unix timestamp so
-        # the frontend can pick its X-axis flavour: numeric match index for
-        # the dashboard "Динамика" mini-chart (3 ticks: 1, mid, last) or a
-        # formatted date for the /stats Dynamics chart. ``start_ts``/``end_ts``
-        # are unix seconds (None when start_time was NaN for the whole batch).
-        start_times = batch["start_time"].dropna()
-        start_ts = int(start_times.min()) if len(start_times) > 0 else None
-        end_ts = int(start_times.max()) if len(start_times) > 0 else None
+    wins_seen = []
+    for i, row in df_sorted.iterrows():
+        if pd.notna(row.get("win")):
+            wins_seen.append(float(row.get("win")))
+        ts = row.get("start_time")
+        ts_int = int(ts) if pd.notna(ts) else None
         trends_data.append({
-            "batch": f"Матчи {i+1}-{min(i+batch_size, len(df_sorted))}",
             "batch_start_idx": i + 1,
-            "batch_end_idx": min(i + batch_size, len(df_sorted)),
-            "start_ts": start_ts,
-            "end_ts": end_ts,
-            "gpm":       _mean_present(batch["gold_per_min"], 1, default=None),
-            "xpm":       _mean_present(batch["xp_per_min"], 1, default=None),
-            "winrate":   round(float(decidable.mean()), 3) if len(decidable) > 0 else None,
-            "kda":       round(batch["kda"].mean(), 2),
-            "kills":     _mean_present(batch["kills"], 1, default=None),
-            "deaths":    _mean_present(batch["deaths"], 1, default=None),
-            "assists":   _mean_present(batch["assists"], 1, default=None),
-            "last_hits": _mean_present(batch["last_hits"], 0, default=None),
-            "cs_per_min": _mean_present(batch["cs_per_min"], 2, default=None),
-            "hero_damage_per_min": _mean_present(batch["hero_damage_per_min"], 0, default=None),
-            "tower_damage": _mean_present(batch["tower_damage"], 0, default=None),
+            "batch_end_idx": i + 1,
+            "start_ts": ts_int,
+            "end_ts": ts_int,
+            "match_id": _json_int(row.get("match_id")),
+            "gpm": _safe_round(row.get("gold_per_min"), 1),
+            "xpm": _safe_round(row.get("xp_per_min"), 1),
+            "winrate": round(float(sum(wins_seen) / len(wins_seen)), 3) if wins_seen else None,
+            "kda": _safe_round(row.get("kda"), 2),
+            "kills": _safe_round(row.get("kills"), 1),
+            "deaths": _safe_round(row.get("deaths"), 1),
+            "assists": _safe_round(row.get("assists"), 1),
+            "last_hits": _safe_round(row.get("last_hits"), 0),
+            "cs_per_min": _safe_round(row.get("cs_per_min"), 2),
+            "hero_damage_per_min": _safe_round(row.get("hero_damage_per_min"), 0),
+            "tower_damage": _safe_round(row.get("tower_damage"), 0),
         })
 
     def _series(metric: str) -> list:
@@ -1242,11 +1236,12 @@ def analyze_player_from_account(
             v = t.get(metric)
             if v is not None:
                 out.append({
-                    "ts": t["batch"],
+                    "ts": t["match_id"] or f"Матч {t['batch_end_idx']}",
                     "batch_start_idx": t["batch_start_idx"],
                     "batch_end_idx": t["batch_end_idx"],
                     "start_ts": t["start_ts"],
                     "end_ts": t["end_ts"],
+                    "match_id": t["match_id"],
                     metric: v,
                 })
         return out
@@ -1264,14 +1259,6 @@ def analyze_player_from_account(
         "hero_damage_per_min_over_time": _series("hero_damage_per_min"),
         "tower_damage_over_time":   _series("tower_damage"),
     }
-    def _json_int(value, default=None):
-        try:
-            if value is None or pd.isna(value):
-                return default
-            return int(value)
-        except Exception:
-            return default
-
     recent_rows = df.sort_values("start_time", ascending=False, na_position="last").head(20)
     trends["recent_matches"] = [
         {
@@ -1315,14 +1302,6 @@ def analyze_player_from_account(
             winrate=("win", "mean"),
             avg_kda=("kda", "mean"),
         ).reset_index().sort_values("games", ascending=False).head(10)
-    def _safe_round(v, digits):
-        try:
-            if v is None or pd.isna(v):
-                return None
-            return round(float(v), digits)
-        except Exception:
-            return None
-
     heroes_data = {
         "top_heroes": [
             {"hero_id": int(r["hero_id"]), "games": int(r["games"]),

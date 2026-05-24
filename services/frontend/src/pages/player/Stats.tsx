@@ -301,6 +301,17 @@ export default function PlayerStats() {
     return String(p.ts ?? '');
   };
 
+  const dynamicTicks = useMemo(() => {
+    const n = dynamicTrend.length;
+    if (n <= 1) return [0];
+    const desired = Math.min(6, Math.max(3, Math.ceil(n / 25)));
+    const ticks = new Set<number>();
+    for (let i = 0; i < desired; i += 1) {
+      ticks.add(Math.round((i * (n - 1)) / (desired - 1)));
+    }
+    return Array.from(ticks).sort((a, b) => a - b);
+  }, [dynamicTrend.length]);
+
   const dynamicLabel = activeMetric.label;
   const dynamicGroupedOptions = useMemo(() => {
     /* Отсортированы по группам, но возвращаем плоский массив с
@@ -441,13 +452,9 @@ export default function PlayerStats() {
                   dataKey="idx"
                   type="number"
                   domain={[0, Math.max(0, dynamicTrend.length - 1)]}
-                  // Тики строим явно из всех точек серии. Recharts с
-                  // type="number" иначе ставит 5 фиксированных значений
-                  // по линейке домена и для коротких выборок дублирует
-                  // одну и ту же дату.
-                  ticks={dynamicTrend.length > 1
-                    ? Array.from({ length: dynamicTrend.length }, (_, i) => i)
-                    : [0]}
+                  // Линия содержит все матчи, но подписи X-оси показываем
+                  // разреженно: иначе 100-500 матчей превращают ось в кашу.
+                  ticks={dynamicTicks}
                   interval="preserveStartEnd"
                   stroke="#7b8ba5"
                   fontSize={11}

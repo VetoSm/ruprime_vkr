@@ -2542,8 +2542,12 @@ table tr:hover {
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  height: 100%;
 }
-.stats-side-stack > .card { margin: 0; }
+.stats-side-stack > .card {
+  flex: 1 1 0;
+  margin: 0;
+}
 @media (max-width: 1100px) {
   .stats-split,
   .stats-split--even,
@@ -2557,8 +2561,8 @@ table tr:hover {
    underneath. */
 .weak-card--in-split { margin-bottom: 0; }
 .weak-card--in-split .weak-circle-layout {
-  grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
-  gap: 20px;
+  grid-template-columns: minmax(220px, 240px) minmax(0, 1fr);
+  gap: 18px;
 }
 .weak-card--in-split .weak-list {
   grid-column: 1 / -1;
@@ -5735,16 +5739,41 @@ table tr:hover {
    Добавляем contain и min-width: 0, и подрезаем горизонтальный
    overflow самой карточки, чтобы компоненты внутри жили в своих
    границах. */
-.weak-card--in-split { overflow: hidden; }
+.weak-card--in-split { overflow: visible; }
 .weak-card--in-split .weak-circle-layout {
   align-items: start;
 }
+.weak-card--in-split .weak-circle {
+  min-width: 220px;
+  padding: 0;
+  overflow: visible;
+}
+.weak-card--in-split .weak-circle svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
 .weak-card--in-split .weak-circle-details {
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
+}
+.weak-card--in-split .weak-circle-row {
+  grid-template-columns: 1fr;
+  gap: 3px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid rgba(22, 233, 212, 0.08);
+  border-radius: 9px;
+  background: rgba(8, 16, 38, 0.36);
+}
+.weak-card--in-split .weak-circle-row strong {
+  justify-self: start;
 }
 .weak-card--in-split .weak-circle-components-list {
   max-width: 100%;
+}
+.stats-split--wide-left > .card:not(.weak-card) {
+  min-height: 320px;
 }
 
 /* === Coach card: короткое описание === */
