@@ -587,7 +587,7 @@ export default function PlayerStats() {
             Теперь шире (3fr вместо clamp ~340px) — больше места для
             метрик и имён героев. */}
         <div className="stats-side-stack">
-          <div className="card dash-card">
+          <div className="card dash-card stats-equal-card">
             <div className="card-head">
               <div className="card-title">Игры по ролям</div>
               <span className="text-muted" style={{ fontSize: '0.72rem' }}>средние</span>
@@ -611,7 +611,7 @@ export default function PlayerStats() {
             </div>
           </div>
 
-          <div className="card dash-card">
+          <div className="card dash-card stats-equal-card">
             <div className="card-head">
               <div className="card-title">Топ героев</div>
               <span className="text-muted" style={{ fontSize: '0.72rem' }}>{topHeroes.length} в пуле</span>
@@ -804,7 +804,7 @@ export default function PlayerStats() {
         {/* Тепловая карта — узкая колонка справа. Пока бэк не отдаёт
             координаты ивентов из replay parser, держим explicit empty
             state в компактной форме. */}
-        <div className="card dash-card">
+        <div className="card dash-card stats-equal-card">
           <div className="card-head">
             <div className="card-title">Тепловая карта</div>
             <span className="badge badge-muted">parsed</span>

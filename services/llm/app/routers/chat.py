@@ -299,13 +299,13 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def _normalise_llm_payload(parsed: dict[str, Any]) -> tuple[str, list[str], str] | None:
-    summary = _clean_visible_answer(str(parsed.get("summary") or ""))
-    full_text = _clean_visible_answer(str(parsed.get("full_text") or ""))
+    summary = _human_role_names(_clean_visible_answer(str(parsed.get("summary") or "")))
+    full_text = _human_role_names(_clean_visible_answer(str(parsed.get("full_text") or "")))
     plan_raw = parsed.get("plan") or []
     if isinstance(plan_raw, str):
-        plan = [line.strip(" -0123456789.") for line in plan_raw.splitlines() if line.strip()]
+        plan = [_human_role_names(line.strip(" -0123456789.")) for line in plan_raw.splitlines() if line.strip()]
     elif isinstance(plan_raw, list):
-        plan = [str(item).strip() for item in plan_raw if str(item).strip()]
+        plan = [_human_role_names(str(item).strip()) for item in plan_raw if str(item).strip()]
     else:
         plan = []
     if not summary or not full_text:
@@ -320,6 +320,20 @@ def _clean_visible_answer(text: str) -> str:
     return text.strip()
 
 
+def _human_role_names(text: str) -> str:
+    replacements = {
+        "POS1": "керри",
+        "POS2": "мид",
+        "POS3": "оффлейн",
+        "POS4": "софт-саппорт",
+        "POS5": "хард-саппорт",
+    }
+    out = text or ""
+    for code, label in replacements.items():
+        out = re.sub(rf"\b{code}\b", label, out, flags=re.I)
+    return out
+
+
 def _build_llm_messages(message: str, context: dict | None) -> list[dict[str, str]]:
     fallback_summary, fallback_plan, fallback_full = _generate_template_response(message, context)
     system = (
@@ -330,8 +344,9 @@ def _build_llm_messages(message: str, context: dict | None) -> list[dict[str, st
         "Не утверждай, что видишь данные других игроков или аккаунтов, если их нет в player_context. "
         "Не выдумывай недоступные данные. Если vision_data показывает missing_matches_in_scope > 0, "
         "обязательно напиши, что выводы по вардам предварительные и данные догружаются. "
-        "Учитывай роль: для POS4/POS5 не ругай игрока за низкий GPM/ластхиты как кора, "
+        "Учитывай роль: для софт-саппорта и хард-саппорта не ругай игрока за низкий GPM/ластхиты как кора, "
         "а объясняй это через смерти, участие, вижн, темп и свободные волны. "
+        "Не используй коды POS1/POS2/POS3/POS4/POS5 в видимом ответе; называй роли словами: керри, мид, оффлейн, софт-саппорт, хард-саппорт. "
         "Учитывай training в контексте: запланированные и завершённые тренировки, выбранную/любимую роль, цели игрока и роль, которая лучше всего подходит по данным. "
         "Давай гибкие игровые рекомендации, которые игрок может обсуждать и превращать в тренировочные цели; не выдавай их как единственно возможный маршрут. "
         "Не показывай рассуждения, chain-of-thought, черновики или повтор вопроса пользователя. "
@@ -354,6 +369,7 @@ def _build_llm_messages(message: str, context: dict | None) -> list[dict[str, st
             "Не добавляй общие советы без привязки к feature_gaps/categories.",
             "Не повторяй вопрос пользователя отдельным блоком.",
             "Не добавляй в full_text раздел Резюме: summary уже выводится отдельно в UI.",
+            "Не используй POS-коды в ответе, только названия ролей словами.",
         ],
     }
     return [
@@ -463,7 +479,7 @@ def _generate_template_response(message: str, context: dict = None) -> tuple[str
     full_text = f"# Советы тренера\n\n"
     full_text += f"Сравниваю с целью: **{target_rank}**. Если включены роль/герой, советы относятся именно к этой выборке.\n\n"
     if training_profile or training_sessions:
-        role_hint = training_profile.get("analysis_role") or ", ".join(training_profile.get("desired_roles") or []) or "не выбрана"
+        role_hint = _human_role_names(training_profile.get("analysis_role") or ", ".join(training_profile.get("desired_roles") or []) or "не выбрана")
         goals = training_profile.get("training_goals") or []
         full_text += "## Тренировочный контекст\n\n"
         full_text += (
@@ -514,7 +530,7 @@ def _generate_template_response(message: str, context: dict = None) -> tuple[str
     for tip in GENERAL_TIPS[:3]:
         full_text += f"- {tip}\n"
 
-    return summary, plan, full_text
+    return _human_role_names(summary), [_human_role_names(p) for p in plan], _human_role_names(full_text)
 
 
 def _generate_response(message: str, context: dict = None) -> tuple[str, list[str], str]:

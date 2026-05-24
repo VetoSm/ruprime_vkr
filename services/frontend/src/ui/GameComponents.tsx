@@ -13,12 +13,44 @@ const RANK_DATA: Record<number, { name: string; color: string }> = {
   8: { name: 'Immortal', color: 'var(--rank-immortal)' },
 };
 
+const RANK_FALLBACK_COLORS: Record<number, string> = {
+  1: '#8b8b8b',
+  2: '#b0c4de',
+  3: '#90ee90',
+  4: '#f0e68c',
+  5: '#ffd700',
+  6: '#ff8c00',
+  7: '#ff69b4',
+  8: '#ff4444',
+};
+
 const RANK_NAMES_RU: Record<string, string> = {
   herald: 'Рекрут', guardian: 'Страж', crusader: 'Рыцарь', archon: 'Герой',
   legend: 'Легенда', ancient: 'Властелин', divine: 'Божество', immortal: 'Титан',
   HERALD: 'Рекрут', GUARDIAN: 'Страж', CRUSADER: 'Рыцарь', ARCHON: 'Герой',
   LEGEND: 'Легенда', ANCIENT: 'Властелин', DIVINE: 'Божество', IMMORTAL: 'Титан',
 };
+
+function rankMedalFallbackSvg(medal: number, color: string) {
+  const label = medal === 8 ? 'I' : String(medal);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+      <defs>
+        <radialGradient id="g" cx="50%" cy="35%" r="70%">
+          <stop offset="0%" stop-color="#fff7d6"/>
+          <stop offset="45%" stop-color="${color}"/>
+          <stop offset="100%" stop-color="#4b1020"/>
+        </radialGradient>
+        <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity=".45"/>
+        </filter>
+      </defs>
+      <path filter="url(#s)" d="M48 6 76 18 88 46 72 78 48 90 24 78 8 46 20 18Z" fill="url(#g)" stroke="#ffdca8" stroke-width="4"/>
+      <path d="M48 15 69 24 78 46 66 69 48 78 30 69 18 46 27 24Z" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="3"/>
+      <text x="48" y="59" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="900" fill="#fff" stroke="#35121c" stroke-width="2">${label}</text>
+    </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
 
 interface RankBadgeProps {
   rankTier?: number | null;
@@ -46,6 +78,7 @@ export function RankBadge({ rankTier, rankName, size = 'md' }: RankBadgeProps) {
   // Valve renders the star count inside the medal icon itself, so we
   // never duplicate "[N]" in text. The icon is the source of truth.
   const iconUrl = `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/rank_icons/rank_icon_${medal}.png`;
+  const fallbackIconUrl = rankMedalFallbackSvg(medal, RANK_FALLBACK_COLORS[medal] || '#16e9d4');
   const sizes = { sm: 20, md: 28, lg: 40 };
   const fontSize = { sm: '0.75rem', md: '0.85rem', lg: '1rem' };
 
@@ -57,29 +90,11 @@ export function RankBadge({ rankTier, rankName, size = 'md' }: RankBadgeProps) {
       background: `${info.color}10`,
       fontSize: fontSize[size], fontWeight: 700, color: info.color,
     }}>
-      {!imgFailed ? (
-        <img src={iconUrl} alt={info.name} style={{ width: sizes[size], height: sizes[size] }}
+      <img
+        src={imgFailed ? fallbackIconUrl : iconUrl}
+        alt={info.name}
+        style={{ width: sizes[size], height: sizes[size], objectFit: 'contain', flexShrink: 0 }}
           onError={() => setImgFailed(true)} />
-      ) : (
-        <span
-          aria-label={info.name}
-          style={{
-            width: sizes[size],
-            height: sizes[size],
-            borderRadius: '50%',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: `${info.color}22`,
-            color: info.color,
-            border: `1px solid ${info.color}66`,
-            fontSize: size === 'lg' ? 18 : 12,
-            lineHeight: 1,
-          }}
-        >
-          {medal === 8 ? 'I' : medal}
-        </span>
-      )}
       {info.name}
     </span>
   );

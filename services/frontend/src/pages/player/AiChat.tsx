@@ -5,10 +5,19 @@ import { coreApi } from '../../api/client';
 interface ChatEntry {
   type: 'user' | 'ai';
   text: string;
+  contextBasis?: any;
+  showWidget?: boolean;
 }
 
 function cleanInline(text: string) {
-  return text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/^>\s?/, '');
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/^>\s?/, '')
+    .replace(/\bPOS1\b/gi, 'керри')
+    .replace(/\bPOS2\b/gi, 'мид')
+    .replace(/\bPOS3\b/gi, 'оффлейн')
+    .replace(/\bPOS4\b/gi, 'софт-саппорт')
+    .replace(/\bPOS5\b/gi, 'хард-саппорт');
 }
 
 function stripAnswerMeta(raw: string) {
@@ -20,7 +29,39 @@ function stripAnswerMeta(raw: string) {
     .trim();
 }
 
-function OracleMessage({ text }: { text: string }) {
+function OracleContextWidget({ basis }: { basis: any }) {
+  if (!basis) return null;
+  const weak = Array.isArray(basis.weak_categories) ? basis.weak_categories.slice(0, 4) : [];
+  return (
+    <div className="oracle-answer-widget">
+      <div className="oracle-answer-widget-head">
+        <strong>Текущий срез</strong>
+        <span>{basis.scope || 'выбранные матчи'} · {basis.matches ?? '—'} м</span>
+      </div>
+      <div className="oracle-answer-widget-kpis">
+        <span>WR <strong>{typeof basis.winrate === 'number' ? `${(basis.winrate * 100).toFixed(0)}%` : '—'}</strong></span>
+        <span>MMR <strong>{basis.mmr ?? '—'}</strong></span>
+        <span>Балл <strong>{typeof basis.overall_score === 'number' ? basis.overall_score.toFixed(1) : (basis.overall_score ?? '—')}</strong></span>
+      </div>
+      {weak.length > 0 && (
+        <div className="oracle-mini-radar">
+          {weak.map((c: any) => {
+            const score = Math.max(0, Math.min(10, Number(c.score || 0)));
+            return (
+              <div key={c.key || c.name} className="oracle-mini-radar-row">
+                <span>{c.name || c.key}</span>
+                <div><i style={{ width: `${score * 10}%` }} /></div>
+                <strong>{score.toFixed(1)}</strong>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OracleMessage({ text, contextBasis, showWidget }: { text: string; contextBasis?: any; showWidget?: boolean }) {
   const [body, metaRaw] = text.split(/\n---\n/);
   const lines = stripAnswerMeta(body).split('\n');
   const blocks: JSX.Element[] = [];
@@ -92,6 +133,7 @@ function OracleMessage({ text }: { text: string }) {
 
   return (
     <div className="oracle-message">
+      {showWidget && <OracleContextWidget basis={contextBasis} />}
       {blocks}
       {meta.length > 0 && (
         <div style={{
@@ -165,6 +207,8 @@ export default function PlayerAiChat() {
       setMessages((prev) => [...prev, {
         type: 'ai',
         text: `${res.data.advice_full || res.data.advice_summary || 'Нет ответа'}${metaText}`,
+        contextBasis: res.data.context_basis || null,
+        showWidget: Boolean(res.data.show_context_radar),
       }]);
     } catch (e: any) {
       const detail = e?.response?.data?.detail;
@@ -292,7 +336,7 @@ export default function PlayerAiChat() {
           {messages.map((msg, i) => (
             <div key={i} className={`chat-message ${msg.type}`}>
               {msg.type === 'ai' ? (
-                <OracleMessage text={msg.text} />
+                <OracleMessage text={msg.text} contextBasis={msg.contextBasis} showWidget={msg.showWidget} />
               ) : (
                 <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.9rem' }}>{msg.text}</div>
               )}

@@ -83,7 +83,14 @@ export function rankMedalIcon(rt: number | null | undefined): string {
   if (!rt || rt <= 0) return '';
   const medal = Math.floor(rt / 10);
   if (medal < 1 || medal > 8) return '';
-  return `${VALVE_CDN}/apps/dota2/images/dota_react/rank_icons/rank_icon_${medal}.png`;
+  const colors: Record<number, string> = {
+    1: '#8b8b8b', 2: '#b0c4de', 3: '#90ee90', 4: '#f0e68c',
+    5: '#ffd700', 6: '#ff8c00', 7: '#ff69b4', 8: '#ff4444',
+  };
+  const label = medal === 8 ? 'I' : String(medal);
+  const color = colors[medal] || '#16e9d4';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><radialGradient id="g" cx="50%" cy="35%" r="70%"><stop offset="0%" stop-color="#fff7d6"/><stop offset="45%" stop-color="${color}"/><stop offset="100%" stop-color="#4b1020"/></radialGradient></defs><path d="M48 6 76 18 88 46 72 78 48 90 24 78 8 46 20 18Z" fill="url(#g)" stroke="#ffdca8" stroke-width="4"/><path d="M48 15 69 24 78 46 66 69 48 78 30 69 18 46 27 24Z" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="3"/><text x="48" y="59" text-anchor="middle" font-family="Arial,sans-serif" font-size="34" font-weight="900" fill="#fff" stroke="#35121c" stroke-width="2">${label}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 export function roleName(role: number | string): string {
