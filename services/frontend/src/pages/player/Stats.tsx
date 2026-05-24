@@ -14,6 +14,10 @@ import { RoleBadge } from '../../ui/GameComponents';
 const CHART_STYLE = { background: '#0d1a35', border: '1px solid rgba(22, 233, 212, 0.20)', color: '#e8edf5', borderRadius: 8 };
 
 const PERIOD_OPTIONS: { id: string; label: string; backend: string }[] = [
+  { id: '10',  label: '10 матчей',  backend: '10' },
+  { id: '20',  label: '20 матчей',  backend: '20' },
+  { id: '50',  label: '50 матчей',  backend: '50' },
+  { id: '100', label: '100 матчей', backend: '100' },
   { id: '3d',  label: '3 дня',   backend: '3d' },
   { id: '7d',  label: '7 дней',  backend: '7d' },
   { id: '30d', label: '30 дней', backend: '30d' },
@@ -475,8 +479,8 @@ export default function PlayerStats() {
                   dataKey="value"
                   stroke="url(#dynamicLineGrad)"
                   strokeWidth={2.6}
-                  dot={{ fill: '#16e9d4', r: 3 }}
-                  activeDot={{ r: 6, fill: '#00ffc8' }}
+                  dot={false}
+                  activeDot={{ r: 5, fill: '#00ffc8', stroke: '#0d1a35', strokeWidth: 2 }}
                   name={dynamicLabel}
                 />
               </LineChart>
@@ -494,7 +498,7 @@ export default function PlayerStats() {
             «Радаром навыков»: WR по ролям информативнее как сосед графика
             динамики (две сводных метрики рядом), а радар лучше работает
             в нижнем ряду вместе с разбивкой по ролям и топом героев. */}
-        <div className="card dash-card">
+        <div className="card dash-card stats-radar-card">
           <div className="card-head">
             <div className="card-title">Винрейт по ролям</div>
             <span className="text-muted" style={{ fontSize: '0.78rem' }}>
@@ -538,7 +542,7 @@ export default function PlayerStats() {
             </span>
           </div>
           {radarData.length > 2 ? (
-            <ResponsiveContainer width="100%" height={320}>
+            <ResponsiveContainer width="100%" height={420}>
               <RadarChart data={radarData}>
                 <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
                 <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={11} />

@@ -2503,6 +2503,12 @@ table tr:hover {
   order: 4;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
+.stats-radar-card {
+  min-height: 500px;
+}
+.stats-radar-card .recharts-responsive-container {
+  flex: 1;
+}
 .stats-split--even {
   /* Историческое имя — оставлено для совместимости (если в коде где-то
      ещё используется). Сейчас совпадает с дефолтным .stats-split. */
