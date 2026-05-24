@@ -594,12 +594,132 @@ from app.match_clusters import (
 RANKED_GAME_MODES = {2, 3, 4, 22}
 TURBO_GAME_MODE = 23
 
-DEFAULT_STATS_MODE = "ranked"
+DEFAULT_STATS_MODE = "all"
 DEFAULT_STATS_PERIOD = "50"
 # Minimum ranked matches in the analysis window before we trust the
 # ranked baseline. Below that we fall back to unranked+turbo with a clear
 # disclaimer on the response.
 RANKED_FALLBACK_MIN = 8
+
+_HERO_DEFAULT_ROLE_CACHE: dict[int, tuple[int, float]] | None = None
+
+
+def _hero_default_roles() -> dict[int, tuple[int, float]]:
+    """Most likely role per hero from global baseline data.
+
+    The value is ``hero_id -> (role, confidence)``. Confidence is the share of
+    that hero's baseline matches played on the chosen role.
+    """
+    global _HERO_DEFAULT_ROLE_CACHE
+    if _HERO_DEFAULT_ROLE_CACHE is not None:
+        return _HERO_DEFAULT_ROLE_CACHE
+    try:
+        rows = pd.read_sql(
+            """
+            SELECT hero_id, role, COALESCE(match_count, 0) AS match_count
+            FROM ml_kaggle_baselines
+            WHERE hero_id IS NOT NULL AND role BETWEEN 1 AND 5
+            """,
+            engine,
+        )
+    except Exception:
+        _HERO_DEFAULT_ROLE_CACHE = {}
+        return _HERO_DEFAULT_ROLE_CACHE
+    out: dict[int, tuple[int, float]] = {}
+    if not rows.empty:
+        for hero_id, group in rows.groupby("hero_id"):
+            total = float(group["match_count"].sum())
+            if total <= 0:
+                continue
+            best = group.sort_values("match_count", ascending=False).iloc[0]
+            out[int(hero_id)] = (int(best["role"]), float(best["match_count"]) / total)
+    _HERO_DEFAULT_ROLE_CACHE = out
+    return out
+
+
+def _with_effective_roles(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure every match has a role used by filters and role stats.
+
+    Exact ``lane_role`` from OpenDota wins. Missing roles are estimated only
+    when there is a real signal: the player's own role for the same hero,
+    global hero default role, player's modal role, then a low-confidence
+    team-slot fallback. If no signal exists, the match remains role-unknown:
+    it stays in "all roles" stats but is not forced into POS1..POS5.
+    """
+    if df.empty or "lane_role" not in df.columns:
+        return df
+
+    out = df.copy()
+    raw_roles = pd.to_numeric(out["lane_role"], errors="coerce")
+    exact_mask = raw_roles.between(1, 5)
+    out["lane_role_effective"] = raw_roles.where(exact_mask)
+    out["role_is_estimated"] = False
+    out["role_confidence"] = np.where(exact_mask, 1.0, np.nan)
+    out["role_source"] = "unknown"
+
+    known = out[exact_mask]
+    hero_role: dict[int, int] = {}
+    if not known.empty and "hero_id" in known.columns:
+        for hero_id, group in known.groupby("hero_id"):
+            if pd.isna(hero_id):
+                continue
+            role_counts = pd.to_numeric(group["lane_role"], errors="coerce").dropna()
+            role_counts = role_counts[role_counts.between(1, 5)]
+            if not role_counts.empty:
+                hero_role[int(hero_id)] = int(role_counts.mode().iloc[0])
+
+    modal_role = None
+    known_roles = raw_roles[exact_mask]
+    if not known_roles.empty:
+        modal_role = int(known_roles.mode().iloc[0])
+
+    hero_defaults = _hero_default_roles()
+
+    def _slot_role(slot) -> int | None:
+        try:
+            idx = int(slot) % 128
+        except Exception:
+            return None
+        if 0 <= idx <= 4:
+            return idx + 1
+        return None
+
+    for idx, row in out[out["lane_role_effective"].isna()].iterrows():
+        hero_id = row.get("hero_id")
+        try:
+            hero_key = int(hero_id) if pd.notna(hero_id) else None
+        except Exception:
+            hero_key = None
+
+        role = None
+        confidence = 0.0
+        source = "unknown"
+        if hero_key is not None and hero_key in hero_role:
+            role, confidence, source = hero_role[hero_key], 0.85, "player_hero_history"
+        elif hero_key is not None and hero_key in hero_defaults:
+            role = hero_defaults[hero_key][0]
+            confidence = max(0.45, min(0.75, hero_defaults[hero_key][1]))
+            source = "global_hero_baseline"
+        elif modal_role is not None:
+            role, confidence, source = modal_role, 0.55, "player_role_history"
+        else:
+            role = _slot_role(row.get("player_slot"))
+            if role is not None:
+                confidence, source = 0.35, "player_slot_fallback"
+
+        if role is None:
+            out.at[idx, "role_confidence"] = 0.0
+            out.at[idx, "role_source"] = "unknown"
+            continue
+
+        out.at[idx, "lane_role_effective"] = int(role)
+        out.at[idx, "role_is_estimated"] = True
+        out.at[idx, "role_confidence"] = float(confidence)
+        out.at[idx, "role_source"] = source
+
+    out.loc[exact_mask, "role_source"] = "opendota_lane_role"
+    out["role_confidence"] = out["role_confidence"].fillna(0.0).astype(float)
+    return out
 
 
 def _filter_ranked(df: pd.DataFrame) -> pd.DataFrame:
@@ -670,6 +790,7 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
     # Classify every row into ranked / turbo / unranked / other up front
     # so subsequent filtering and counts share one definition.
     result = add_cluster_column(result)
+    result = _with_effective_roles(result)
     cluster_counts = counts_by_cluster(result)
     mode_counts = {
         "all": total_available,
@@ -709,8 +830,9 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
 
     role_counts: dict[str, int] = {str(i): 0 for i in range(1, 6)}
     unknown_role_count = 0
-    if "lane_role" in result.columns:
-        role_values = pd.to_numeric(result["lane_role"], errors="coerce")
+    role_col = "lane_role_effective" if "lane_role_effective" in result.columns else "lane_role"
+    if role_col in result.columns:
+        role_values = pd.to_numeric(result[role_col], errors="coerce")
         valid_roles_for_counts = role_values[(role_values >= 1) & (role_values <= 5)]
         for role_num, count in valid_roles_for_counts.value_counts().to_dict().items():
             role_counts[str(int(role_num))] = int(count)
@@ -720,24 +842,20 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
     role_source = "explicit" if explicit_role else "auto"
     auto_role = None
     role_pool = result.copy()
-    if explicit_role and "lane_role" in result.columns:
-        result = result[result["lane_role"] == explicit_role]
-    elif not explicit_role and "lane_role" in result.columns:
-        valid_roles = result["lane_role"].dropna()
+    if explicit_role and role_col in result.columns:
+        result = result[result[role_col] == explicit_role]
+    elif not explicit_role and role_col in result.columns:
+        valid_roles = result[role_col].dropna()
         valid_roles = valid_roles[(valid_roles >= 1) & (valid_roles <= 5)]
-        # OpenDota only fills lane_role for parsed matches (recentMatches +
-        # explicit /request). For unparsed history the column is NULL. If we
-        # blindly auto-filter by the most common role we'd discard 95 % of the
-        # history just because we know the role for 5 % of it. So only apply
-        # auto-role when at least ~30 % of the available matches have a
-        # detected role and we'll keep at least 10 of them after filtering.
+        # Auto-role now uses exact + inferred roles, so every match belongs to
+        # a bucket. Still only auto-narrow when the leading role is meaningful.
         if not valid_roles.empty and len(valid_roles) >= 10 and len(valid_roles) >= 0.3 * max(len(result), 1):
             candidate = int(valid_roles.mode().iloc[0])
-            kept = int((result["lane_role"] == candidate).sum())
+            kept = int((result[role_col] == candidate).sum())
             if kept >= 10:
                 auto_role = candidate
                 filters["role"] = auto_role
-                result = result[result["lane_role"] == auto_role]
+                result = result[result[role_col] == auto_role]
 
     if filters["hero_id"] and "hero_id" in result.columns:
         result = result[result["hero_id"] == filters["hero_id"]]
@@ -777,6 +895,8 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
         "role_pool_count": int(len(role_pool)),
         "role_counts": role_counts,
         "unknown_role_count": unknown_role_count,
+        "exact_role_count": int((result.get("role_is_estimated") == False).sum()) if "role_is_estimated" in result.columns else 0,
+        "estimated_role_count": int((result.get("role_is_estimated") == True).sum()) if "role_is_estimated" in result.columns else 0,
         "before_period_count": before_period,
         "base_report_count": after_period,
         "narrowing_applied": narrowing_applied,
@@ -797,10 +917,11 @@ def _role_breakdown(df: pd.DataFrame) -> dict:
     """Role stats for the same base report window before an explicit role cut."""
     rows = []
     unknown_role_count = 0
-    if df.empty or "lane_role" not in df.columns:
+    role_col = "lane_role_effective" if "lane_role_effective" in df.columns else "lane_role"
+    if df.empty or role_col not in df.columns:
         return {"role_stats": rows, "unknown_role_count": 0, "base_report_count": int(len(df))}
 
-    role_values = pd.to_numeric(df["lane_role"], errors="coerce")
+    role_values = pd.to_numeric(df[role_col], errors="coerce")
     unknown_role_count = int(((role_values < 1) | (role_values > 5) | role_values.isna()).sum())
     for role_num in range(1, 6):
         matches = df[role_values == role_num].copy()
@@ -838,6 +959,8 @@ def _role_breakdown(df: pd.DataFrame) -> dict:
     return {
         "role_stats": rows,
         "unknown_role_count": unknown_role_count,
+        "exact_role_count": int((df.get("role_is_estimated") == False).sum()) if "role_is_estimated" in df.columns else 0,
+        "estimated_role_count": int((df.get("role_is_estimated") == True).sum()) if "role_is_estimated" in df.columns else 0,
         "base_report_count": int(len(df)),
     }
 
@@ -938,7 +1061,13 @@ def analyze_player_from_account(
             return None
         return int(rw) if int(slot) < 128 else int(not rw)
 
-    df["win"] = df.apply(_win_row, axis=1)
+    if df.empty:
+        # pandas returns an empty DataFrame for axis=1 apply on an empty frame,
+        # which cannot be assigned into a single column. Keep the schema stable
+        # so empty filtered windows return an honest "no matches" response.
+        df["win"] = pd.Series(dtype="float64")
+    else:
+        df["win"] = df.apply(_win_row, axis=1)
     if not df_role_base.empty:
         df_role_base["win"] = df_role_base.apply(_win_row, axis=1)
         df_role_base["kda"] = (
@@ -1157,19 +1286,25 @@ def analyze_player_from_account(
             "gpm": _json_int(r.get("gold_per_min")),
             "xpm": _json_int(r.get("xp_per_min")),
             "duration": _json_int(r.get("duration")),
-            "lane_role": _json_int(r.get("lane_role")),
+            "lane_role": _json_int(r.get("lane_role_effective")),
+            "lane_role_exact": _json_int(r.get("lane_role")),
+            "role_is_estimated": bool(r.get("role_is_estimated")) if "role_is_estimated" in r else False,
+            "role_confidence": round(float(r.get("role_confidence") or 0), 2),
+            "role_source": r.get("role_source"),
         }
         for _, r in recent_rows.iterrows()
     ]
 
-    # Roles distribution — filter out 0 (unknown) lane_role
-    valid_roles = df["lane_role"].dropna()
+    # Roles distribution — use the effective role so every match is represented.
+    role_col = "lane_role_effective" if "lane_role_effective" in df.columns else "lane_role"
+    valid_roles = df[role_col].dropna() if role_col in df.columns else pd.Series(dtype="float64")
     valid_roles = valid_roles[valid_roles > 0]
     roles_dist = valid_roles.value_counts(normalize=True).to_dict() if len(valid_roles) > 0 else {}
     roles_data = {
         "actual_roles_distribution": {f"POS{int(k)}": round(v, 3) for k, v in roles_dist.items() if pd.notna(k) and int(k) > 0},
         **_role_breakdown(df_role_base),
         "filters_applied": role_filters_applied,
+        "role_assignment": "exact lane_role when available, otherwise inferred from player hero history, global hero role, player role history, or slot fallback",
     }
 
     # Top heroes

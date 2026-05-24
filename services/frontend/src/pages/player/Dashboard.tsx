@@ -44,6 +44,12 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
  * =======================================================*/
 const STEAM_PENDING_KEY = 'steam_pending_link_id';
 const DASHBOARD_ROLES = ['', 'POS1', 'POS2', 'POS3', 'POS4', 'POS5'] as const;
+const MODE_OPTIONS = [
+  { value: 'all', label: 'Все матчи' },
+  { value: 'ranked', label: 'Ranked' },
+  { value: 'turbo', label: 'Turbo' },
+  { value: 'unranked', label: 'Unranked' },
+];
 const PERIOD_OPTIONS = [
   { value: '10',  label: 'Последние 10 матчей' },
   { value: '20',  label: 'Последние 20 матчей' },
@@ -186,6 +192,7 @@ export default function PlayerDashboard() {
   const [pendingSteamChecked, setPendingSteamChecked] = useState(false);
 
   // Управление UI
+  const [matchMode, setMatchMode] = useState<'all' | 'ranked' | 'turbo' | 'unranked'>('all');
   const [periodCount, setPeriodCount] = useState<'10' | '20' | '50' | '100'>('50');
   const [selectedAnalysisRole, setSelectedAnalysisRole] = useState('');
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
@@ -247,11 +254,11 @@ export default function PlayerDashboard() {
   useEffect(() => {
     if (overview?.profile?.id) {
       const pid = overview.profile.id;
-      coreApi.get(`/player/${pid}/stats/overview`, { params: { mode: 'ranked', period: periodCount } })
+      coreApi.get(`/player/${pid}/stats/overview`, { params: { mode: matchMode, period: periodCount } })
         .then((r) => setPlayerStats(r.data))
         .catch(() => {});
     }
-  }, [overview, periodCount]);
+  }, [overview, matchMode, periodCount]);
 
   // Detailed features (по периоду + роль)
   useEffect(() => {
@@ -259,9 +266,9 @@ export default function PlayerDashboard() {
     const pid = overview.profile.id;
     const baselineRole = String(selectedAnalysisRole || '').match(/POS([1-5])/)?.[1];
     coreApi.get(`/player/${pid}/detailed-features`, {
-      params: { mode: 'ranked', period: periodCount, ...(baselineRole ? { baseline_role: Number(baselineRole) } : {}) },
+      params: { mode: matchMode, period: periodCount, ...(baselineRole ? { baseline_role: Number(baselineRole) } : {}) },
     }).then((r) => setDetailedFeatures(r.data)).catch(() => {});
-  }, [overview?.profile?.id, selectedAnalysisRole, periodCount]);
+  }, [overview?.profile?.id, selectedAnalysisRole, matchMode, periodCount]);
 
   // Заявка из регистрации (pending steam link)
   useEffect(() => {
@@ -287,11 +294,11 @@ export default function PlayerDashboard() {
         localStorage.removeItem(STEAM_PENDING_KEY);
         coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
         coreApi.get('/player/profile').then((r) => setPlayerProfile(r.data)).catch(() => {});
-        coreApi.get(`/player/${pid}/stats/overview`, { params: { mode: 'ranked', period: periodCount } })
+        coreApi.get(`/player/${pid}/stats/overview`, { params: { mode: matchMode, period: periodCount } })
           .then((r) => setPlayerStats(r.data)).catch(() => {});
       } catch { /* кнопка ручной привязки остаётся в настройках */ }
     })();
-  }, [overview, steamData, pendingSteamChecked, periodCount]);
+  }, [overview, steamData, pendingSteamChecked, matchMode, periodCount]);
 
   // Retry sync если ничего не подгрузилось
   useEffect(() => {
@@ -302,12 +309,12 @@ export default function PlayerDashboard() {
       setRetried(true);
       coreApi.post('/player/sync-steam').then(() => {
         const pid = overview.profile.id;
-        coreApi.get(`/player/${pid}/stats/overview`, { params: { mode: 'ranked', period: periodCount } })
+        coreApi.get(`/player/${pid}/stats/overview`, { params: { mode: matchMode, period: periodCount } })
           .then((r) => setPlayerStats(r.data)).catch(() => {});
         coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
       }).catch(() => {});
     }
-  }, [steamData, detailedFeatures, playerStats, overview, retried, periodCount]);
+  }, [steamData, detailedFeatures, playerStats, overview, retried, matchMode, periodCount]);
 
   /* ---------- Вычисляемые поля ---------- */
   const summary = playerStats?.summary || {};
@@ -524,6 +531,13 @@ export default function PlayerDashboard() {
           <p>Отслеживай прогресс, анализируй игры и побеждай!</p>
         </div>
         <div className="dash-filter-row">
+          <Dropdown
+            value={matchMode}
+            onChange={(v) => setMatchMode(v as any)}
+            options={MODE_OPTIONS}
+            label="Тип матчей"
+            align="right"
+          />
           <Dropdown
             value={periodCount}
             onChange={(v) => setPeriodCount(v as any)}

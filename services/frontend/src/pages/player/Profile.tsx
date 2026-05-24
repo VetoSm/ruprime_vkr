@@ -133,7 +133,7 @@ export default function PlayerProfile() {
     coreApi.get('/me/overview').then((r) => {
       const pid = r.data?.profile?.player_profile_id ?? r.data?.profile?.id;
       if (pid) {
-        coreApi.get(`/player/${pid}/detailed-features`, { params: { mode: 'ranked', period: '50' } })
+        coreApi.get(`/player/${pid}/detailed-features`, { params: { mode: 'all', period: '50' } })
           .then((r2) => {
             setFeatures(r2.data);
             // init targets from current values, allow editing

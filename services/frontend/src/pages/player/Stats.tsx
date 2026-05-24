@@ -21,6 +21,13 @@ const PERIOD_OPTIONS: { id: string; label: string; backend: string }[] = [
   { id: 'all', label: 'Все',     backend: 'all' },
 ];
 
+const MODE_DROPDOWN_OPTIONS = [
+  { value: 'all', label: 'Все матчи' },
+  { value: 'ranked', label: 'Ranked' },
+  { value: 'turbo', label: 'Turbo' },
+  { value: 'unranked', label: 'Unranked' },
+];
+
 const ROLE_DROPDOWN_OPTIONS = [
   { value: '',  label: 'Все роли' },
   { value: '1', label: 'Carry' },
@@ -111,6 +118,7 @@ export default function PlayerStats() {
   const [heroOptions, setHeroOptions] = useState<any[]>([]);
 
   const [period, setPeriod] = useState<typeof PERIOD_OPTIONS[number]['id']>('30d');
+  const [matchMode, setMatchMode] = useState<'all' | 'ranked' | 'turbo' | 'unranked'>('all');
   const [selectedRole, setSelectedRole] = useState<string>('');
   const [selectedHero, setSelectedHero] = useState<string>('');
   const [chartMetric, setChartMetric] = useState<string>('kda');
@@ -139,7 +147,7 @@ export default function PlayerStats() {
     setStats(null);
     setFeatures(null);
     let cancelled = false;
-    const params: any = { mode: 'ranked', period: backendPeriod };
+    const params: any = { mode: matchMode, period: backendPeriod };
     if (selectedRole)  params.role = Number(selectedRole);
     if (selectedHero)  params.hero_id = Number(selectedHero);
     coreApi.get(`/player/${pid}/stats/overview`, { params })
@@ -149,7 +157,7 @@ export default function PlayerStats() {
       .then((r) => { if (!cancelled) setFeatures(r.data); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [pid, backendPeriod, selectedRole, selectedHero]);
+  }, [pid, matchMode, backendPeriod, selectedRole, selectedHero]);
 
   /* ---- Вычисляемые ---- */
   const summary = stats?.summary || {};
@@ -327,6 +335,13 @@ export default function PlayerStats() {
               </button>
             ))}
           </div>
+
+          <Dropdown
+            value={matchMode}
+            onChange={(v) => setMatchMode(v as any)}
+            options={MODE_DROPDOWN_OPTIONS}
+            label="Тип матчей"
+          />
 
           {/* Role — кастомный Dropdown */}
           <Dropdown

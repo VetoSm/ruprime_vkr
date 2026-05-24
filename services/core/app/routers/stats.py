@@ -12,7 +12,7 @@ router = APIRouter(tags=["stats"])
 
 
 def _stats_filter_params(
-    mode: str = "ranked",
+    mode: str = "all",
     period: str = "50",
     role: int | None = None,
     hero_id: int | None = None,
