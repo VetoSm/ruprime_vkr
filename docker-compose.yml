@@ -1,0 +1,118 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # Bind to loopback only: psql/pgAdmin from the same host still work
+    # ("localhost"), but the port is not reachable from the public
+    # internet even if a firewall rule slips. To open it for dev across
+    # the LAN, override in docker-compose.override.yml.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth:
+    build: ./services/auth
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_ACCESS_EXPIRES_MIN: ${JWT_ACCESS_EXPIRES_MIN:-30}
+      JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS:-30}
+      SEED_TEST_DATA: ${SEED_TEST_DATA}
+      FORCE_REVOKE_ALL_SESSIONS: ${FORCE_REVOKE_ALL_SESSIONS:-false}
+      STEAM_OPENID_ENABLED: ${STEAM_OPENID_ENABLED:-true}
+      STEAM_RETURN_URL: ${STEAM_RETURN_URL:-http://localhost:8001/auth/steam/callback}
+      STEAM_REALM: ${STEAM_REALM:-http://localhost:8001/}
+      FRONTEND_STEAM_REDIRECT: ${FRONTEND_STEAM_REDIRECT:-http://localhost:3000/auth/steam-callback}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  core:
+    build: ./services/core
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth:8001}
+      ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml:8003}
+      LLM_SERVICE_URL: ${LLM_SERVICE_URL:-http://llm:8004}
+      ML_INTERNAL_TOKEN: ${ML_INTERNAL_TOKEN}
+      AI_CHAT_DAILY_LIMIT: ${AI_CHAT_DAILY_LIMIT:-20}
+      SEED_TEST_DATA: ${SEED_TEST_DATA}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth:
+        condition: service_started
+
+  ml:
+    build: ./services/ml
+    # Intentionally no public port: ML is internal-only and must be reached
+    # through core (which forwards X-Internal-Token).
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      KAGGLE_DATA_PATH: ${KAGGLE_DATA_PATH}
+      ML_INTERNAL_TOKEN: ${ML_INTERNAL_TOKEN}
+      STEAM_API_KEY: ${STEAM_API_KEY:-}
+      OPENDOTA_API_KEY: ${OPENDOTA_API_KEY:-}
+      OPENDOTA_REQUEST_DELAY_SEC: ${OPENDOTA_REQUEST_DELAY_SEC:-1.4}
+      PLAYER_DEEP_SYNC_MAX_MATCHES: ${PLAYER_DEEP_SYNC_MAX_MATCHES:-500}
+      PLAYER_DEEP_SYNC_DETAILED_MATCHES: ${PLAYER_DEEP_SYNC_DETAILED_MATCHES:-30}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    volumes:
+      - ./archive-2:/data/archive-2:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  llm:
+    build: ./services/llm
+    # Loopback-only port for ops smoke tests (`curl localhost:8004/health`
+    # from inside the server). The browser never talks to LLM directly —
+    # core proxies /ai/chat internally — so no public exposure is needed.
+    ports:
+      - "127.0.0.1:8004:8004"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-25}
+      ML_INTERNAL_TOKEN: ${ML_INTERNAL_TOKEN}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./services/frontend
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_AUTH_API_URL: ${VITE_AUTH_API_URL:-http://localhost:8001}
+      VITE_CORE_API_URL: ${VITE_CORE_API_URL:-http://localhost:8002}
+    depends_on:
+      - auth
+      - core
+      - ml
+      - llm
+
+volumes:
+  pgdata:

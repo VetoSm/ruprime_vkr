@@ -1,0 +1,24 @@
+archive-2/
+secrets/
+node_modules/
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.pytest_cache/
+*.sql
+# Local research notebooks — never commit to GitHub
+notebooks/
+# Deploy/demo helpers — local only, not for public repo
+scripts/
+.jupyter_cfg/
+docs/Рецензия*
+docs/amark05.pdf
+services/frontend/dist/
+services/frontend/node_modules/
+# Empty/accidental top-level package-lock left behind when someone ran
+# `npm ...` from the repo root by mistake.
+/package-lock.json
+/pgdata/
+*.jpg

@@ -1,0 +1,237 @@
+import { useState } from 'react';
+
+/* ===== Rank Badge: иконка медали + название ===== */
+
+const RANK_DATA: Record<number, { name: string; color: string }> = {
+  1: { name: 'Herald', color: 'var(--rank-herald)' },
+  2: { name: 'Guardian', color: 'var(--rank-guardian)' },
+  3: { name: 'Crusader', color: 'var(--rank-crusader)' },
+  4: { name: 'Archon', color: 'var(--rank-archon)' },
+  5: { name: 'Legend', color: 'var(--rank-legend)' },
+  6: { name: 'Ancient', color: 'var(--rank-ancient)' },
+  7: { name: 'Divine', color: 'var(--rank-divine)' },
+  8: { name: 'Immortal', color: 'var(--rank-immortal)' },
+};
+
+const RANK_FALLBACK_COLORS: Record<number, string> = {
+  1: '#8b8b8b',
+  2: '#b0c4de',
+  3: '#90ee90',
+  4: '#f0e68c',
+  5: '#ffd700',
+  6: '#ff8c00',
+  7: '#ff69b4',
+  8: '#ff4444',
+};
+
+const RANK_NAMES_RU: Record<string, string> = {
+  herald: 'Рекрут', guardian: 'Страж', crusader: 'Рыцарь', archon: 'Герой',
+  legend: 'Легенда', ancient: 'Властелин', divine: 'Божество', immortal: 'Титан',
+  HERALD: 'Рекрут', GUARDIAN: 'Страж', CRUSADER: 'Рыцарь', ARCHON: 'Герой',
+  LEGEND: 'Легенда', ANCIENT: 'Властелин', DIVINE: 'Божество', IMMORTAL: 'Титан',
+};
+
+function rankMedalFallbackSvg(medal: number, color: string) {
+  const label = medal === 8 ? 'I' : String(medal);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+      <defs>
+        <radialGradient id="g" cx="50%" cy="35%" r="70%">
+          <stop offset="0%" stop-color="#fff7d6"/>
+          <stop offset="45%" stop-color="${color}"/>
+          <stop offset="100%" stop-color="#4b1020"/>
+        </radialGradient>
+        <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity=".45"/>
+        </filter>
+      </defs>
+      <path filter="url(#s)" d="M48 6 76 18 88 46 72 78 48 90 24 78 8 46 20 18Z" fill="url(#g)" stroke="#ffdca8" stroke-width="4"/>
+      <path d="M48 15 69 24 78 46 66 69 48 78 30 69 18 46 27 24Z" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="3"/>
+      <text x="48" y="59" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="900" fill="#fff" stroke="#35121c" stroke-width="2">${label}</text>
+    </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+interface RankBadgeProps {
+  rankTier?: number | null;
+  rankName?: string | null;
+  size?: 'sm' | 'md' | 'lg';
+}
+
+export function RankBadge({ rankTier, rankName, size = 'md' }: RankBadgeProps) {
+  const [imgFailed, setImgFailed] = useState(false);
+  let medal = 0;
+
+  if (rankTier && rankTier > 0) {
+    medal = Math.floor(rankTier / 10);
+  } else if (rankName) {
+    // Accept both "Divine" and a legacy "Divine [5]" string — strip the
+    // bracketed star count if it's there, we no longer surface it.
+    const upper = rankName.toUpperCase().split(' ')[0].split('[')[0].trim();
+    const idx = Object.entries(RANK_DATA).find(([_, v]) => v.name.toUpperCase() === upper);
+    if (idx) medal = parseInt(idx[0]);
+  }
+
+  const info = RANK_DATA[medal];
+  if (!info) return <span className="badge badge-accent">{rankName || 'Без ранга'}</span>;
+
+  // Valve renders the star count inside the medal icon itself, so we
+  // never duplicate "[N]" in text. The icon is the source of truth.
+  const iconUrl = `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/rank_icons/rank_icon_${medal}.png`;
+  const fallbackIconUrl = rankMedalFallbackSvg(medal, RANK_FALLBACK_COLORS[medal] || '#16e9d4');
+  const sizes = { sm: 20, md: 28, lg: 40 };
+  const fontSize = { sm: '0.75rem', md: '0.85rem', lg: '1rem' };
+
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '3px 10px', borderRadius: 20,
+      border: `1px solid ${info.color}40`,
+      background: `${info.color}10`,
+      fontSize: fontSize[size], fontWeight: 700, color: info.color,
+    }}>
+      <img
+        src={imgFailed ? fallbackIconUrl : iconUrl}
+        alt={info.name}
+        style={{ width: sizes[size], height: sizes[size], objectFit: 'contain', flexShrink: 0 }}
+          onError={() => setImgFailed(true)} />
+      {info.name}
+    </span>
+  );
+}
+
+
+/* ===== Hero Icon + Name ===== */
+
+const HERO_CDN = 'https://cdn.opendota.com/apps/dota2/images/heroes';
+
+interface HeroIconProps {
+  heroId: number;
+  heroName?: string;
+  size?: number;
+  showName?: boolean;
+}
+
+export function HeroIcon({ heroId, heroName, size = 28, showName = true }: HeroIconProps) {
+  const name = heroName || `Hero #${heroId}`;
+  const slug = heroName?.replace('npc_dota_hero_', '') || '';
+  const imgUrl = slug ? `${HERO_CDN}/${slug}_sb.png` : '';
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      {imgUrl && (
+        <img src={imgUrl} alt={name} style={{ width: size, height: size, borderRadius: 4 }}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+      )}
+      {showName && <span style={{ fontSize: '0.85rem' }}>{name}</span>}
+    </span>
+  );
+}
+
+
+/* ===== Role Badge ===== */
+
+function RoleIconSvg({ type, color, size = 12 }: { type: string; color: string; size?: number }) {
+  const s = { width: size, height: size, flexShrink: 0 } as const;
+  switch (type) {
+    case 'carry': return (
+      <svg style={s} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round">
+        <line x1="2" y1="14" x2="14" y2="2" /><polyline points="8,2 14,2 14,8" />
+      </svg>
+    );
+    case 'mid': return (
+      <svg style={s} viewBox="0 0 16 16" fill={color} stroke="none">
+        <polygon points="8,1 10,6 8,5 6,6" /><polygon points="8,15 6,10 8,11 10,10" />
+        <rect x="7" y="5" width="2" height="6" rx="1" />
+      </svg>
+    );
+    case 'off': return (
+      <svg style={s} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 2L2 6v5l6 4 6-4V6z" />
+      </svg>
+    );
+    case 'sup4': return (
+      <svg style={s} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round">
+        <circle cx="8" cy="8" r="3" /><line x1="8" y1="1" x2="8" y2="4" /><line x1="8" y1="12" x2="8" y2="15" />
+        <line x1="1" y1="8" x2="4" y2="8" /><line x1="12" y1="8" x2="15" y2="8" />
+      </svg>
+    );
+    case 'sup5': return (
+      <svg style={s} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round">
+        <line x1="8" y1="2" x2="8" y2="14" /><line x1="2" y1="8" x2="14" y2="8" />
+      </svg>
+    );
+    default: return null;
+  }
+}
+
+const ROLE_INFO: Record<string, { name: string; short: string; svgType: string; color: string }> = {
+  POS1: { name: 'Carry', short: 'Carry', svgType: 'carry', color: '#ff8c00' },
+  POS2: { name: 'Mid', short: 'Mid', svgType: 'mid', color: '#ffd700' },
+  POS3: { name: 'Offlane', short: 'Offlane', svgType: 'off', color: '#ff4757' },
+  POS4: { name: 'Soft Support', short: 'Soft Sup', svgType: 'sup4', color: '#7c5cfc' },
+  POS5: { name: 'Hard Support', short: 'Hard Sup', svgType: 'sup5', color: '#00d4aa' },
+  '1': { name: 'Carry', short: 'Carry', svgType: 'carry', color: '#ff8c00' },
+  '2': { name: 'Mid', short: 'Mid', svgType: 'mid', color: '#ffd700' },
+  '3': { name: 'Offlane', short: 'Offlane', svgType: 'off', color: '#ff4757' },
+  '4': { name: 'Soft Support', short: 'Soft Sup', svgType: 'sup4', color: '#7c5cfc' },
+  '5': { name: 'Hard Support', short: 'Hard Sup', svgType: 'sup5', color: '#00d4aa' },
+};
+
+interface RoleBadgeProps {
+  role: string | number;
+  compact?: boolean;
+}
+
+export function RoleBadge({ role, compact = false }: RoleBadgeProps) {
+  const key = typeof role === 'number' ? String(role) : role;
+  const info = ROLE_INFO[key] || ROLE_INFO[`POS${key}`];
+  if (!info) return <span className="badge badge-accent">{role}</span>;
+
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '2px 8px', borderRadius: 12,
+      border: `1px solid ${info.color}40`,
+      background: `${info.color}10`,
+      fontSize: '0.75rem', fontWeight: 700, color: info.color,
+    }}>
+      <RoleIconSvg type={info.svgType} color={info.color} />
+      {compact ? info.short : info.name}
+    </span>
+  );
+}
+
+
+/* ===== Info Tooltip ===== */
+
+interface InfoTooltipProps {
+  text: string;
+}
+
+export function InfoTooltip({ text }: InfoTooltipProps) {
+  const [show, setShow] = useState(false);
+
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <span
+        className="info-icon"
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        onClick={() => setShow(!show)}
+      >i</span>
+      {show && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+          marginBottom: 8, padding: '10px 14px', borderRadius: 'var(--radius)',
+          background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+          color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: 1.5,
+          width: 240, zIndex: 100, boxShadow: 'var(--shadow)',
+          pointerEvents: 'none',
+        }}>
+          {text}
+        </div>
+      )}
+    </span>
+  );
+}
