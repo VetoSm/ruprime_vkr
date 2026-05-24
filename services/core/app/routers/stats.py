@@ -6,7 +6,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
 from app.ml_client import ml_headers
-from app.models import PlayerProfile
+from app.models import PlayerProfile, CoachProfile, TrainingRequest, TrainingSession
 
 router = APIRouter(tags=["stats"])
 
@@ -123,6 +123,28 @@ async def _get_or_create_analysis(profile: PlayerProfile, db: Session, filters: 
     return None
 
 
+def _can_view_player_stats(profile: PlayerProfile, current_user: CurrentUser, db: Session) -> bool:
+    if current_user.role == "ADMIN":
+        return True
+    if current_user.role == "PLAYER":
+        return profile.core_user_id == current_user.user_id
+    if current_user.role == "COACH":
+        coach = db.query(CoachProfile).filter(
+            CoachProfile.core_user_id == current_user.user_id
+        ).first()
+        if not coach:
+            return False
+        row = db.query(TrainingSession.id).join(
+            TrainingRequest,
+            TrainingRequest.id == TrainingSession.training_request_id,
+        ).filter(
+            TrainingSession.coach_profile_id == coach.id,
+            TrainingRequest.player_profile_id == profile.id,
+        ).first()
+        return row is not None
+    return False
+
+
 @router.get("/player/{player_id}/stats/overview")
 async def player_stats_overview(
     player_id: int,
@@ -138,7 +160,7 @@ async def player_stats_overview(
     if not profile:
         raise HTTPException(status_code=404, detail="Профиль игрока не найден")
 
-    if current_user.role == "PLAYER" and profile.core_user_id != current_user.user_id:
+    if not _can_view_player_stats(profile, current_user, db):
         raise HTTPException(status_code=403, detail="Нет доступа")
 
     filters = _stats_filter_params(mode=mode, period=period, role=role, hero_id=hero_id)
@@ -180,7 +202,7 @@ async def player_features(
     if not profile:
         raise HTTPException(status_code=404, detail="Профиль игрока не найден")
 
-    if current_user.role == "PLAYER" and profile.core_user_id != current_user.user_id:
+    if not _can_view_player_stats(profile, current_user, db):
         raise HTTPException(status_code=403, detail="Нет доступа")
 
     filters = _stats_filter_params(mode=mode, period=period, role=role, hero_id=hero_id)
@@ -220,7 +242,7 @@ async def player_detailed_features(
     if not profile:
         raise HTTPException(status_code=404, detail="Профиль не найден")
 
-    if current_user.role == "PLAYER" and profile.core_user_id != current_user.user_id:
+    if not _can_view_player_stats(profile, current_user, db):
         raise HTTPException(status_code=403, detail="Нет доступа")
 
     if not profile.dota_account_id:

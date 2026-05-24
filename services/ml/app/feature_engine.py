@@ -628,7 +628,7 @@ def normalize_stats_filters(
         mode_val = DEFAULT_STATS_MODE
 
     period_val = str(period or DEFAULT_STATS_PERIOD).lower()
-    if period_val not in {"20", "50", "month", "all"}:
+    if period_val not in {"10", "20", "50", "100", "3d", "7d", "30d", "90d", "month", "all"}:
         period_val = DEFAULT_STATS_PERIOD
 
     def _to_int(value, min_value=None, max_value=None):
@@ -694,11 +694,15 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
     before_period = int(len(result))
     date_from = None
     limit = None
-    if filters["period"] in {"20", "50"}:
+    if filters["period"] in {"10", "20", "50", "100"}:
         limit = int(filters["period"])
         result = result.head(limit)
     elif filters["period"] == "month" and "start_time" in result.columns:
         date_from = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp())
+        result = result[result["start_time"].fillna(0) >= date_from]
+    elif filters["period"].endswith("d") and "start_time" in result.columns:
+        days = int(filters["period"][:-1])
+        date_from = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
         result = result[result["start_time"].fillna(0) >= date_from]
 
     after_period = int(len(result))
@@ -748,8 +752,14 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
             "all": "все режимы",
         }[filters["mode"]],
         "period": {
+            "10": "последние 10",
             "20": "последние 20",
             "50": "последние 50",
+            "100": "последние 100",
+            "3d": "последние 3 дня",
+            "7d": "последние 7 дней",
+            "30d": "последние 30 дней",
+            "90d": "последние 90 дней",
             "month": "последние 30 дней",
             "all": "вся загруженная история",
         }[filters["period"]],
@@ -781,6 +791,55 @@ def apply_stats_filters(df: pd.DataFrame, filters: dict | None = None) -> tuple[
         else:
             meta["label"] = f"{meta['label']}, роль {role_label}"
     return result.copy(), meta
+
+
+def _role_breakdown(df: pd.DataFrame) -> dict:
+    """Role stats for the same base report window before an explicit role cut."""
+    rows = []
+    unknown_role_count = 0
+    if df.empty or "lane_role" not in df.columns:
+        return {"role_stats": rows, "unknown_role_count": 0, "base_report_count": int(len(df))}
+
+    role_values = pd.to_numeric(df["lane_role"], errors="coerce")
+    unknown_role_count = int(((role_values < 1) | (role_values > 5) | role_values.isna()).sum())
+    for role_num in range(1, 6):
+        matches = df[role_values == role_num].copy()
+        if matches.empty:
+            rows.append({
+                "role": role_num,
+                "matches": 0,
+                "wins": 0,
+                "winrate": None,
+                "kda": None,
+                "gpm": None,
+            })
+            continue
+        if "win" not in matches.columns:
+            def _win_row(row):
+                rw = row.get("radiant_win")
+                slot = row.get("player_slot")
+                if rw is None or slot is None:
+                    return None
+                return int(rw) if int(slot) < 128 else int(not rw)
+            matches["win"] = matches.apply(_win_row, axis=1)
+        if "kda" not in matches.columns:
+            matches["kda"] = (
+                matches["kills"].fillna(0) + matches["assists"].fillna(0)
+            ) / matches["deaths"].fillna(0).clip(lower=1)
+        wins = matches["win"].dropna()
+        rows.append({
+            "role": role_num,
+            "matches": int(len(matches)),
+            "wins": int(wins.sum()) if len(wins) > 0 else 0,
+            "winrate": round(float(wins.mean()), 3) if len(wins) > 0 else None,
+            "kda": round(float(matches["kda"].mean()), 2) if not matches["kda"].dropna().empty else None,
+            "gpm": _mean_present(matches["gold_per_min"], 1, default=None) if "gold_per_min" in matches.columns else None,
+        })
+    return {
+        "role_stats": rows,
+        "unknown_role_count": unknown_role_count,
+        "base_report_count": int(len(df)),
+    }
 
 
 def analyze_player_from_account(
@@ -826,6 +885,8 @@ def analyze_player_from_account(
 
     normalized_filters = normalize_stats_filters(**(filters or {}))
     df, filters_applied = apply_stats_filters(df_all, normalized_filters)
+    role_base_filters = {**normalized_filters, "role": None}
+    df_role_base, role_filters_applied = apply_stats_filters(df_all, role_base_filters)
     sample_quality = _sample_quality(df)
     freshness = _data_freshness(df)
 
@@ -839,6 +900,7 @@ def analyze_player_from_account(
     if (
         requested_mode == CLUSTER_RANKED
         and len(df) < RANKED_FALLBACK_MIN
+        and bool((filters or {}).get("allow_fallback"))
     ):
         relaxed = dict(normalized_filters)
         relaxed["mode"] = "all"
@@ -854,6 +916,8 @@ def analyze_player_from_account(
                 "effective_mode": "all",
                 "fallback_in_effect": True,
             }
+            relaxed_role_base = {**relaxed, "role": None}
+            df_role_base, role_filters_applied = apply_stats_filters(df_all, relaxed_role_base)
             fallback_in_effect = True
             fallback_notice = (
                 f"Для рейтинговых матчей нашлось всего "
@@ -875,6 +939,11 @@ def analyze_player_from_account(
         return int(rw) if int(slot) < 128 else int(not rw)
 
     df["win"] = df.apply(_win_row, axis=1)
+    if not df_role_base.empty:
+        df_role_base["win"] = df_role_base.apply(_win_row, axis=1)
+        df_role_base["kda"] = (
+            df_role_base["kills"].fillna(0) + df_role_base["assists"].fillna(0)
+        ) / df_role_base["deaths"].fillna(0).clip(lower=1)
 
     # KDA
     df["kda"] = (df["kills"].fillna(0) + df["assists"].fillna(0)) / df["deaths"].fillna(0).clip(lower=1)
@@ -1066,6 +1135,32 @@ def analyze_player_from_account(
         "hero_damage_per_min_over_time": _series("hero_damage_per_min"),
         "tower_damage_over_time":   _series("tower_damage"),
     }
+    def _json_int(value, default=None):
+        try:
+            if value is None or pd.isna(value):
+                return default
+            return int(value)
+        except Exception:
+            return default
+
+    recent_rows = df.sort_values("start_time", ascending=False, na_position="last").head(20)
+    trends["recent_matches"] = [
+        {
+            "match_id": _json_int(r.get("match_id")),
+            "hero_id": _json_int(r.get("hero_id")),
+            "start_time": _json_int(r.get("start_time")),
+            "win": bool(r["win"]) if pd.notna(r.get("win")) else None,
+            "kills": _json_int(r.get("kills"), 0),
+            "deaths": _json_int(r.get("deaths"), 0),
+            "assists": _json_int(r.get("assists"), 0),
+            "kda": round(float(r["kda"]), 2) if pd.notna(r.get("kda")) else None,
+            "gpm": _json_int(r.get("gold_per_min")),
+            "xpm": _json_int(r.get("xp_per_min")),
+            "duration": _json_int(r.get("duration")),
+            "lane_role": _json_int(r.get("lane_role")),
+        }
+        for _, r in recent_rows.iterrows()
+    ]
 
     # Roles distribution — filter out 0 (unknown) lane_role
     valid_roles = df["lane_role"].dropna()
@@ -1073,6 +1168,8 @@ def analyze_player_from_account(
     roles_dist = valid_roles.value_counts(normalize=True).to_dict() if len(valid_roles) > 0 else {}
     roles_data = {
         "actual_roles_distribution": {f"POS{int(k)}": round(v, 3) for k, v in roles_dist.items() if pd.notna(k) and int(k) > 0},
+        **_role_breakdown(df_role_base),
+        "filters_applied": role_filters_applied,
     }
 
     # Top heroes

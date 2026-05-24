@@ -190,6 +190,7 @@ class AiChatResponse(BaseModel):
     advice_summary: str
     advice_full: str
     context_basis: Optional[Any] = None
+    show_context_radar: bool = False
     llm_request_id: Optional[str] = None
     llm_status: Optional[str] = None
     llm_error: Optional[str] = None

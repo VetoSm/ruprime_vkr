@@ -8,7 +8,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
 from app.ml_client import ml_headers
-from app.models import PlayerProfile, AiAdviceHistory
+from app.models import PlayerProfile, AiAdviceHistory, TrainingRequest, TrainingSession, SessionStatus
 from app.schemas import AiChatRequest, AiChatResponse, AiHistoryEntry, MessageResponse
 
 router = APIRouter(prefix="/ai", tags=["ai-chat"])
@@ -49,6 +49,7 @@ def _limit_response(context: dict, used_today: int) -> AiChatResponse:
         advice_summary=summary,
         advice_full=full,
         context_basis=_context_basis(context),
+        show_context_radar=used_today == 0,
         llm_status="rate_limited",
         llm_error="AI_CHAT_DAILY_LIMIT exceeded",
         requests_used_today=used_today,
@@ -97,6 +98,47 @@ def _context_basis(context: dict) -> dict:
         "target_rank": context.get("target_rank"),
         "top_gaps": gaps[:5],
         "weak_categories": sorted(categories, key=lambda c: c.get("score", 0))[:4],
+    }
+
+
+def _training_context(profile: PlayerProfile | None, db: Session) -> dict:
+    if not profile:
+        return {}
+    sessions = db.query(TrainingSession).join(
+        TrainingRequest,
+        TrainingRequest.id == TrainingSession.training_request_id,
+    ).filter(
+        TrainingRequest.player_profile_id == profile.id,
+    ).order_by(TrainingSession.scheduled_at.desc().nullslast()).limit(20).all()
+    planned = []
+    completed = []
+    for session in sessions:
+        item = {
+            "session_id": session.id,
+            "coach_profile_id": session.coach_profile_id,
+            "scheduled_at": session.scheduled_at.isoformat() if session.scheduled_at else None,
+            "duration_minutes": session.duration_minutes,
+            "status": session.status.value if session.status else None,
+            "report_available": bool(session.report),
+        }
+        if session.status == SessionStatus.COMPLETED:
+            completed.append(item)
+        elif session.status == SessionStatus.PLANNED:
+            planned.append(item)
+    return {
+        "profile": {
+            "analysis_role": profile.analysis_role,
+            "desired_roles": profile.desired_roles,
+            "desired_rank_tier": profile.desired_rank_tier,
+            "training_goals": profile.training_goals,
+            "about": profile.about,
+        },
+        "sessions": {
+            "planned": planned[:5],
+            "completed": completed[:10],
+            "planned_count": len(planned),
+            "completed_count": len(completed),
+        },
     }
 
 
@@ -166,6 +208,8 @@ async def ai_chat(
         except Exception:
             pass
 
+    context["training"] = _training_context(profile, db)
+
     used_today = _today_usage(profile.id if profile else None, db)
     if used_today >= AI_CHAT_DAILY_LIMIT:
         return _limit_response(context, used_today)
@@ -226,6 +270,7 @@ async def ai_chat(
         advice_summary=advice_summary,
         advice_full=advice_full,
         context_basis=_context_basis(context),
+        show_context_radar=used_today == 0,
         llm_request_id=llm_request_id,
         llm_status=llm_status,
         llm_error=llm_error,

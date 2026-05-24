@@ -164,7 +164,7 @@ def compute_detailed_features(
     from app.match_clusters import CLUSTER_RANKED
     fallback_notice = None
     requested_mode = normalized_filters.get("mode")
-    if requested_mode == CLUSTER_RANKED and len(df) < RANKED_FALLBACK_MIN:
+    if requested_mode == CLUSTER_RANKED and len(df) < RANKED_FALLBACK_MIN and bool((filters or {}).get("allow_fallback")):
         relaxed = dict(normalized_filters)
         relaxed["mode"] = "all"
         df_fallback, fb_applied = apply_stats_filters(df_all, relaxed)

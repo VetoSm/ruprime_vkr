@@ -14,13 +14,10 @@ import { RoleBadge } from '../../ui/GameComponents';
 const CHART_STYLE = { background: '#0d1a35', border: '1px solid rgba(22, 233, 212, 0.20)', color: '#e8edf5', borderRadius: 8 };
 
 const PERIOD_OPTIONS: { id: string; label: string; backend: string }[] = [
-  { id: '7d',  label: '7 дней',  backend: '20' },
-  { id: '30d', label: '30 дней', backend: 'month' },
-  { id: '90d', label: '90 дней', backend: 'all' },
-  // Раньше тут была подпись "Сезон" — нынешний бэкенд не знает о
-  // киберспортивных сезонах, и под капотом всё равно отдавал «все
-  // матчи». Чтобы не вводить пользователя в заблуждение, переименовали
-  // в "Все" — это честнее и проще читается рядом с другими интервалами.
+  { id: '3d',  label: '3 дня',   backend: '3d' },
+  { id: '7d',  label: '7 дней',  backend: '7d' },
+  { id: '30d', label: '30 дней', backend: '30d' },
+  { id: '90d', label: '90 дней', backend: '90d' },
   { id: 'all', label: 'Все',     backend: 'all' },
 ];
 
@@ -139,6 +136,8 @@ export default function PlayerStats() {
     // Сбрасываем активный выбор в списке "слабых мест" и старые данные,
     // чтобы при смене фильтра старая выборка не подмешивалась к новой.
     setActiveFeatureIdx(0);
+    setStats(null);
+    setFeatures(null);
     let cancelled = false;
     const params: any = { mode: 'ranked', period: backendPeriod };
     if (selectedRole)  params.role = Number(selectedRole);
@@ -182,27 +181,36 @@ export default function PlayerStats() {
     return fmtDelta(arr[arr.length - 1]?.gpm, arr[0]?.gpm, 0, '');
   }, [trends]);
 
-  /* WR по ролям + KDA + GPM (avg) из recent_matches */
+  /* WR по ролям + KDA + GPM из той же base-window выборки, что и KPI. */
   const roleStats = useMemo(() => {
-    const rm = steamData?.recent_matches || [];
+    const backendRows = stats?.roles?.role_stats;
+    if (Array.isArray(backendRows) && backendRows.length > 0) {
+      return [1, 2, 3, 4, 5].map((r) => {
+        const row = backendRows.find((x: any) => Number(x.role) === r) || {};
+        return {
+          role: r,
+          label: roleName(r),
+          total: Number(row.matches || 0),
+          wins: Number(row.wins || 0),
+          winrate: typeof row.winrate === 'number' ? row.winrate : null,
+          kda: typeof row.kda === 'number' ? row.kda : null,
+          gpm: typeof row.gpm === 'number' ? row.gpm : null,
+        };
+      });
+    }
+    const roleCounts = summary.filters_applied?.role_counts || {};
     return [1, 2, 3, 4, 5].map((r) => {
-      const matches = rm.filter((m: any) => m.lane_role === r);
-      const wins = matches.filter((m: any) => m.win).length;
-      const avg = (key: 'kda' | 'gpm') => {
-        const arr = matches.map((m: any) => Number(m[key]) || 0).filter((n: number) => Number.isFinite(n) && n > 0);
-        return arr.length > 0 ? arr.reduce((s: number, n: number) => s + n, 0) / arr.length : null;
-      };
       return {
         role: r,
         label: roleName(r),
-        total: matches.length,
-        wins,
-        winrate: matches.length > 0 ? wins / matches.length : null,
-        kda: avg('kda'),
-        gpm: avg('gpm'),
+        total: Number(roleCounts[String(r)] || 0),
+        wins: 0,
+        winrate: null,
+        kda: null,
+        gpm: null,
       };
     });
-  }, [steamData]);
+  }, [stats, summary.filters_applied]);
 
   /* Радар */
   const radarData = useMemo(() => {
@@ -297,7 +305,7 @@ export default function PlayerStats() {
   }, []);
 
   return (
-    <div>
+    <div className="stats-page">
       {/* ============ Header (без экспорта) ============ */}
       <div className="stats-header">
         <div className="stats-header-title">
@@ -468,7 +476,7 @@ export default function PlayerStats() {
           <div className="card-head">
             <div className="card-title">Винрейт по ролям</div>
             <span className="text-muted" style={{ fontSize: '0.78rem' }}>
-              по {steamData?.recent_matches?.length || 0} матчам
+              по {stats?.roles?.base_report_count ?? summary.filters_applied?.base_report_count ?? matchesCount} матчам
             </span>
           </div>
           <div className="role-wr-list">
@@ -499,7 +507,7 @@ export default function PlayerStats() {
       </div>
 
       {/* ============ Row 3: Радар навыков (слева) | Игры по ролям + Топ героев (справа стопкой) ============ */}
-      <div className="stats-split">
+      <div className="stats-split stats-split--radar-row">
         <div className="card dash-card">
           <div className="card-head">
             <div className="card-title">Радар навыков</div>

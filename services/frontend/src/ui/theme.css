@@ -2490,18 +2490,28 @@ table tr:hover {
   margin-bottom: 14px;
   align-items: stretch;
 }
+.stats-page {
+  display: flex;
+  flex-direction: column;
+}
+.stats-page .stats-header { order: 0; }
+.stats-page .stats-tiles { order: 1; }
+.stats-page .stats-dynamics-card { order: 0; }
+.stats-page > .stats-split:not(.stats-split--radar-row):not(.stats-split--wide-left) { order: 2; }
+.stats-page > .stats-split--wide-left { order: 3; }
+.stats-page > .stats-split--radar-row {
+  order: 4;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
 .stats-split--even {
   /* Историческое имя — оставлено для совместимости (если в коде где-то
      ещё используется). Сейчас совпадает с дефолтным .stats-split. */
   grid-template-columns: minmax(0, 5fr) minmax(240px, 3fr);
 }
 .stats-split--wide-left {
-  /* Weak-spots (слева) | Тепловая карта (справа). Правый край слабых
-     мест ровно на отметке 75% — это правая граница плитки KDA сверху
-     (4 равных KPI-тайла → KDA = тайл 3 из 4, его правый край = 75%).
-     Тепловая карта получает оставшиеся 25%, что заметно шире старого
-     фиксированного rail'а 320–400px. */
-  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  /* Weak-spots | Heatmap: both are primary work-area widgets, so split
+     the row evenly instead of squeezing the heatmap into a side rail. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 /* Cards inside any stats-split row become flex columns so their inner
@@ -2547,8 +2557,8 @@ table tr:hover {
    underneath. */
 .weak-card--in-split { margin-bottom: 0; }
 .weak-card--in-split .weak-circle-layout {
-  grid-template-columns: 180px 1fr;
-  gap: 18px;
+  grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
+  gap: 20px;
 }
 .weak-card--in-split .weak-list {
   grid-column: 1 / -1;
@@ -2966,26 +2976,30 @@ table tr:hover {
   margin: 0 0 6px;
 }
 .weak-circle-row {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
   font-size: 0.88rem;
   padding: 6px 0;
   border-bottom: 1px solid rgba(22, 233, 212, 0.06);
 }
-.weak-circle-row-label { color: var(--text-muted); }
+.weak-circle-row-label { color: var(--text-muted); min-width: 0; white-space: normal; }
 .weak-circle-row strong { color: var(--text-primary); font-family: var(--font-display); font-variant-numeric: tabular-nums; }
 
 .weak-circle-components { margin-top: 10px; }
 .weak-circle-components-list { display: flex; flex-direction: column; gap: 4px; }
 .weak-circle-comp-row {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
   padding: 6px 8px;
   background: rgba(8, 16, 38, 0.4);
   border-radius: 6px;
   font-size: 0.82rem;
 }
-.weak-circle-comp-name { color: var(--text-secondary); }
+.weak-circle-comp-name { color: var(--text-secondary); min-width: 0; white-space: normal; }
 .weak-circle-comp-value { font-variant-numeric: tabular-nums; color: var(--text-primary); font-weight: 600; }
 
 .weak-list {

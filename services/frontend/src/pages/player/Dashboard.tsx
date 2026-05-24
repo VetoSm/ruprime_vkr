@@ -45,6 +45,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 const STEAM_PENDING_KEY = 'steam_pending_link_id';
 const DASHBOARD_ROLES = ['', 'POS1', 'POS2', 'POS3', 'POS4', 'POS5'] as const;
 const PERIOD_OPTIONS = [
+  { value: '10',  label: 'Последние 10 матчей' },
   { value: '20',  label: 'Последние 20 матчей' },
   { value: '50',  label: 'Последние 50 матчей' },
   { value: '100', label: 'Последние 100 матчей' },
@@ -185,7 +186,7 @@ export default function PlayerDashboard() {
   const [pendingSteamChecked, setPendingSteamChecked] = useState(false);
 
   // Управление UI
-  const [periodCount, setPeriodCount] = useState<'20' | '50' | '100'>('50');
+  const [periodCount, setPeriodCount] = useState<'10' | '20' | '50' | '100'>('50');
   const [selectedAnalysisRole, setSelectedAnalysisRole] = useState('');
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [chartMetric, setChartMetric] = useState<'gpm' | 'xpm' | 'kda' | 'winrate'>('gpm');
@@ -341,7 +342,9 @@ export default function PlayerDashboard() {
       .slice(0, 3);
   }, [categories]);
 
-  const recentMatches: any[] = Array.isArray(steamData?.recent_matches) ? steamData.recent_matches : [];
+  const recentMatches: any[] = Array.isArray(trends?.recent_matches)
+    ? trends.recent_matches
+    : (Array.isArray(steamData?.recent_matches) ? steamData.recent_matches : []);
 
   /* Top roles ordered by how often the player actually played them in
      the recent window, descending. Empty (`0`/`null` `lane_role`) and
@@ -495,6 +498,18 @@ export default function PlayerDashboard() {
               {typeof syncStatus.fetched_matches === 'number' && (
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
                   Загружено матчей: {syncStatus.fetched_matches.toLocaleString('ru-RU')}
+                  {typeof syncStatus.planned_fetch_matches === 'number'
+                    ? ` из ${syncStatus.planned_fetch_matches.toLocaleString('ru-RU')} запланированных`
+                    : ''}
+                  {syncStatus.status === 'running' ? ' · выполняется' : ''}
+                </div>
+              )}
+              {typeof syncStatus.parse_requested === 'number' && (
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                  На детальный разбор запланировано: {syncStatus.parse_requested.toLocaleString('ru-RU')}
+                  {typeof syncStatus.planned_parse_matches === 'number'
+                    ? ` / ${syncStatus.planned_parse_matches.toLocaleString('ru-RU')}`
+                    : ''}
                 </div>
               )}
             </div>
@@ -555,7 +570,7 @@ export default function PlayerDashboard() {
 
         <HeroStat
           label="MMR"
-          color="var(--accent-bright)"
+          color="var(--text-primary)"
           value={accountMmr ? accountMmr.toLocaleString('ru-RU') : '—'}
           delta={scopeMatches > 0 ? `${scopeMatches} м в окне` : undefined}
           deltaTone="neutral"

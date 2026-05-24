@@ -299,8 +299,8 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def _normalise_llm_payload(parsed: dict[str, Any]) -> tuple[str, list[str], str] | None:
-    summary = str(parsed.get("summary") or "").strip()
-    full_text = str(parsed.get("full_text") or "").strip()
+    summary = _clean_visible_answer(str(parsed.get("summary") or ""))
+    full_text = _clean_visible_answer(str(parsed.get("full_text") or ""))
     plan_raw = parsed.get("plan") or []
     if isinstance(plan_raw, str):
         plan = [line.strip(" -0123456789.") for line in plan_raw.splitlines() if line.strip()]
@@ -311,6 +311,13 @@ def _normalise_llm_payload(parsed: dict[str, Any]) -> tuple[str, list[str], str]
     if not summary or not full_text:
         return None
     return summary, plan[:7], full_text
+
+
+def _clean_visible_answer(text: str) -> str:
+    text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.S | re.I)
+    text = re.sub(r"^\s*(Вопрос|Ваш вопрос|User question)\s*[:：].*(\n|$)", "", text, flags=re.I)
+    text = re.sub(r"^\s*#+\s*(Вопрос|Ваш вопрос|Повтор вопроса).*?(?=\n#+\s+|\Z)", "", text, flags=re.S | re.I)
+    return text.strip()
 
 
 def _build_llm_messages(message: str, context: dict | None) -> list[dict[str, str]]:
@@ -325,6 +332,9 @@ def _build_llm_messages(message: str, context: dict | None) -> list[dict[str, st
         "обязательно напиши, что выводы по вардам предварительные и данные догружаются. "
         "Учитывай роль: для POS4/POS5 не ругай игрока за низкий GPM/ластхиты как кора, "
         "а объясняй это через смерти, участие, вижн, темп и свободные волны. "
+        "Учитывай training в контексте: запланированные и завершённые тренировки, выбранную/любимую роль, цели игрока и роль, которая лучше всего подходит по данным. "
+        "Давай гибкие игровые рекомендации, которые игрок может обсуждать и превращать в тренировочные цели; не выдавай их как единственно возможный маршрут. "
+        "Не показывай рассуждения, chain-of-thought, черновики или повтор вопроса пользователя. "
         "Отвечай только про Dota 2, статистику, матчи, роли, героев, ошибки и тренировочный план. "
         "Верни строго JSON с ключами: summary (строка), plan (массив строк), full_text (markdown строка)."
     )
@@ -340,6 +350,7 @@ def _build_llm_messages(message: str, context: dict | None) -> list[dict[str, st
             "В summary укажи выборку матчей и 2-3 главные проблемы.",
             "В full_text дай разбор по top_gaps: текущий показатель, цель, почему это важно, что делать.",
             "Дай 3-5 практических шагов на ближайшие 10 игр.",
+            "Если в player_context.training есть тренировки или цели, привяжи рекомендации к ним.",
             "Не добавляй общие советы без привязки к feature_gaps/categories.",
             "Не повторяй вопрос пользователя отдельным блоком.",
             "Не добавляй в full_text раздел Резюме: summary уже выводится отдельно в UI.",
@@ -405,6 +416,9 @@ def _generate_template_response(message: str, context: dict = None) -> tuple[str
     filters_applied = context.get("filters_applied") or summary_data.get("filters_applied") or {}
     vision_data = context.get("vision_data") or {}
     target_rank = context.get("target_rank") or "цель"
+    training = context.get("training") or {}
+    training_profile = training.get("profile") or {}
+    training_sessions = training.get("sessions") or {}
 
     # Build summary in Russian
     games = summary_data.get("games_analyzed", 0)
@@ -448,6 +462,18 @@ def _generate_template_response(message: str, context: dict = None) -> tuple[str
     # Build full text
     full_text = f"# Советы тренера\n\n"
     full_text += f"Сравниваю с целью: **{target_rank}**. Если включены роль/герой, советы относятся именно к этой выборке.\n\n"
+    if training_profile or training_sessions:
+        role_hint = training_profile.get("analysis_role") or ", ".join(training_profile.get("desired_roles") or []) or "не выбрана"
+        goals = training_profile.get("training_goals") or []
+        full_text += "## Тренировочный контекст\n\n"
+        full_text += (
+            f"- Роль/фокус из профиля: **{role_hint}**\n"
+            f"- Запланировано тренировок: **{training_sessions.get('planned_count', 0)}**, "
+            f"завершено: **{training_sessions.get('completed_count', 0)}**\n"
+        )
+        if goals:
+            full_text += f"- Цели игрока: {', '.join(map(str, goals[:4]))}\n"
+        full_text += "\n"
     snapshot = _category_snapshot(categories)
     if snapshot:
         full_text += "## Самые слабые категории\n\n"

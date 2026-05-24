@@ -27,6 +27,7 @@ interface RankBadgeProps {
 }
 
 export function RankBadge({ rankTier, rankName, size = 'md' }: RankBadgeProps) {
+  const [imgFailed, setImgFailed] = useState(false);
   let medal = 0;
 
   if (rankTier && rankTier > 0) {
@@ -56,8 +57,29 @@ export function RankBadge({ rankTier, rankName, size = 'md' }: RankBadgeProps) {
       background: `${info.color}10`,
       fontSize: fontSize[size], fontWeight: 700, color: info.color,
     }}>
-      <img src={iconUrl} alt={info.name} style={{ width: sizes[size], height: sizes[size] }}
-        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+      {!imgFailed ? (
+        <img src={iconUrl} alt={info.name} style={{ width: sizes[size], height: sizes[size] }}
+          onError={() => setImgFailed(true)} />
+      ) : (
+        <span
+          aria-label={info.name}
+          style={{
+            width: sizes[size],
+            height: sizes[size],
+            borderRadius: '50%',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: `${info.color}22`,
+            color: info.color,
+            border: `1px solid ${info.color}66`,
+            fontSize: size === 'lg' ? 18 : 12,
+            lineHeight: 1,
+          }}
+        >
+          {medal === 8 ? 'I' : medal}
+        </span>
+      )}
       {info.name}
     </span>
   );

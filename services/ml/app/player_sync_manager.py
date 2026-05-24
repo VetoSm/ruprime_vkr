@@ -76,6 +76,8 @@ def schedule_deep_sync(account_id: int, steam_id: str | None = None, force: bool
             "status": "queued",
             "requested_at": now,
             "message": "Запланирована фоновая догрузка матчей",
+            "planned_fetch_matches": DEEP_SYNC_MAX_MATCHES,
+            "planned_parse_matches": RECENT_PARSE_MATCHES,
         })
         _state["jobs"][account_id] = job
 
@@ -124,6 +126,8 @@ def _worker_loop():
                     "message": "Фоновая синхронизация завершена",
                     "fetched_matches": result.get("fetched_matches", 0),
                     "parse_requested": result.get("parse_requested", 0),
+                    "planned_fetch_matches": DEEP_SYNC_MAX_MATCHES,
+                    "planned_parse_matches": RECENT_PARSE_MATCHES,
                     "detailed_matches_fetched": result.get("detailed_matches_fetched", 0),
                     "players_cached": result.get("players_cached", 0),
                 })

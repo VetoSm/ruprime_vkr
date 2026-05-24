@@ -13,6 +13,8 @@ function cleanInline(text: string) {
 
 function stripAnswerMeta(raw: string) {
   return raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/^#+\s*(Вопрос|Ваш вопрос|Повтор вопроса)\s*[:\n][\s\S]*?(?=\n#+\s+|$)/i, '')
     .replace(/^#\s+Советы тренера\s*\n+/i, '')
     .replace(/##\s+Резюме[\s\S]*?(?=\n##\s+|$)/i, '')
     .trim();
@@ -115,6 +117,7 @@ export default function PlayerAiChat() {
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [contextBasis, setContextBasis] = useState<any>(null);
+  const [showContextRadar, setShowContextRadar] = useState(false);
   const [showBasis, setShowBasis] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -157,6 +160,7 @@ export default function PlayerAiChat() {
         meta.push(`Причина: ${res.data.llm_error}`);
       }
       setContextBasis(res.data.context_basis || null);
+      setShowContextRadar(Boolean(res.data.show_context_radar));
       const metaText = meta.length ? `\n\n---\n${meta.join('\n')}` : '';
       setMessages((prev) => [...prev, {
         type: 'ai',
@@ -184,6 +188,7 @@ export default function PlayerAiChat() {
     setMessages([]);
     setHistory([]);
     setContextBasis(null);
+    setShowContextRadar(false);
   };
 
   return (
@@ -224,13 +229,13 @@ export default function PlayerAiChat() {
             <Link to="/dashboard" className="btn btn-outline btn-sm">К дашборду</Link>
           </div>
         </div>
-        {contextBasis && (
+        {contextBasis && showContextRadar && (
           <div className="card mb-20" style={{ padding: 12, borderStyle: 'dashed' }}>
             <div className="flex-between" style={{ gap: 10, flexWrap: 'wrap' }}>
               <div>
-                <strong>База для ответа</strong>
+                <strong>Текущий срез игрока</strong>
                 <div className="text-muted" style={{ fontSize: '0.78rem' }}>
-                  Резюме среза и ключевые разрывы, которые были переданы Оракулу.
+                  Показывается один раз в начале диалога: выборка, матчей и слабые категории.
                 </div>
               </div>
               <button className="btn btn-outline btn-sm" onClick={() => setShowBasis((v) => !v)}>
@@ -246,6 +251,22 @@ export default function PlayerAiChat() {
                       <li key={idx}>{g.component}: {g.player_value} → {g.target_value}</li>
                     ))}
                   </ul>
+                )}
+                {contextBasis.weak_categories?.length > 0 && (
+                  <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+                    {contextBasis.weak_categories.slice(0, 4).map((c: any) => {
+                      const pct = Math.max(0, Math.min(100, Number(c.score || 0) * 10));
+                      return (
+                        <div key={c.key || c.name} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 42px', gap: 8, alignItems: 'center' }}>
+                          <span className="text-muted">{c.name || c.key}</span>
+                          <span style={{ height: 6, borderRadius: 999, background: 'rgba(22, 233, 212, 0.10)', overflow: 'hidden' }}>
+                            <span style={{ display: 'block', width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, #f6c463, #ff4757)' }} />
+                          </span>
+                          <strong>{Number(c.score || 0).toFixed(1)}</strong>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             )}
@@ -279,7 +300,7 @@ export default function PlayerAiChat() {
           ))}
           {loading && (
             <div className="chat-message ai">
-              <span className="text-muted">Сверяю ranked-срез, роль и слабые зоны...</span>
+              <span className="text-muted">Готовлю ответ по вашему текущему срезу...</span>
             </div>
           )}
         </div>

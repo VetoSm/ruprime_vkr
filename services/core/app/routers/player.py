@@ -33,6 +33,8 @@ class SteamAccountData(BaseModel):
     win: Optional[int] = None
     lose: Optional[int] = None
     total_games: Optional[int] = None
+    lifetime_games: Optional[int] = None
+    parsed_games_n: Optional[int] = None
     totals: Optional[dict] = None
     estimated_hours: Optional[float] = None
     last_match_time: Optional[str] = None
