@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { coreApi, authApi } from '../../api/client';
 import { RankBadge } from '../../ui/GameComponents';
@@ -19,6 +19,22 @@ const ROLE_OPTIONS = [
 ];
 
 const RANK_OPTIONS = ['HERALD', 'GUARDIAN', 'CRUSADER', 'ARCHON', 'LEGEND', 'ANCIENT', 'DIVINE', 'IMMORTAL'];
+
+/* Возвращает позицию ранга в RANK_OPTIONS (или -1, если не распознали).
+   Принимает как "DIVINE" / "Divine", так и "Divine [5]" (медаль+звёзды). */
+function rankOrdinal(name?: string | null): number {
+  if (!name) return -1;
+  const upper = String(name).toUpperCase().split(/[\s\[]/)[0];
+  return RANK_OPTIONS.indexOf(upper);
+}
+
+/* Преобразует rank_tier (integer) от стима в имя ранга:
+   tier=80 ⇒ IMMORTAL, tier=50 ⇒ LEGEND, … */
+function rankTierToOrdinal(rt?: number | null): number {
+  if (!rt || rt <= 0) return -1;
+  const medal = Math.floor(rt / 10) - 1; // 1..8 -> 0..7
+  return medal >= 0 && medal < RANK_OPTIONS.length ? medal : -1;
+}
 
 type TabId = 'profile' | 'goals' | 'security' | 'notifications' | 'subscription';
 
@@ -106,6 +122,9 @@ export default function PlayerProfile() {
       setFavRole(r.data.analysis_role || r.data.preferred_role || '');
       setAbout(r.data.about || '');
       setTelegram(r.data.telegram || '');
+      // desired_rank_tier ставим из БД, но если у игрока его ещё нет —
+      // подставим в эффекте ниже, когда подгрузится actual_rank_tier
+      // / steam.rank_tier (default = следующий ранг после текущего).
       setDesiredRank(r.data.desired_rank_tier || '');
     }).catch(() => {});
 
@@ -161,6 +180,39 @@ export default function PlayerProfile() {
       } finally { setLinking(false); }
     })();
   }, [steamData, autoLinkTried]);
+
+  /* Текущий ранг и индекс «следующего». Используется ниже на вкладке
+     «Цели»: если игрок ещё не выставил desired_rank — подставляем сразу
+     следующий рангом за текущим (мотивационный шаг, а не "Immortal по
+     умолчанию"). Также используется для предупреждения, когда выбор
+     перепрыгивает несколько рангов. */
+  const currentRankIdx = useMemo(() => {
+    const fromSteam = rankTierToOrdinal(steamData?.rank_tier);
+    if (fromSteam >= 0) return fromSteam;
+    return rankOrdinal(profile?.actual_rank_tier);
+  }, [steamData?.rank_tier, profile?.actual_rank_tier]);
+
+  /* Следующий доступный шаг наверх. Если игрок уже Immortal, остаёмся
+     на Immortal (выше некуда). */
+  const nextRankIdx = useMemo(() => {
+    if (currentRankIdx < 0) return -1;
+    return Math.min(currentRankIdx + 1, RANK_OPTIONS.length - 1);
+  }, [currentRankIdx]);
+
+  /* Авто-подстановка дефолта: ровно один раз, когда у игрока пока пусто
+     в desired_rank, а актуальный ранг уже виден. Не трогаем сохранённое
+     значение из БД. */
+  useEffect(() => {
+    if (desiredRank) return;
+    if (nextRankIdx < 0) return;
+    setDesiredRank(RANK_OPTIONS[nextRankIdx]);
+  }, [desiredRank, nextRankIdx]);
+
+  /* Предупреждение, когда игрок выбрал не «следующий», а сильно выше.
+     Показываем только если у нас есть текущий ранг — иначе сравнивать
+     не с чем. */
+  const desiredRankIdx = rankOrdinal(desiredRank);
+  const desiredRankTooFar = currentRankIdx >= 0 && desiredRankIdx > currentRankIdx + 1;
 
   /* ============================================================
    * Handlers
@@ -423,19 +475,69 @@ export default function PlayerProfile() {
             <>
               <div className="card dash-card">
                 <div className="card-head"><div className="card-title">Желаемый ранг</div></div>
+                <p className="text-muted" style={{ fontSize: '0.85rem', margin: '0 0 12px' }}>
+                  По умолчанию — следующий ранг за текущим. Можно поставить выше,
+                  но дорогу до него всё равно придётся пройти ступенька за ступенькой.
+                </p>
                 <div className="role-toggle" role="tablist" style={{ borderRadius: 10, gridTemplateColumns: 'repeat(4, 1fr)' }}>
-                  {RANK_OPTIONS.map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      className={`role-toggle-btn ${desiredRank === r ? 'active' : ''}`}
-                      onClick={() => setDesiredRank(desiredRank === r ? '' : r)}
-                      style={{ borderRadius: 8, padding: '8px 6px', fontSize: '0.78rem' }}
-                    >
-                      {r}
-                    </button>
-                  ))}
+                  {RANK_OPTIONS.map((r, i) => {
+                    const isCurrent = i === currentRankIdx;
+                    const isNext = i === nextRankIdx && i !== currentRankIdx;
+                    return (
+                      <button
+                        key={r}
+                        type="button"
+                        className={`role-toggle-btn ${desiredRank === r ? 'active' : ''}`}
+                        onClick={() => setDesiredRank(desiredRank === r ? '' : r)}
+                        disabled={isCurrent}
+                        title={isCurrent ? 'Это ваш текущий ранг' : isNext ? 'Следующая ступенька' : undefined}
+                        style={{
+                          borderRadius: 8,
+                          padding: '8px 6px',
+                          fontSize: '0.78rem',
+                          opacity: isCurrent ? 0.45 : 1,
+                          position: 'relative',
+                        }}
+                      >
+                        {r}
+                        {isCurrent && (
+                          <span style={{
+                            display: 'block', fontSize: '0.6rem',
+                            color: 'var(--text-muted)', marginTop: 2,
+                          }}>
+                            сейчас
+                          </span>
+                        )}
+                        {isNext && (
+                          <span style={{
+                            display: 'block', fontSize: '0.6rem',
+                            color: 'var(--accent)', marginTop: 2, fontWeight: 700,
+                          }}>
+                            следующий
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
+                {desiredRankTooFar && (
+                  <div
+                    className="alert"
+                    style={{
+                      marginTop: 12,
+                      background: 'var(--warning-bg)',
+                      border: '1px solid rgba(255, 165, 2, 0.4)',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    Цель амбициозная — но сначала тренировками надо проделать путь
+                    по предыдущим рангам.{' '}
+                    {nextRankIdx >= 0 && (
+                      <>Ближайшая ступенька — <strong>{RANK_OPTIONS[nextRankIdx]}</strong>.</>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
                   <button className="btn btn-primary btn-sm" onClick={saveProfile}>Сохранить ранг</button>
                 </div>

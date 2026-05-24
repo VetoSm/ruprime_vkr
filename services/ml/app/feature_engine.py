@@ -1011,8 +1011,20 @@ def analyze_player_from_account(
         if len(batch) == 0:
             continue
         decidable = batch["win"].dropna()
+        # Surface batch positional bounds + a representative unix timestamp so
+        # the frontend can pick its X-axis flavour: numeric match index for
+        # the dashboard "Динамика" mini-chart (3 ticks: 1, mid, last) or a
+        # formatted date for the /stats Dynamics chart. ``start_ts``/``end_ts``
+        # are unix seconds (None when start_time was NaN for the whole batch).
+        start_times = batch["start_time"].dropna()
+        start_ts = int(start_times.min()) if len(start_times) > 0 else None
+        end_ts = int(start_times.max()) if len(start_times) > 0 else None
         trends_data.append({
             "batch": f"Матчи {i+1}-{min(i+batch_size, len(df_sorted))}",
+            "batch_start_idx": i + 1,
+            "batch_end_idx": min(i + batch_size, len(df_sorted)),
+            "start_ts": start_ts,
+            "end_ts": end_ts,
             "gpm":       _mean_present(batch["gold_per_min"], 1, default=None),
             "xpm":       _mean_present(batch["xp_per_min"], 1, default=None),
             "winrate":   round(float(decidable.mean()), 3) if len(decidable) > 0 else None,
@@ -1031,7 +1043,14 @@ def analyze_player_from_account(
         for t in trends_data:
             v = t.get(metric)
             if v is not None:
-                out.append({"ts": t["batch"], metric: v})
+                out.append({
+                    "ts": t["batch"],
+                    "batch_start_idx": t["batch_start_idx"],
+                    "batch_end_idx": t["batch_end_idx"],
+                    "start_ts": t["start_ts"],
+                    "end_ts": t["end_ts"],
+                    metric: v,
+                })
         return out
 
     trends = {

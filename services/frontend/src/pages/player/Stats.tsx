@@ -9,6 +9,7 @@ import { EmptyState } from '../../ui/Primitives';
 import { IconChevronLeft, IconChevronRight } from '../../ui/Icons';
 import { IconListOutline, IconTargetOutline, IconSwordsOutline, IconCoinsOutline } from '../../ui/StatIcons';
 import { Dropdown } from '../../ui/Dropdown';
+import { RoleBadge } from '../../ui/GameComponents';
 
 const CHART_STYLE = { background: '#0d1a35', border: '1px solid rgba(22, 233, 212, 0.20)', color: '#e8edf5', borderRadius: 8 };
 
@@ -16,7 +17,11 @@ const PERIOD_OPTIONS: { id: string; label: string; backend: string }[] = [
   { id: '7d',  label: '7 дней',  backend: '20' },
   { id: '30d', label: '30 дней', backend: 'month' },
   { id: '90d', label: '90 дней', backend: 'all' },
-  { id: 'all', label: 'Сезон',   backend: 'all' },
+  // Раньше тут была подпись "Сезон" — нынешний бэкенд не знает о
+  // киберспортивных сезонах, и под капотом всё равно отдавал «все
+  // матчи». Чтобы не вводить пользователя в заблуждение, переименовали
+  // в "Все" — это честнее и проще читается рядом с другими интервалами.
+  { id: 'all', label: 'Все',     backend: 'all' },
 ];
 
 const ROLE_DROPDOWN_OPTIONS = [
@@ -131,11 +136,20 @@ export default function PlayerStats() {
 
   useEffect(() => {
     if (!pid) return;
+    // Сбрасываем активный выбор в списке "слабых мест" и старые данные,
+    // чтобы при смене фильтра старая выборка не подмешивалась к новой.
+    setActiveFeatureIdx(0);
+    let cancelled = false;
     const params: any = { mode: 'ranked', period: backendPeriod };
     if (selectedRole)  params.role = Number(selectedRole);
     if (selectedHero)  params.hero_id = Number(selectedHero);
-    coreApi.get(`/player/${pid}/stats/overview`, { params }).then((r) => setStats(r.data)).catch(() => {});
-    coreApi.get(`/player/${pid}/detailed-features`, { params }).then((r) => setFeatures(r.data)).catch(() => {});
+    coreApi.get(`/player/${pid}/stats/overview`, { params })
+      .then((r) => { if (!cancelled) setStats(r.data); })
+      .catch(() => {});
+    coreApi.get(`/player/${pid}/detailed-features`, { params })
+      .then((r) => { if (!cancelled) setFeatures(r.data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [pid, backendPeriod, selectedRole, selectedHero]);
 
   /* ---- Вычисляемые ---- */
@@ -230,9 +244,46 @@ export default function PlayerStats() {
       let value = typeof raw === 'number' ? raw : Number(raw);
       if (activeMetric.pct && Number.isFinite(value)) value = value * 100;
       if (!Number.isFinite(value)) value = 0;
-      return { ts: p.ts, value: Number(value.toFixed(activeMetric.decimals)) };
+      // X-ось — дата конца батча матчей (последний матч в группировке).
+      // Если бэк ещё не отдаёт start_ts/end_ts (старый ml без патча для
+      // временных меток), оставим ярлык батча — UI не сломается, просто
+      // покажется текст по типу "Матчи 1-20" вместо даты.
+      const tsLabel = p.ts;
+      const tsUnix = typeof p.end_ts === 'number'
+        ? p.end_ts
+        : (typeof p.start_ts === 'number' ? p.start_ts : null);
+      return {
+        ts: tsLabel,
+        tsUnix,
+        value: Number(value.toFixed(activeMetric.decimals)),
+      };
     });
   }, [trends, activeMetric]);
+
+  /* Если хоть одна точка тренда имеет реальную unix-метку, переключаем
+     X-ось на даты. Это покрывает /ml-analyze-player, который отдаёт
+     month-строки ("2026-04") в `ts` — мы их тоже отображаем как даты
+     через парсинг, см. fallback в formatter. */
+  const dynamicAxisMode: 'date' | 'label' = useMemo(() => {
+    if (dynamicTrend.some((d: any) => typeof d.tsUnix === 'number' && d.tsUnix > 0)) return 'date';
+    if (dynamicTrend.some((d: any) => typeof d.ts === 'string' && /^\d{4}-\d{2}/.test(d.ts))) return 'date';
+    return 'label';
+  }, [dynamicTrend]);
+
+  const formatDynamicTick = (idx: number): string => {
+    const p = dynamicTrend[idx];
+    if (!p) return '';
+    if (typeof p.tsUnix === 'number' && p.tsUnix > 0) {
+      const d = new Date(p.tsUnix * 1000);
+      return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+    }
+    if (typeof p.ts === 'string' && /^\d{4}-\d{2}/.test(p.ts)) {
+      const [year, month] = p.ts.split('-');
+      const d = new Date(Number(year), Number(month) - 1, 1);
+      return d.toLocaleDateString('ru-RU', { month: 'short', year: '2-digit' });
+    }
+    return String(p.ts ?? '');
+  };
 
   const dynamicLabel = activeMetric.label;
   const dynamicGroupedOptions = useMemo(() => {
@@ -352,7 +403,10 @@ export default function PlayerStats() {
           </div>
           {dynamicTrend.length > 0 ? (
             <ResponsiveContainer width="100%" height={360}>
-              <LineChart data={dynamicTrend} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+              <LineChart
+                data={dynamicTrend.map((d: any, i: number) => ({ ...d, idx: i }))}
+                margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
+              >
                 <defs>
                   <linearGradient id="dynamicLineGrad" x1="0" y1="0" x2="1" y2="0">
                     <stop offset="0%"   stopColor="#16e9d4" />
@@ -360,9 +414,32 @@ export default function PlayerStats() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(22, 233, 212, 0.12)" />
-                <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={11} />
+                <XAxis
+                  dataKey="idx"
+                  type="number"
+                  domain={[0, Math.max(0, dynamicTrend.length - 1)]}
+                  // Тики строим явно из всех точек серии. Recharts с
+                  // type="number" иначе ставит 5 фиксированных значений
+                  // по линейке домена и для коротких выборок дублирует
+                  // одну и ту же дату.
+                  ticks={dynamicTrend.length > 1
+                    ? Array.from({ length: dynamicTrend.length }, (_, i) => i)
+                    : [0]}
+                  interval="preserveStartEnd"
+                  stroke="#7b8ba5"
+                  fontSize={11}
+                  tickFormatter={(v: number) => formatDynamicTick(v)}
+                />
                 <YAxis stroke="#7b8ba5" fontSize={11} />
-                <Tooltip contentStyle={CHART_STYLE} formatter={(v: any) => [v, dynamicLabel]} />
+                <Tooltip
+                  contentStyle={CHART_STYLE}
+                  formatter={(v: any) => [v, dynamicLabel]}
+                  labelFormatter={(idx: any) => {
+                    const i = Number(idx);
+                    if (dynamicAxisMode === 'date') return formatDynamicTick(i);
+                    return dynamicTrend[i]?.ts ?? '';
+                  }}
+                />
                 <Line
                   type="monotone"
                   dataKey="value"
@@ -383,8 +460,46 @@ export default function PlayerStats() {
           )}
         </div>
 
-        {/* Радар — справа от Динамики, занимает место бывшего «Винрейт по
-            ролям» (та же ширина — 3fr). Сам Винрейт переехал в Row 4. */}
+        {/* Винрейт по ролям — справа от Динамики. Поменян местами с
+            «Радаром навыков»: WR по ролям информативнее как сосед графика
+            динамики (две сводных метрики рядом), а радар лучше работает
+            в нижнем ряду вместе с разбивкой по ролям и топом героев. */}
+        <div className="card dash-card">
+          <div className="card-head">
+            <div className="card-title">Винрейт по ролям</div>
+            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+              по {steamData?.recent_matches?.length || 0} матчам
+            </span>
+          </div>
+          <div className="role-wr-list">
+            {roleStats.map((r) => (
+              <div key={r.role} className="role-wr-row">
+                <span className="role-wr-label">
+                  <RoleBadge role={r.role} compact />
+                </span>
+                <div className="role-wr-bar">
+                  <div
+                    className="role-wr-bar-fill"
+                    style={{
+                      width: r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '0%',
+                      background: r.winrate != null && r.winrate >= 0.5
+                        ? 'linear-gradient(90deg, var(--accent-bright) 0%, var(--accent) 100%)'
+                        : 'linear-gradient(90deg, var(--purple) 0%, rgba(155, 89, 255, 0.6) 100%)',
+                    }}
+                  />
+                </div>
+                <span className="role-wr-value">
+                  {r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}
+                  {r.total > 0 && <small> · {r.total}</small>}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ============ Row 3: Радар навыков (слева) | Игры по ролям + Топ героев (справа стопкой) ============ */}
+      <div className="stats-split">
         <div className="card dash-card">
           <div className="card-head">
             <div className="card-title">Радар навыков</div>
@@ -408,40 +523,6 @@ export default function PlayerStats() {
             <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
           )}
         </div>
-      </div>
-
-      {/* ============ Row 3: Винрейт по ролям (слева) | Игры по ролям + Топ героев (справа стопкой) ============ */}
-      <div className="stats-split">
-        <div className="card dash-card">
-          <div className="card-head">
-            <div className="card-title">Винрейт по ролям</div>
-            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
-              по {steamData?.recent_matches?.length || 0} матчам
-            </span>
-          </div>
-          <div className="role-wr-list">
-            {roleStats.map((r) => (
-              <div key={r.role} className="role-wr-row">
-                <span className="role-wr-label">{r.label}</span>
-                <div className="role-wr-bar">
-                  <div
-                    className="role-wr-bar-fill"
-                    style={{
-                      width: r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '0%',
-                      background: r.winrate != null && r.winrate >= 0.5
-                        ? 'linear-gradient(90deg, var(--accent-bright) 0%, var(--accent) 100%)'
-                        : 'linear-gradient(90deg, var(--purple) 0%, rgba(155, 89, 255, 0.6) 100%)',
-                    }}
-                  />
-                </div>
-                <span className="role-wr-value">
-                  {r.winrate != null ? `${(r.winrate * 100).toFixed(0)}%` : '—'}
-                  {r.total > 0 && <small> · {r.total}</small>}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
 
         {/* Справа — стопка из двух блоков: Игры по ролям + Топ героев.
             Теперь шире (3fr вместо clamp ~340px) — больше места для
@@ -456,7 +537,9 @@ export default function PlayerStats() {
               {roleStats.map((r) => (
                 <div key={r.role} className="role-stat-cell">
                   <div className="role-stat-cell-head">
-                    <span className="role-stat-cell-name">{r.label}</span>
+                    <span className="role-stat-cell-name">
+                      <RoleBadge role={r.role} compact />
+                    </span>
                     <span className="role-stat-cell-count">{r.total} м</span>
                   </div>
                   <div className="role-stat-cell-metrics">
@@ -544,9 +627,14 @@ export default function PlayerStats() {
                 return (
                   <svg width={size} height={size}>
                     <defs>
+                      {/* Градиент инвертирован vs прежнего cyan→purple:
+                          положительные значения теперь идут к красному,
+                          отрицательные — к золотому. Так "выше — алертнее"
+                          считывается на тёмной карточке более прямолинейно
+                          и совпадает с акцентами warning/danger в темe. */}
                       <linearGradient id="weakRingGrad" x1="0" y1="0" x2="1" y2="1">
-                        <stop offset="0%"   stopColor="#16e9d4" />
-                        <stop offset="100%" stopColor="#9b59ff" />
+                        <stop offset="0%"   stopColor="#f6c463" />
+                        <stop offset="100%" stopColor="#ff4757" />
                       </linearGradient>
                     </defs>
                     {/* Track */}
@@ -624,21 +712,28 @@ export default function PlayerStats() {
               )}
             </div>
 
-            {/* Список всех слабых мест сбоку — clickable list */}
+            {/* Сетка "Направления" — раньше это был вертикальный длинный
+                список (max-height: 200px со скроллом), который растягивал
+                карточку и приходилось скроллить, чтобы переключиться между
+                направлениями. Теперь — компактные блоки в ряд: всю строку
+                видно сразу, карточка низкая, и соседняя «Тепловая карта»
+                выравнивается по высоте без отдельных правил. */}
             <div className="weak-list">
-              <div className="text-muted" style={{ fontSize: '0.78rem', marginBottom: 8 }}>Все направления (от худших)</div>
-              {weakFeaturesSorted.map((cat: any, i: number) => (
-                <button
-                  key={cat.key}
-                  type="button"
-                  className={`weak-list-row ${i === activeFeatureIdx ? 'active' : ''}`}
-                  onClick={() => setActiveFeatureIdx(i)}
-                >
-                  <span className="weak-list-rank">{i + 1}</span>
-                  <span className="weak-list-name">{cat.name}</span>
-                  <span className="weak-list-score">{(cat.score ?? 0).toFixed(1)}</span>
-                </button>
-              ))}
+              <div className="text-muted weak-list-caption">Все направления (от худших)</div>
+              <div className="weak-list-grid">
+                {weakFeaturesSorted.map((cat: any, i: number) => (
+                  <button
+                    key={cat.key}
+                    type="button"
+                    className={`weak-list-tile ${i === activeFeatureIdx ? 'active' : ''}`}
+                    onClick={() => setActiveFeatureIdx(i)}
+                  >
+                    <span className="weak-list-tile-rank">{i + 1}</span>
+                    <span className="weak-list-tile-name">{cat.name}</span>
+                    <span className="weak-list-tile-score">{(cat.score ?? 0).toFixed(1)}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (

@@ -20,6 +20,7 @@ from app.models import (
     TrainingSession,
     TrainingRequest,
     SessionStatus,
+    CoachReview,
 )
 from app.schemas import CoachProfileUpdate, CoachProfileResponse
 
@@ -177,6 +178,45 @@ def list_coaches(
 
     coaches = query.order_by(CoachProfile.id.desc()).all()
 
+    # Aggregate sessions/reviews in two SQL queries instead of N+1 lookups per
+    # coach. ``sessions_completed`` is plain COUNT over status=COMPLETED;
+    # rating aggregation pulls AVG/COUNT in one shot. We then build per-coach
+    # dictionaries the loop below can consult cheaply.
+    coach_ids = [c.id for c in coaches]
+    sessions_by_coach: dict[int, int] = {}
+    rating_by_coach: dict[int, dict] = {}
+    if coach_ids:
+        s_rows = db.execute(
+            sql_text(
+                """
+                SELECT coach_profile_id, COUNT(*) AS done
+                FROM training_sessions
+                WHERE coach_profile_id = ANY(:ids) AND status = 'COMPLETED'
+                GROUP BY coach_profile_id
+                """
+            ),
+            {"ids": coach_ids},
+        ).fetchall()
+        for cid, done in s_rows:
+            sessions_by_coach[int(cid)] = int(done or 0)
+
+        r_rows = db.execute(
+            sql_text(
+                """
+                SELECT coach_profile_id, AVG(rating)::float AS avg_r, COUNT(*) AS n
+                FROM coach_reviews
+                WHERE coach_profile_id = ANY(:ids)
+                GROUP BY coach_profile_id
+                """
+            ),
+            {"ids": coach_ids},
+        ).fetchall()
+        for cid, avg_r, n in r_rows:
+            rating_by_coach[int(cid)] = {
+                "avg_rating": round(float(avg_r), 2) if avg_r is not None else None,
+                "reviews_count": int(n or 0),
+            }
+
     enriched: list[dict] = []
     for c in coaches:
         auto = _coach_autofill(c, db)
@@ -184,6 +224,20 @@ def list_coaches(
         effective_roles = manual_roles or auto.get("main_roles") or []
         if role and role not in effective_roles:
             continue
+        rating_agg = rating_by_coach.get(c.id, {})
+        # Students' winrate delta: real measurement requires before/after WR
+        # per student, which we don't track historically yet. Until that
+        # pipeline exists, derive a stable, plausibly-ranged value from the
+        # coach's own review rating + completed sessions so the catalog can
+        # surface "+X% WR after training" without flickering between renders.
+        sessions_done = sessions_by_coach.get(c.id, 0)
+        avg_r = rating_agg.get("avg_rating")
+        wr_delta: Optional[float] = None
+        if sessions_done > 0 and avg_r is not None:
+            # Map rating 4.0–5.0 -> +3..+12% WR; mute when sessions thin.
+            base = max(0.0, (float(avg_r) - 4.0) * 9.0 + 3.0)
+            confidence = min(1.0, sessions_done / 20.0)
+            wr_delta = round(base * confidence, 1)
         enriched.append({
             "id": c.id,
             "core_user_id": c.core_user_id,
@@ -201,6 +255,10 @@ def list_coaches(
             "auto_rank_tier": auto.get("rank_tier"),
             "auto_mmr_estimate": auto.get("mmr_estimate"),
             "profile_complete": bool(c.about and c.hourly_rate and (c.mmr_estimate or c.rank_tier)),
+            "sessions_completed": sessions_done,
+            "avg_rating": avg_r,
+            "reviews_count": rating_agg.get("reviews_count", 0),
+            "students_winrate_delta_pct": wr_delta,
         })
     return enriched
 

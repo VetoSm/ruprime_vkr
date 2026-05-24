@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
 import { useAuth } from '../../store/AuthContext';
-import { loadHeroes, heroIcon, heroName, roleName, rankTierToName, rankMedalIcon } from '../../api/heroes';
-import { RankBadge, InfoTooltip } from '../../ui/GameComponents';
+import { loadHeroes, heroIcon, heroName, roleName } from '../../api/heroes';
+import { RankBadge, RoleBadge, InfoTooltip } from '../../ui/GameComponents';
 import SkillRing from '../../ui/SkillRing';
 import DotaPrivacyBanner from '../../ui/DotaPrivacyBanner';
 import ParseProgressBadge from '../../ui/ParseProgressBadge';
@@ -373,15 +373,66 @@ export default function PlayerDashboard() {
     return arr;
   }, [recentMatches]);
 
+  /* Линейный график "Динамика" — снимок одной метрики по 5 батчам.
+     Раньше X-ось показывала ярлык батча ("Матчи 1-20" / месяц), что
+     ломалось на любых размерах окна и не совпадало с реальным числом
+     матчей в фильтре. Теперь X-ось — номер матча, и мы явным образом
+     просим Recharts показать ровно 3 тика: 1, середина, конец (с учётом
+     общего количества матчей в окне). */
+  /* Безопасный фолбэк для усреднённых метрик: иногда backend возвращает
+     только overall_score (без kda/gpm/xpm), и плитки начинают показывать
+     одинаковые "—". Чтобы пользователь всегда видел РАЗНЫЕ значения по
+     метрикам, считаем среднее из recent_matches как запасной вариант
+     (только когда summary не дал свой). */
+  const fallbackAverages = useMemo(() => {
+    const arr = (recentMatches || []).filter(Boolean);
+    if (arr.length === 0) return { kda: null, gpm: null, xpm: null };
+    const mean = (key: 'kda' | 'gpm' | 'xpm' | 'kills' | 'deaths' | 'assists'): number | null => {
+      const vals = arr.map((m: any) => Number(m?.[key])).filter((n: number) => Number.isFinite(n) && n > 0);
+      if (vals.length === 0) return null;
+      return vals.reduce((s: number, n: number) => s + n, 0) / vals.length;
+    };
+    let kda = mean('kda');
+    if (kda === null) {
+      // На случай, если бэк не положил `kda` в matches — посчитаем сами.
+      const k = mean('kills') ?? 0;
+      const d = mean('deaths');
+      const a = mean('assists') ?? 0;
+      if ((k + a) > 0) kda = d && d > 0 ? (k + a) / d : (k + a);
+    }
+    return { kda, gpm: mean('gpm'), xpm: mean('xpm') };
+  }, [recentMatches]);
+
+  const kdaDisplay = summary.kda_avg ?? fallbackAverages.kda;
+  const gpmDisplay = summary.gpm_avg ?? fallbackAverages.gpm;
+  const xpmDisplay = summary.xpm_avg ?? fallbackAverages.xpm;
+
   const chartData = useMemo(() => {
     const key = `${chartMetric}_over_time`;
     const series = (trends as any)[key];
     if (!Array.isArray(series)) return [];
-    return series.map((p: any) => ({
-      ts: p.ts,
-      value: typeof p[chartMetric] === 'number' ? p[chartMetric] : Number(p[chartMetric]) || 0,
-    }));
+    return series.map((p: any) => {
+      const endIdx = typeof p.batch_end_idx === 'number' ? p.batch_end_idx : null;
+      const startIdx = typeof p.batch_start_idx === 'number' ? p.batch_start_idx : null;
+      const midpoint = endIdx != null && startIdx != null
+        ? Math.round((startIdx + endIdx) / 2)
+        : null;
+      return {
+        ts: p.ts,
+        x: midpoint,
+        value: typeof p[chartMetric] === 'number' ? p[chartMetric] : Number(p[chartMetric]) || 0,
+      };
+    });
   }, [trends, chartMetric]);
+
+  const chartTicks = useMemo(() => {
+    const last = chartData.length > 0
+      ? chartData[chartData.length - 1]?.x
+      : null;
+    if (!last || last <= 1) return [1];
+    const mid = Math.max(2, Math.round(last / 2));
+    return [1, mid, last];
+  }, [chartData]);
 
   const coachPending = user?.coach_application_status === 'PENDING';
   const coachRejected = user?.coach_application_status === 'REJECTED';
@@ -490,13 +541,14 @@ export default function PlayerDashboard() {
           <h2 className="player-hero-name">{displayName}</h2>
           {(steamData?.rank_tier || playerProfile?.actual_rank_tier) && (
             <div className="player-hero-rank-row">
+              {/* RankBadge сам рендерит медаль + имя ранга; раньше рядом
+                  была отдельная подпись с тем же названием, и на UI выходило
+                  "🏅 Immortal  Immortal" — задвоение. Достаточно одной
+                  бейдж-капсулы. */}
               {steamData?.rank_tier
                 ? <RankBadge rankTier={steamData.rank_tier} size="lg" />
                 : <RankBadge rankName={playerProfile?.actual_rank_tier} size="lg" />
               }
-              <span className="player-hero-rank-label">
-                {steamData?.rank_tier ? rankTierToName(steamData.rank_tier) : (playerProfile?.actual_rank_tier || 'Без ранга')}
-              </span>
             </div>
           )}
         </div>
@@ -524,17 +576,21 @@ export default function PlayerDashboard() {
           <span className="player-hero-stat-label">Роли</span>
           <div className="player-hero-stat-tags">
             {popularRoles.length > 0 ? (
-              popularRoles.map((r) => (
-                <span
-                  key={r.role}
-                  className={`player-hero-stat-tag ${effectiveAnalysisRole === `POS${r.role}` ? 'active' : ''}`}
-                  title={`${r.count} матч${r.count === 1 ? '' : 'ей'} · ${(r.pct * 100).toFixed(0)}%`}
-                >
-                  {roleName(r.role)} <small>{Math.round(r.pct * 100)}%</small>
-                </span>
-              ))
+              popularRoles.map((r) => {
+                const active = effectiveAnalysisRole === `POS${r.role}`;
+                return (
+                  <span
+                    key={r.role}
+                    className={`hero-role-pill ${active ? 'active' : ''}`}
+                    title={`${r.count} матч${r.count === 1 ? '' : 'ей'} · ${(r.pct * 100).toFixed(0)}%`}
+                  >
+                    <RoleBadge role={r.role} compact />
+                    <small>{Math.round(r.pct * 100)}%</small>
+                  </span>
+                );
+              })
             ) : effectiveAnalysisRole ? (
-              <span className="player-hero-stat-tag">{roleName(effectiveAnalysisRole)}</span>
+              <RoleBadge role={effectiveAnalysisRole} compact />
             ) : (
               <span className="player-hero-stat-tag warn">авто</span>
             )}
@@ -573,7 +629,7 @@ export default function PlayerDashboard() {
         <StatTile
           label="KDA" tint="rose"
           icon={<IconSwordsOutline />}
-          value={summary.kda_avg ? Number(summary.kda_avg).toFixed(2) : '—'}
+          value={typeof kdaDisplay === 'number' && Number.isFinite(kdaDisplay) ? Number(kdaDisplay).toFixed(2) : '—'}
           deltaText={kdaTileDelta.text}
           deltaTone={kdaTileDelta.tone}
           deltaContext={kdaTileDelta.text ? deltaCtx : undefined}
@@ -581,7 +637,7 @@ export default function PlayerDashboard() {
         <StatTile
           label="GPM" tint="gold"
           icon={<IconCoinsOutline />}
-          value={summary.gpm_avg || '—'}
+          value={typeof gpmDisplay === 'number' && Number.isFinite(gpmDisplay) ? Math.round(gpmDisplay) : '—'}
           deltaText={gpmTileDelta.text}
           deltaTone={gpmTileDelta.tone}
           deltaContext={gpmTileDelta.text ? deltaCtx : undefined}
@@ -589,7 +645,7 @@ export default function PlayerDashboard() {
         <StatTile
           label="XPM" tint="purple"
           icon={<IconBookOpenOutline />}
-          value={summary.xpm_avg || '—'}
+          value={typeof xpmDisplay === 'number' && Number.isFinite(xpmDisplay) ? Math.round(xpmDisplay) : '—'}
           deltaText={xpmTileDelta.text}
           deltaTone={xpmTileDelta.tone}
           deltaContext={xpmTileDelta.text ? deltaCtx : undefined}
@@ -713,14 +769,40 @@ export default function PlayerDashboard() {
             )
           ) : chartData.length > 0 ? (
             // === Default mode: линейный график выбранной метрики ===
+            // Стиль повторяет график "Динамика" со страницы /stats:
+            // cyan→purple-градиент по линии, ровно 3 тика на X (1, mid,
+            // last) — масштабируются по числу матчей в окне.
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e2a45" />
-                <XAxis dataKey="ts" stroke="#7b8ba5" fontSize={11} />
+              <LineChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="dashLineGrad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%"   stopColor="#16e9d4" />
+                    <stop offset="100%" stopColor="#9b59ff" />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(22, 233, 212, 0.12)" />
+                <XAxis
+                  dataKey="x"
+                  type="number"
+                  domain={[1, chartTicks[chartTicks.length - 1] || 1]}
+                  ticks={chartTicks}
+                  stroke="#7b8ba5"
+                  fontSize={11}
+                  tickFormatter={(v: number) => String(v)}
+                />
                 <YAxis stroke="#7b8ba5" fontSize={11} />
-                <Tooltip contentStyle={{ background: '#151c2e', border: '1px solid #1e2a45', color: '#e8edf5' }} />
-                <Line type="monotone" dataKey="value" stroke="#00d4aa" strokeWidth={2.5}
-                  dot={{ fill: '#00d4aa', r: 3 }} activeDot={{ r: 5, fill: '#00ffc8' }} />
+                <Tooltip
+                  contentStyle={{ background: '#0d1a35', border: '1px solid rgba(22, 233, 212, 0.20)', color: '#e8edf5', borderRadius: 8 }}
+                  labelFormatter={(_v, payload: any) => payload?.[0]?.payload?.ts ?? ''}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke="url(#dashLineGrad)"
+                  strokeWidth={2.6}
+                  dot={{ fill: '#16e9d4', r: 3 }}
+                  activeDot={{ r: 6, fill: '#00ffc8' }}
+                />
               </LineChart>
             </ResponsiveContainer>
           ) : (
@@ -778,7 +860,17 @@ export default function PlayerDashboard() {
           <div className="card-head">
             <div className="card-title">Последние матчи</div>
             <div className="flex gap-10" style={{ alignItems: 'center' }}>
-              <ParseProgressBadge compact />
+              {/* Label теперь привязан к выбранному фильтру (периоду): меняется
+                  вместе с dropdown "Последние N матчей". Раньше использовался
+                  ParseProgressBadge со счётчиком из /player/parse-progress —
+                  он отдавал total-в-БД, а не filtered count. */}
+              {scopeMatches > 0 ? (
+                <span className="badge badge-muted" title="Матчей попало в текущий фильтр">
+                  Загружено {scopeMatches.toLocaleString('ru-RU')} матчей
+                </span>
+              ) : (
+                <ParseProgressBadge compact />
+              )}
               <Link to="/stats" className="btn btn-outline btn-sm">
                 Все <IconChevronRight size={14} />
               </Link>
@@ -801,7 +893,7 @@ export default function PlayerDashboard() {
                 const dur = typeof m.duration === 'number' ? fmtHM(m.duration) : '—';
                 const gpmDelta = gpmDeltas[i];
                 return (
-                  <div key={m.match_id || i} className="recent-matches-row">
+                  <div key={m.match_id || i} className={`recent-matches-row ${i % 2 === 1 ? 'recent-matches-row--alt' : ''}`}>
                     <span className="match-hero">
                       {icon && <img src={icon} alt="" />}
                       <span>{m.hero_id ? heroName(m.hero_id) : `Match #${m.match_id}`}</span>

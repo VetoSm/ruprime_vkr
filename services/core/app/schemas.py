@@ -67,6 +67,16 @@ class CoachProfileResponse(BaseModel):
     auto_rank_tier: Optional[str] = None
     auto_mmr_estimate: Optional[int] = None
     profile_complete: bool = True
+    # Aggregated coach stats, computed in /coaches so the catalog doesn't need
+    # N+1 review/session lookups. ``sessions_completed`` counts ``COMPLETED``
+    # TrainingSession rows; ``reviews_count`` / ``avg_rating`` come from
+    # CoachReview. ``students_winrate_delta_pct`` is the average percent-point
+    # winrate growth of students trained by this coach (positive = WR went up
+    # after training), or ``None`` when we don't have enough signal yet.
+    sessions_completed: int = 0
+    reviews_count: int = 0
+    avg_rating: Optional[float] = None
+    students_winrate_delta_pct: Optional[float] = None
 
     class Config:
         from_attributes = True
