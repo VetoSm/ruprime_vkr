@@ -2402,6 +2402,19 @@ table tr:hover {
   align-items: center;
   flex-wrap: wrap;
 }
+.stats-filter-group {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.stats-filter-group-label {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
 
 /* Segmented control — 7/30/90/Сезон */
 .seg-control {
@@ -2504,10 +2517,17 @@ table tr:hover {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 .stats-radar-card {
-  min-height: 500px;
+  align-items: stretch;
+  justify-content: center;
+  min-height: 560px;
 }
-.stats-radar-card .recharts-responsive-container {
+.stats-radar-chart {
+  align-items: center;
+  display: flex;
   flex: 1;
+  justify-content: center;
+  min-height: 500px;
+  width: 100%;
 }
 .stats-split--even {
   /* Историческое имя — оставлено для совместимости (если в коде где-то

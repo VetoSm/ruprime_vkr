@@ -829,8 +829,8 @@ export default function PlayerDashboard() {
                   dataKey="value"
                   stroke="url(#dashLineGrad)"
                   strokeWidth={2.6}
-                  dot={{ fill: '#16e9d4', r: 3 }}
-                  activeDot={{ r: 6, fill: '#00ffc8' }}
+                  dot={false}
+                  activeDot={{ r: 5, fill: '#00ffc8', stroke: '#0d1a35', strokeWidth: 2 }}
                 />
               </LineChart>
             </ResponsiveContainer>

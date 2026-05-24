@@ -13,17 +13,22 @@ import { RoleBadge } from '../../ui/GameComponents';
 
 const CHART_STYLE = { background: '#0d1a35', border: '1px solid rgba(22, 233, 212, 0.20)', color: '#e8edf5', borderRadius: 8 };
 
-const PERIOD_OPTIONS: { id: string; label: string; backend: string }[] = [
+const MATCH_COUNT_OPTIONS: { id: string; label: string; backend: string }[] = [
   { id: '10',  label: '10 матчей',  backend: '10' },
   { id: '20',  label: '20 матчей',  backend: '20' },
   { id: '50',  label: '50 матчей',  backend: '50' },
   { id: '100', label: '100 матчей', backend: '100' },
+];
+
+const DAY_PERIOD_OPTIONS: { id: string; label: string; backend: string }[] = [
   { id: '3d',  label: '3 дня',   backend: '3d' },
   { id: '7d',  label: '7 дней',  backend: '7d' },
   { id: '30d', label: '30 дней', backend: '30d' },
   { id: '90d', label: '90 дней', backend: '90d' },
   { id: 'all', label: 'Все',     backend: 'all' },
 ];
+
+const PERIOD_OPTIONS = [...MATCH_COUNT_OPTIONS, ...DAY_PERIOD_OPTIONS];
 
 const MODE_DROPDOWN_OPTIONS = [
   { value: 'all', label: 'Все матчи' },
@@ -337,18 +342,36 @@ export default function PlayerStats() {
         </div>
 
         <div className="stats-header-filters">
-          {/* Period — оставлен сегментированным контролем */}
-          <div className="seg-control">
-            {PERIOD_OPTIONS.map(p => (
-              <button
-                key={p.id}
-                type="button"
-                className={`seg-control-btn ${period === p.id ? 'active' : ''}`}
-                onClick={() => setPeriod(p.id as any)}
-              >
-                {p.label}
-              </button>
-            ))}
+          <div className="stats-filter-group">
+            <span className="stats-filter-group-label">Матчи</span>
+            <div className="seg-control">
+              {MATCH_COUNT_OPTIONS.map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`seg-control-btn ${period === p.id ? 'active' : ''}`}
+                  onClick={() => setPeriod(p.id as any)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="stats-filter-group">
+            <span className="stats-filter-group-label">Дни</span>
+            <div className="seg-control">
+              {DAY_PERIOD_OPTIONS.map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`seg-control-btn ${period === p.id ? 'active' : ''}`}
+                  onClick={() => setPeriod(p.id as any)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <Dropdown
@@ -498,7 +521,7 @@ export default function PlayerStats() {
             «Радаром навыков»: WR по ролям информативнее как сосед графика
             динамики (две сводных метрики рядом), а радар лучше работает
             в нижнем ряду вместе с разбивкой по ролям и топом героев. */}
-        <div className="card dash-card stats-radar-card">
+        <div className="card dash-card">
           <div className="card-head">
             <div className="card-title">Винрейт по ролям</div>
             <span className="text-muted" style={{ fontSize: '0.78rem' }}>
@@ -534,7 +557,7 @@ export default function PlayerStats() {
 
       {/* ============ Row 3: Радар навыков (слева) | Игры по ролям + Топ героев (справа стопкой) ============ */}
       <div className="stats-split stats-split--radar-row">
-        <div className="card dash-card">
+        <div className="card dash-card stats-radar-card">
           <div className="card-head">
             <div className="card-title">Радар навыков</div>
             <span className="text-muted" style={{ fontSize: '0.78rem' }}>
@@ -542,8 +565,9 @@ export default function PlayerStats() {
             </span>
           </div>
           {radarData.length > 2 ? (
-            <ResponsiveContainer width="100%" height={420}>
-              <RadarChart data={radarData}>
+            <div className="stats-radar-chart">
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart data={radarData} outerRadius="82%">
                 <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
                 <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={11} />
                 <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.4)" fontSize={9} angle={45} />
@@ -553,6 +577,7 @@ export default function PlayerStats() {
                 <Tooltip contentStyle={CHART_STYLE} />
               </RadarChart>
             </ResponsiveContainer>
+            </div>
           ) : (
             <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
           )}
