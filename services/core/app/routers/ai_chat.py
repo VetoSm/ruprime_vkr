@@ -1,5 +1,6 @@
 import httpx
 import os
+import uuid
 from datetime import datetime, time, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -15,6 +16,13 @@ router = APIRouter(prefix="/ai", tags=["ai-chat"])
 
 DEFAULT_AI_STATS_PARAMS = {"mode": "ranked", "period": "50"}
 AI_CHAT_DAILY_LIMIT = max(1, int(os.getenv("AI_CHAT_DAILY_LIMIT", "20")))
+
+
+def _conversation_title(message: str | None) -> str:
+    text = " ".join((message or "").strip().split())
+    if not text:
+        return "Новый чат"
+    return text[:42] + ("…" if len(text) > 42 else "")
 
 
 def _today_usage(profile_id: int | None, db: Session) -> int:
@@ -214,6 +222,9 @@ async def ai_chat(
     if used_today >= AI_CHAT_DAILY_LIMIT:
         return _limit_response(context, used_today)
 
+    conversation_id = (body.conversation_id or "").strip() or f"chat_{uuid.uuid4().hex[:12]}"
+    conversation_title = _conversation_title(body.message)
+
     # Call LLM service
     advice_summary = ""
     advice_full = ""
@@ -252,10 +263,17 @@ async def ai_chat(
         llm_error = "LLM service request failed"
 
     # Save to history
+    history_context = {
+        **(context or {}),
+        "conversation_meta": {
+            "conversation_id": conversation_id,
+            "conversation_title": conversation_title,
+        },
+    }
     history = AiAdviceHistory(
         player_profile_id=profile.id if profile else None,
         llm_request_id=llm_request_id,
-        prompt_context=context,
+        prompt_context=history_context,
         message=body.message,
         advice_summary=advice_summary,
         advice_full=advice_full,
@@ -269,6 +287,7 @@ async def ai_chat(
     return AiChatResponse(
         advice_summary=advice_summary,
         advice_full=advice_full,
+        conversation_id=conversation_id,
         context_basis=_context_basis(context),
         show_context_radar=used_today == 0,
         llm_request_id=llm_request_id,
@@ -302,6 +321,8 @@ def ai_history(
             message=e.message,
             advice_summary=e.advice_summary,
             advice_full=e.advice_full,
+            conversation_id=((e.prompt_context or {}).get("conversation_meta") or {}).get("conversation_id") or f"legacy_{e.id}",
+            conversation_title=((e.prompt_context or {}).get("conversation_meta") or {}).get("conversation_title") or _conversation_title(e.message),
             created_at=e.created_at,
         )
         for e in entries

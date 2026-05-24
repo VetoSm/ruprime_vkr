@@ -184,11 +184,13 @@ class ReviewResponse(BaseModel):
 class AiChatRequest(BaseModel):
     message: str
     context_mode: str = "AUTO"
+    conversation_id: Optional[str] = None
 
 
 class AiChatResponse(BaseModel):
     advice_summary: str
     advice_full: str
+    conversation_id: Optional[str] = None
     context_basis: Optional[Any] = None
     show_context_radar: bool = False
     llm_request_id: Optional[str] = None
@@ -204,6 +206,8 @@ class AiHistoryEntry(BaseModel):
     message: Optional[str] = None
     advice_summary: Optional[str] = None
     advice_full: Optional[str] = None
+    conversation_id: Optional[str] = None
+    conversation_title: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:

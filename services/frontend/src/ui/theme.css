@@ -2929,40 +2929,68 @@ table tr:hover {
 /* Role stats grid (Игры по ролям — 5 ячеек) */
 .role-stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
 }
 .role-stat-cell {
-  padding: 12px 14px;
+  min-width: 0;
+  padding: 9px 10px;
   background: rgba(8, 16, 38, 0.55);
   border: 1px solid rgba(22, 233, 212, 0.12);
   border-radius: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 7px;
 }
-.role-stat-cell-head { display: flex; justify-content: space-between; align-items: baseline; }
+.role-stat-cell-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .role-stat-cell-name {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.82rem;
   color: var(--text-primary);
+  min-width: 0;
 }
-.role-stat-cell-count { font-size: 0.72rem; color: var(--text-muted); }
-.role-stat-cell-metrics {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 0.85rem;
-}
-.role-stat-cell-metrics > span { display: inline-flex; flex-direction: column; gap: 2px; }
-.role-stat-cell-metric-label {
+.role-stat-cell-count {
+  flex-shrink: 0;
   font-size: 0.68rem;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
 }
-.role-stat-cell-metrics strong { font-family: var(--font-display); color: var(--text-primary); font-size: 1.05rem; }
+.role-stat-cell-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  font-size: 0.78rem;
+}
+.role-stat-cell-metrics > span {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.role-stat-cell-metric-label {
+  font-size: 0.60rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.role-stat-cell-metrics strong {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* Слабые места — circular widget */
 .weak-card {
@@ -5241,6 +5269,70 @@ table tr:hover {
   width: 52px;
   height: 52px;
   border-radius: 14px;
+}
+.oracle-chat-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+.oracle-chat-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 520px;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid rgba(22, 233, 212, 0.12);
+  border-radius: 12px;
+  background: rgba(8, 16, 38, 0.42);
+}
+.oracle-chat-sidebar-title {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.oracle-chat-thread {
+  appearance: none;
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: var(--transition);
+}
+.oracle-chat-thread:hover,
+.oracle-chat-thread.active {
+  border-color: rgba(22, 233, 212, 0.34);
+  background: rgba(22, 233, 212, 0.07);
+  color: var(--text-primary);
+}
+.oracle-chat-thread span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oracle-chat-thread small {
+  color: var(--text-muted);
+  font-size: 0.70rem;
+}
+.oracle-chat-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .oracle-chat-layout { grid-template-columns: 1fr; }
+  .oracle-chat-sidebar { max-height: 180px; }
 }
 .oracle-answer-widget-head,
 .oracle-answer-widget-kpis {

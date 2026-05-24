@@ -453,7 +453,19 @@ export default function PlayerDashboard() {
   const coachApprovedButStillPlayer =
     user?.coach_application_status === 'APPROVED' && user?.role === 'PLAYER';
 
-  const currentAi = aiHistory[aiIndex];
+  const topOracleHints = useMemo(() => {
+    return (aiHistory || [])
+      .filter((h: any) => h?.advice_summary || h?.advice_full)
+      .slice(0, 3);
+  }, [aiHistory]);
+
+  useEffect(() => {
+    if (aiIndex >= topOracleHints.length) {
+      setAiIndex(Math.max(0, topOracleHints.length - 1));
+    }
+  }, [aiIndex, topOracleHints.length]);
+
+  const currentAi = topOracleHints[aiIndex];
 
   /* ---------- Render ---------- */
   return (
@@ -996,8 +1008,8 @@ export default function PlayerDashboard() {
               <div className="ai-hint-card-footer">
                 <div className="ai-hint-nav">
                   <button type="button" className="ai-hint-nav-btn" onClick={() => setAiIndex(Math.max(0, aiIndex - 1))} disabled={aiIndex === 0} aria-label="Назад">‹</button>
-                  <span>{aiHistory.length === 0 ? 0 : aiIndex + 1} / {aiHistory.length}</span>
-                  <button type="button" className="ai-hint-nav-btn" onClick={() => setAiIndex(Math.min(aiHistory.length - 1, aiIndex + 1))} disabled={aiIndex >= aiHistory.length - 1} aria-label="Вперёд">›</button>
+                  <span>{topOracleHints.length === 0 ? 0 : aiIndex + 1} / {topOracleHints.length}</span>
+                  <button type="button" className="ai-hint-nav-btn" onClick={() => setAiIndex(Math.min(topOracleHints.length - 1, aiIndex + 1))} disabled={aiIndex >= topOracleHints.length - 1} aria-label="Вперёд">›</button>
                 </div>
                 <Link to="/ai-chat" className="ai-hint-cta">
                   Открыть чат <IconChevronRight size={12} />

@@ -11,6 +11,13 @@ interface ChatEntry {
   showWidget?: boolean;
 }
 
+interface ChatThread {
+  id: string;
+  title: string;
+  createdAt?: string;
+  messages: ChatEntry[];
+}
+
 function cleanInline(text: string) {
   return text
     .replace(/\*\*(.*?)\*\*/g, '$1')
@@ -168,32 +175,71 @@ export default function PlayerAiChat() {
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState<any[]>([]);
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  useEffect(() => {
+  const makeChatId = () => `chat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const titleFromMessage = (text: string) => {
+    const clean = text.trim().replace(/\s+/g, ' ');
+    return clean ? `${clean.slice(0, 42)}${clean.length > 42 ? '…' : ''}` : 'Новый чат';
+  };
+
+  const loadHistory = () => {
     coreApi.get('/ai/history').then((r) => {
-      setHistory(r.data);
-      // Load last messages
-      const loaded: ChatEntry[] = [];
-      r.data.slice(0, 10).reverse().forEach((h: any) => {
-        if (h.message) loaded.push({ type: 'user', text: h.message });
-        if (h.advice_summary) loaded.push({ type: 'ai', text: h.advice_full || h.advice_summary });
+      const rows = Array.isArray(r.data) ? r.data : [];
+      const byId = new Map<string, ChatThread>();
+      rows.slice().reverse().forEach((h: any) => {
+        const id = h.conversation_id || `legacy_${h.id}`;
+        if (!byId.has(id)) {
+          byId.set(id, {
+            id,
+            title: h.conversation_title || titleFromMessage(h.message || 'Старый чат'),
+            createdAt: h.created_at,
+            messages: [],
+          });
+        }
+        const thread = byId.get(id)!;
+        if (h.message) thread.messages.push({ type: 'user', text: h.message });
+        if (h.advice_summary) thread.messages.push({ type: 'ai', text: h.advice_full || h.advice_summary });
+        thread.createdAt = h.created_at || thread.createdAt;
       });
-      setMessages(loaded);
+      const list = Array.from(byId.values()).reverse();
+      setThreads(list);
+      if (list.length > 0 && !activeThreadId) {
+        setActiveThreadId(list[0].id);
+        setMessages(list[0].messages);
+      }
     }).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadHistory();
   }, []);
+
+  const startNewChat = () => {
+    const id = makeChatId();
+    setActiveThreadId(id);
+    setMessages([]);
+  };
+
+  const openThread = (thread: ChatThread) => {
+    setActiveThreadId(thread.id);
+    setMessages(thread.messages);
+  };
 
   const send = async (preset?: string) => {
     const userMsg = preset || input;
     if (!userMsg.trim()) return;
     const shouldShowWidget = !messages.some((m) => m.type === 'ai' && m.contextBasis);
+    const conversationId = activeThreadId || makeChatId();
+    if (!activeThreadId) setActiveThreadId(conversationId);
     setMessages((prev) => [...prev, { type: 'user', text: userMsg }]);
     setInput('');
     setLoading(true);
 
     try {
-      const res = await coreApi.post('/ai/chat', { message: userMsg, context_mode: 'AUTO' });
+      const res = await coreApi.post('/ai/chat', { message: userMsg, context_mode: 'AUTO', conversation_id: conversationId });
       const meta: string[] = [];
       if (typeof res.data.requests_remaining_today === 'number') {
         meta.push(`Осталось запросов сегодня: ${res.data.requests_remaining_today}/${res.data.requests_limit_daily}`);
@@ -211,12 +257,26 @@ export default function PlayerAiChat() {
         meta.push(`Причина: ${res.data.llm_error}`);
       }
       const metaText = meta.length ? `\n\n---\n${meta.join('\n')}` : '';
-      setMessages((prev) => [...prev, {
+      const aiMessage: ChatEntry = {
         type: 'ai',
         text: `${res.data.advice_full || res.data.advice_summary || 'Нет ответа'}${metaText}`,
         contextBasis: res.data.context_basis || null,
         showWidget: shouldShowWidget && Boolean(res.data.context_basis),
-      }]);
+      };
+      setMessages((prev) => {
+        const next = [...prev, aiMessage];
+        setThreads((old) => {
+          const existing = old.find((t) => t.id === conversationId);
+          const updated: ChatThread = {
+            id: conversationId,
+            title: existing?.title || titleFromMessage(userMsg),
+            createdAt: new Date().toISOString(),
+            messages: next,
+          };
+          return [updated, ...old.filter((t) => t.id !== conversationId)];
+        });
+        return next;
+      });
     } catch (e: any) {
       const detail = e?.response?.data?.detail;
       setMessages((prev) => [...prev, { type: 'ai', text: detail || 'Оракул временно недоступен.' }]);
@@ -237,7 +297,8 @@ export default function PlayerAiChat() {
   const clearChat = async () => {
     await coreApi.delete('/ai/history').catch(() => {});
     setMessages([]);
-    setHistory([]);
+    setThreads([]);
+    setActiveThreadId(null);
   };
 
   return (
@@ -257,10 +318,29 @@ export default function PlayerAiChat() {
             </div>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn btn-outline btn-sm" onClick={clearChat}>Очистить чат</button>
+            <button className="btn btn-primary btn-sm" onClick={startNewChat}>Новый чат</button>
+            <button className="btn btn-outline btn-sm" onClick={clearChat}>Очистить историю</button>
             <Link to="/dashboard" className="btn btn-outline btn-sm">К дашборду</Link>
           </div>
         </div>
+        <div className="oracle-chat-layout">
+        <aside className="oracle-chat-sidebar">
+          <div className="oracle-chat-sidebar-title">Старые чаты</div>
+          {threads.length > 0 ? threads.map((thread) => (
+            <button
+              key={thread.id}
+              type="button"
+              className={`oracle-chat-thread ${thread.id === activeThreadId ? 'active' : ''}`}
+              onClick={() => openThread(thread)}
+            >
+              <span>{thread.title}</span>
+              {thread.createdAt && <small>{new Date(thread.createdAt).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })}</small>}
+            </button>
+          )) : (
+            <div className="text-muted" style={{ fontSize: '0.8rem' }}>Истории пока нет.</div>
+          )}
+        </aside>
+        <div className="oracle-chat-main">
         <div className="chat-container" style={{ flex: 1 }}>
           {messages.length === 0 && (
             <div className="text-center text-muted oracle-empty-state">
@@ -306,6 +386,8 @@ export default function PlayerAiChat() {
           <button className="btn btn-primary" onClick={() => send()} disabled={loading}>
             Получить разбор
           </button>
+        </div>
+        </div>
         </div>
       </div>
     </div>
