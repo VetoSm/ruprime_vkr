@@ -9,7 +9,7 @@ from app.database import engine, Base
 from app.models import (  # noqa: F401
     CoreUser, PlayerProfile, CoachProfile,
     TrainingRequest, TrainingSession, CoachReview,
-    TrainingContactExchange, AiAdviceHistory, CoreActionLog,
+    TrainingContactExchange, AiAdviceHistory, UserSubscription, Payment, CoreActionLog,
 )
 from app.routers.me import router as me_router
 from app.routers.player import router as player_router
@@ -21,6 +21,7 @@ from app.routers.admin import router as admin_router
 from app.routers.sessions import router as sessions_router
 from app.routers.public import router as public_router
 from app.routers.ml_proxy import router as ml_proxy_router
+from app.routers.billing import router as billing_router
 
 # Auto-generated /docs and /redoc are great for local dev but leak the
 # full API schema in production. Gate them behind ENABLE_API_DOCS so the
@@ -58,6 +59,7 @@ app.include_router(admin_router)
 app.include_router(sessions_router)
 app.include_router(public_router)
 app.include_router(ml_proxy_router)
+app.include_router(billing_router)
 
 
 @app.middleware("http")

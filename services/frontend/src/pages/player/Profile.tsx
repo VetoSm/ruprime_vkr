@@ -6,7 +6,6 @@ import { rankTierToName } from '../../api/heroes';
 import { IconEye, IconEyeOff } from '../../ui/Icons';
 
 const STEAM_PENDING_KEY = 'steam_pending_link_id';
-const AI_SUB_KEY = 'ai_subscription_active_v1';
 const NOTIF_KEY  = 'notification_prefs_v1';
 const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || 'http://localhost:8001';
 
@@ -44,6 +43,14 @@ interface NotifPrefs {
   oracle_reports: boolean;
 }
 
+interface SubscriptionState {
+  plan: string;
+  status: string;
+  active: boolean;
+  current_period_end?: string | null;
+  requests_limit_daily?: number | null;
+}
+
 function loadNotifPrefs(): NotifPrefs {
   try {
     const raw = localStorage.getItem(NOTIF_KEY);
@@ -63,7 +70,6 @@ export default function PlayerProfile() {
   /* ---- Data ---- */
   const [profile, setProfile] = useState<any>(null);
   const [steamData, setSteamData] = useState<any>(null);
-  const [syncStatus, setSyncStatus] = useState<any>(null);
   const [features, setFeatures] = useState<any>(null);
 
   /* ---- Profile fields ---- */
@@ -81,10 +87,10 @@ export default function PlayerProfile() {
   /* ---- Notifications ---- */
   const [notifs, setNotifs] = useState<NotifPrefs>(loadNotifPrefs());
 
-  /* ---- AI subscription (local, until backend) ---- */
-  const [aiSubActive, setAiSubActive] = useState<boolean>(() => {
-    try { return localStorage.getItem(AI_SUB_KEY) === '1'; } catch { return false; }
-  });
+  /* ---- Subscription ---- */
+  const [subscription, setSubscription] = useState<SubscriptionState | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const aiSubActive = Boolean(subscription?.active);
 
   /* ---- Steam linking ---- */
   const [steamId, setSteamId] = useState('');
@@ -103,10 +109,40 @@ export default function PlayerProfile() {
 
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const loadSubscription = async () => {
+    try {
+      const res = await coreApi.get('/billing/subscription');
+      setSubscription(res.data);
+    } catch {
+      setSubscription({ plan: 'free', status: 'inactive', active: false, requests_limit_daily: 1 });
+    }
+  };
+
   /* ============================================================
    * Load
    * ==========================================================*/
   useEffect(() => {
+    if (searchParams.get('tab') === 'subscription') {
+      setTab('subscription');
+    }
+    if (searchParams.get('payment') === 'return' && searchParams.get('payment_id')) {
+      const paymentId = Number(searchParams.get('payment_id'));
+      const next = new URLSearchParams(searchParams);
+      next.delete('payment');
+      next.delete('payment_id');
+      setSearchParams(next, { replace: true });
+      setTab('subscription');
+      if (paymentId) {
+        coreApi.post('/billing/yookassa/confirm', { payment_id: paymentId })
+          .then((r) => {
+            setSubscription(r.data.subscription);
+            setProfileMsg(r.data.message || 'Оплата прошла успешно.');
+          })
+          .catch((err) => {
+            setProfileErr(err?.response?.data?.detail || 'Не удалось подтвердить оплату.');
+          });
+      }
+    }
     if (searchParams.get('linked') === '1') {
       setProfileMsg('Steam привязан. Статистика обновится за минуту.');
       coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
@@ -115,25 +151,6 @@ export default function PlayerProfile() {
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
-
-  useEffect(() => {
-    if (!steamData?.linked) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const r = await coreApi.get('/player/sync-status');
-        if (cancelled) return;
-        setSyncStatus(r.data);
-        if (r.data?.status === 'queued' || r.data?.status === 'running') {
-          window.setTimeout(tick, 5000);
-        }
-      } catch {
-        if (!cancelled) setSyncStatus(null);
-      }
-    };
-    tick();
-    return () => { cancelled = true; };
-  }, [steamData?.linked]);
 
   useEffect(() => {
     coreApi.get('/player/profile').then((r) => {
@@ -149,6 +166,7 @@ export default function PlayerProfile() {
     }).catch(() => {});
 
     coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
+    loadSubscription();
 
     coreApi.get('/me/overview').then((r) => {
       const pid = r.data?.profile?.player_profile_id ?? r.data?.profile?.id;
@@ -307,12 +325,20 @@ export default function PlayerProfile() {
     });
   };
 
-  const toggleAiSub = () => {
-    setAiSubActive((v) => {
-      const next = !v;
-      try { localStorage.setItem(AI_SUB_KEY, next ? '1' : '0'); } catch {}
-      return next;
-    });
+  const requestPayment = async () => {
+    setProfileMsg('');
+    setProfileErr('');
+    setPaymentLoading(true);
+    try {
+      const res = await coreApi.post('/billing/yookassa/create-payment', {
+        return_path: '/settings?tab=subscription',
+      });
+      window.location.href = res.data.confirmation_url;
+    } catch (err: any) {
+      setProfileErr(err?.response?.data?.detail || 'Не удалось создать платёж ЮKassa.');
+    } finally {
+      setPaymentLoading(false);
+    }
   };
 
   /* ============================================================
@@ -320,6 +346,9 @@ export default function PlayerProfile() {
    * ==========================================================*/
   const isLinked = steamData?.linked && steamData?.personaname;
   const initials = (steamData?.personaname || profile?.login || '?').slice(0, 2).toUpperCase();
+  const subUntil = subscription?.current_period_end
+    ? new Date(subscription.current_period_end).toLocaleDateString('ru-RU')
+    : null;
 
   return (
     <div>
@@ -377,11 +406,7 @@ export default function PlayerProfile() {
                     </div>
                   </div>
 
-                  <div className="grid-2 form-grid">
-                    <div className="form-group">
-                      <label>Никнейм</label>
-                      <input type="text" className="form-input" value={profile?.login || ''} readOnly />
-                    </div>
+                  <div className="form-grid">
                     <div className="form-group">
                       <label>Email</label>
                       <input type="email" className="form-input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your@mail.ru" />
@@ -454,19 +479,8 @@ export default function PlayerProfile() {
                           {steamData.estimated_hours && <> · {Math.round(steamData.estimated_hours)} ч</>}
                         </div>
                         <div className="text-muted" style={{ fontSize: '0.76rem', marginTop: 4 }}>
-                          Данные обновляются автоматически в фоне.
+                          Данные обновляются автоматически в фоне. Прогресс показан в техническом блоке слева.
                         </div>
-                        {syncStatus && (
-                          <div className="profile-sync-pill">
-                            {syncStatus.status === 'queued' || syncStatus.status === 'running' ? 'Догружаем' : 'Синхронизация'}
-                            {typeof syncStatus.fetched_matches === 'number' && typeof syncStatus.planned_fetch_matches === 'number' && (
-                              <> · {syncStatus.fetched_matches.toLocaleString('ru-RU')} / {syncStatus.planned_fetch_matches.toLocaleString('ru-RU')} матчей</>
-                            )}
-                            {typeof syncStatus.parse_requested === 'number' && syncStatus.parse_requested > 0 && (
-                              <> · parsed: {syncStatus.parse_requested.toLocaleString('ru-RU')}</>
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -703,25 +717,56 @@ export default function PlayerProfile() {
           {tab === 'subscription' && (
             <div className="card dash-card">
               <div className="card-head">
-                <div className="card-title">Подписка на AI-тренера</div>
+                <div className="card-title">Подписка RuPrime</div>
                 <span className={`badge ${aiSubActive ? 'badge-accent' : 'badge-muted'}`}>
-                  {aiSubActive ? 'Активна' : 'Не оформлена'}
+                  {aiSubActive ? 'Pro' : 'Free'}
                 </span>
               </div>
               <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: 14 }}>
-                {aiSubActive
-                  ? 'У вас активная подписка Pro. Расширенные разборы, неограниченные запросы Оракулу, доступ к гайдам тренеров.'
-                  : 'С Pro-подпиской открывается доступ к расширенному Оракулу, неограниченным разборам матчей и эксклюзивным гайдам.'}
+                Аналитика, поиск тренеров и базовый Оракул доступны бесплатно. Pro нужен для безлимитных запросов и полной истории разборов.
               </p>
-              <ul className="profile-sub-features">
-                <li>✓ Неограниченные разборы с Оракулом</li>
-                <li>✓ Расширенная аналитика и таргеты</li>
-                <li>✓ Эксклюзивные гайды от тренеров</li>
-                <li>✓ Приоритетная поддержка</li>
-              </ul>
-              <button className="btn btn-primary btn-sm" onClick={toggleAiSub}>
-                {aiSubActive ? 'Отключить подписку' : 'Оформить Pro'}
-              </button>
+              <div className="subscription-plans">
+                <div className="subscription-plan-card">
+                  <div className="subscription-plan-head">
+                    <span className="badge badge-muted">Free</span>
+                    <strong>0 ₽</strong>
+                  </div>
+                  <h3>Базовый доступ</h3>
+                  <ul>
+                    <li>Аналитика по матчам бесплатно</li>
+                    <li>1 запрос к Оракулу в день</li>
+                    <li>Поиск тренеров и заявки</li>
+                    <li>Короткая история последнего диалога</li>
+                  </ul>
+                  <button className="btn btn-outline btn-sm" disabled>
+                    {aiSubActive ? 'Доступен после окончания Pro' : 'Текущий тариф'}
+                  </button>
+                </div>
+                <div className="subscription-plan-card subscription-plan-card--pro">
+                  <div className="subscription-plan-head">
+                    <span className="badge badge-accent">{aiSubActive ? 'Текущий тариф' : 'Pro'}</span>
+                    <strong>499 ₽/мес</strong>
+                  </div>
+                  <h3>Полная версия</h3>
+                  {aiSubActive && subUntil && (
+                    <p className="text-muted" style={{ fontSize: '0.82rem', margin: '-2px 0 2px' }}>
+                      Активен до {subUntil}. Можно продлить ещё на месяц.
+                    </p>
+                  )}
+                  <ul>
+                    <li>Безлимитные запросы к Оракулу</li>
+                    <li>Полная история подробных разборов</li>
+                    <li>Больше контекста по ролям и героям</li>
+                    <li>Приоритет новых AI-функций</li>
+                  </ul>
+                  <button className="btn btn-primary btn-sm" onClick={requestPayment} disabled={paymentLoading}>
+                    {paymentLoading ? 'Создаём платёж...' : (aiSubActive ? 'Продлить на месяц' : 'Оплатить')}
+                  </button>
+                  <p className="text-muted" style={{ fontSize: '0.74rem', margin: '8px 0 0' }}>
+                    После оплаты ЮKassa вернёт вас на эту страницу и активирует Pro на 30 дней.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -774,6 +819,11 @@ export default function PlayerProfile() {
                 {aiSubActive ? 'Pro' : 'Free'}
               </span>
             </div>
+            {aiSubActive && subUntil && (
+              <p className="text-muted" style={{ fontSize: '0.78rem', margin: '0 0 10px' }}>
+                Активен до {subUntil}
+              </p>
+            )}
             <ul className="profile-sub-features" style={{ marginBottom: 12, fontSize: '0.82rem' }}>
               <li>{aiSubActive ? '✓' : '·'} Неограниченные разборы</li>
               <li>{aiSubActive ? '✓' : '·'} Расширенная аналитика</li>

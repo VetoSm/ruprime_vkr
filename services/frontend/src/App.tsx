@@ -101,13 +101,24 @@ function RouteTelemetry() {
 
 function AppRoutes() {
   const { user } = useAuth();
+  const location = useLocation();
   const defaultRoute = defaultRouteForRole(user?.role);
+
+  if (location.pathname === '/landing' || location.pathname === '/landing/') {
+    return (
+      <>
+        <RouteTelemetry />
+        <PublicLayout><Landing /></PublicLayout>
+      </>
+    );
+  }
 
   return (
     <>
       <RouteTelemetry />
       <Routes>
         <Route path="/" element={user ? <Navigate to={defaultRoute} /> : <PublicLayout><Landing /></PublicLayout>} />
+          <Route path="/landing" element={<PublicLayout><Landing /></PublicLayout>} />
         <Route path="/login" element={user ? <Navigate to={defaultRoute} /> : <PublicLayout><Login /></PublicLayout>} />
         <Route path="/register" element={user ? <Navigate to={defaultRoute} /> : <PublicLayout><Register /></PublicLayout>} />
         <Route path="/about" element={<PublicLayout><About /></PublicLayout>} />

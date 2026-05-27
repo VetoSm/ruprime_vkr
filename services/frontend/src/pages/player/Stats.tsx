@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { coreApi } from '../../api/client';
+import { useAuth } from '../../store/AuthContext';
 import { loadHeroes, heroName, heroIcon, roleName } from '../../api/heroes';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -120,7 +122,9 @@ function StatTile({
 
 /* ============ Главный компонент ============ */
 export default function PlayerStats() {
+  const { user } = useAuth();
   const [pid, setPid] = useState<number | null>(null);
+  const [missingCoachSteam, setMissingCoachSteam] = useState(false);
   const [stats, setStats] = useState<any>(null);
   const [features, setFeatures] = useState<any>(null);
   const [steamData, setSteamData] = useState<any>(null);
@@ -131,6 +135,7 @@ export default function PlayerStats() {
   const [selectedRole, setSelectedRole] = useState<string>('');
   const [selectedHero, setSelectedHero] = useState<string>('');
   const [chartMetric, setChartMetric] = useState<string>('kda');
+  const [topHeroesExpanded, setTopHeroesExpanded] = useState(false);
 
   // Активная фитча для widget "Слабые места"
   const [activeFeatureIdx, setActiveFeatureIdx] = useState(0);
@@ -142,8 +147,10 @@ export default function PlayerStats() {
       setHeroOptions(Object.values(heroes).sort((a: any, b: any) => a.localized_name.localeCompare(b.localized_name)));
     });
     coreApi.get('/me/overview').then((r) => {
-      const profileId = r.data?.profile?.player_profile_id ?? r.data?.profile?.id;
+      const profile = r.data?.profile || {};
+      const profileId = r.data?.role === 'COACH' ? profile.player_profile_id : profile.id;
       if (profileId) setPid(profileId);
+      if (r.data?.role === 'COACH' && !profileId) setMissingCoachSteam(true);
     }).catch(() => {});
     coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
   }, []);
@@ -177,6 +184,8 @@ export default function PlayerStats() {
   const kdaAvg  = summary.kda_avg ?? null;
   const gpmAvg  = summary.gpm_avg ?? null;
   const isLinked = steamData?.linked && steamData?.personaname;
+  const heatmap = trends.position_heatmap || {};
+  const heatmapPoints = Array.isArray(heatmap.points) ? heatmap.points : [];
 
   const wrDelta = useMemo(() => {
     const arr = trends.winrate_over_time;
@@ -332,13 +341,29 @@ export default function PlayerStats() {
     }));
   }, []);
 
+  if (missingCoachSteam && !pid) {
+    return (
+      <div className="stats-page">
+        <div className="card dash-card">
+          <EmptyState
+            title="Steam не привязан"
+            description="Чтобы открыть «Мой разбор», привяжите Steam в настройках тренера. После синхронизации эта страница покажет ту же аналитику, что у игрока."
+          />
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
+            <Link to="/settings" className="btn btn-primary btn-sm">Перейти в настройки</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="stats-page">
       {/* ============ Header (без экспорта) ============ */}
       <div className="stats-header">
         <div className="stats-header-title">
-          <h1>Аналитика</h1>
-          <p>Глубокий разбор твоей игры по последним матчам</p>
+          <h1>{user?.role === 'COACH' ? 'Мой разбор' : 'Аналитика'}</h1>
+          <p>{user?.role === 'COACH' ? 'Та же статистика игрока по твоему привязанному Steam' : 'Глубокий разбор твоей игры по последним матчам'}</p>
         </div>
 
         <div className="stats-header-filters">
@@ -555,8 +580,149 @@ export default function PlayerStats() {
         </div>
       </div>
 
-      {/* ============ Row 3: Радар навыков (слева) | Игры по ролям + Топ героев (справа стопкой) ============ */}
-      <div className="stats-split stats-split--radar-row">
+      {/* ============ Row 3: Слабые места | Тепловая карта + Топ героев ============ */}
+      <div className="stats-split stats-split--wide-left">
+        <div className="stats-left-stack">
+        <div className="card dash-card weak-card weak-card--in-split">
+          <div className="card-head">
+            <div className="card-title">Слабые места — над чем работать</div>
+            {weakFeaturesSorted.length > 0 && (
+              <div className="weak-pager">
+                <button
+                  type="button"
+                  className="weak-pager-btn"
+                  onClick={() => setActiveFeatureIdx((i) => Math.max(0, i - 1))}
+                  disabled={activeFeatureIdx === 0}
+                  aria-label="Предыдущая"
+                >
+                  <IconChevronLeft size={14} />
+                </button>
+                <span>{activeFeatureIdx + 1} / {weakFeaturesSorted.length}</span>
+                <button
+                  type="button"
+                  className="weak-pager-btn"
+                  onClick={() => setActiveFeatureIdx((i) => Math.min(weakFeaturesSorted.length - 1, i + 1))}
+                  disabled={activeFeatureIdx >= weakFeaturesSorted.length - 1}
+                  aria-label="Следующая"
+                >
+                  <IconChevronRight size={14} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {activeFeature ? (
+            <div className="weak-circle-layout">
+              <div className="weak-circle">
+                {(() => {
+                  const score = activeFeature.score ?? 0;
+                  const target = activeFeature.target ?? 0;
+                  const pct = Math.min(100, (score / 10) * 100);
+                  const targetPct = Math.min(100, (target / 10) * 100);
+                  const size = 145;
+                  const r = (size - 16) / 2;
+                  const c = 2 * Math.PI * r;
+                  const offset = c - (pct / 100) * c;
+                  const targetOffset = c - (targetPct / 100) * c;
+                  return (
+                    <svg width={size} height={size}>
+                      <defs>
+                        <linearGradient id="weakRingGrad" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%"   stopColor="#f6c463" />
+                          <stop offset="100%" stopColor="#ff4757" />
+                        </linearGradient>
+                      </defs>
+                      <circle cx={size/2} cy={size/2} r={r} stroke="rgba(22, 233, 212, 0.12)" strokeWidth="12" fill="none" />
+                      <circle
+                        cx={size/2} cy={size/2} r={r}
+                        stroke="rgba(155, 89, 255, 0.35)"
+                        strokeWidth="3" fill="none"
+                        strokeDasharray={c}
+                        strokeDashoffset={targetOffset}
+                        transform={`rotate(-90 ${size/2} ${size/2})`}
+                        strokeLinecap="round"
+                      />
+                      <circle
+                        cx={size/2} cy={size/2} r={r}
+                        stroke="url(#weakRingGrad)"
+                        strokeWidth="12"
+                        fill="none"
+                        strokeDasharray={c}
+                        strokeDashoffset={offset}
+                        transform={`rotate(-90 ${size/2} ${size/2})`}
+                        strokeLinecap="round"
+                        style={{ filter: 'drop-shadow(0 0 8px rgba(22, 233, 212, 0.4))' }}
+                      />
+                      <text x={size/2} y={size/2 + 10} textAnchor="middle"
+                        fill="var(--accent-bright)" fontSize="31" fontWeight="800" fontFamily="var(--font-display)">
+                        {score.toFixed(1)}
+                      </text>
+                    </svg>
+                  );
+                })()}
+              </div>
+
+              <div className="weak-circle-details">
+                <h3 className="weak-circle-title">{activeFeature.name}</h3>
+                <p className="weak-circle-desc">{FEATURE_TIPS[activeFeature.key] || 'Игровая категория, влияет на исход матча.'}</p>
+
+                <div className="weak-circle-row">
+                  <span className="weak-circle-row-label">Текущий балл</span>
+                  <strong>{(activeFeature.score ?? 0).toFixed(1)} / 10</strong>
+                </div>
+                <div className="weak-circle-row">
+                  <span className="weak-circle-row-label">Цель</span>
+                  <strong style={{ color: 'var(--purple)' }}>{(activeFeature.target ?? 0).toFixed(1)} / 10</strong>
+                </div>
+                <div className="weak-circle-row">
+                  <span className="weak-circle-row-label">Разрыв</span>
+                  <strong style={{ color: 'var(--warning)' }}>
+                    −{Math.max(0, (activeFeature.target ?? 0) - (activeFeature.score ?? 0)).toFixed(1)}
+                  </strong>
+                </div>
+              </div>
+
+              {(activeFeature.components || []).length > 0 && (
+                <div className="weak-circle-components">
+                  <div className="text-muted" style={{ fontSize: '0.78rem', marginBottom: 6 }}>Компоненты</div>
+                  <div className="weak-circle-components-list">
+                    {(activeFeature.components || []).slice(0, 6).map((c: any) => (
+                      <div key={c.key} className="weak-circle-comp-row">
+                        <span className="weak-circle-comp-name">{c.name}</span>
+                        <span className="weak-circle-comp-value">
+                          {typeof c.player_value === 'number' ? c.player_value.toFixed(1) : c.player_value}
+                          {typeof c.target_value === 'number' && <span className="text-muted"> → {c.target_value.toFixed(1)}</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="weak-list">
+                <div className="text-muted weak-list-caption">Все направления</div>
+                <div className="weak-list-grid">
+                  {weakFeaturesSorted.map((cat: any, i: number) => (
+                    <button
+                      key={cat.key}
+                      type="button"
+                      className={`weak-list-tile ${i === activeFeatureIdx ? 'active' : ''}`}
+                      onClick={() => setActiveFeatureIdx(i)}
+                    >
+                      <span className="weak-list-tile-rank">{i + 1}</span>
+                      <span className="weak-list-tile-name">{cat.name}</span>
+                      <span className="weak-list-tile-score">{(cat.score ?? 0).toFixed(1)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="Недостаточно данных"
+              description={isLinked ? 'Слабые направления появятся после загрузки фитчей.' : 'Привяжите Steam.'} compact />
+          )}
+        </div>
+
         <div className="card dash-card stats-radar-card">
           <div className="card-head">
             <div className="card-title">Радар навыков</div>
@@ -566,13 +732,13 @@ export default function PlayerStats() {
           </div>
           {radarData.length > 2 ? (
             <div className="stats-radar-chart">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={500}>
               <RadarChart data={radarData} outerRadius="82%">
-                <PolarGrid stroke="rgba(22, 233, 212, 0.18)" />
-                <PolarAngleAxis dataKey="category" stroke="#a0b1c8" fontSize={11} />
-                <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.4)" fontSize={9} angle={45} />
-                <Radar name="Ты" dataKey="you" stroke="#16e9d4" fill="#16e9d4" fillOpacity={0.18} />
-                <Radar name="Цель" dataKey="baseline" stroke="#9b59ff" fill="#9b59ff" fillOpacity={0.10} />
+                <PolarGrid stroke="rgba(22, 233, 212, 0.24)" />
+                <PolarAngleAxis dataKey="category" stroke="#c7d4ea" fontSize={13} tickLine={false} />
+                <PolarRadiusAxis stroke="rgba(123, 139, 165, 0.45)" fontSize={10} angle={45} />
+                <Radar name="Ты" dataKey="you" stroke="#16e9d4" strokeWidth={3.2} fill="#16e9d4" fillOpacity={0.20} />
+                <Radar name="Цель" dataKey="baseline" stroke="#9b59ff" strokeWidth={2.6} fill="#9b59ff" fillOpacity={0.12} />
                 <Legend verticalAlign="bottom" iconType="line" wrapperStyle={{ fontSize: 11, color: '#a0b1c8' }} />
                 <Tooltip contentStyle={CHART_STYLE} />
               </RadarChart>
@@ -582,12 +748,93 @@ export default function PlayerStats() {
             <EmptyState title="Недостаточно данных" description={isLinked ? 'Радар появится после загрузки фитчей.' : 'Привяжите Steam.'} compact />
           )}
         </div>
+        </div>
 
-        {/* Справа — стопка из двух блоков: Игры по ролям + Топ героев.
-            Теперь шире (3fr вместо clamp ~340px) — больше места для
-            метрик и имён героев. */}
-        <div className="stats-side-stack">
-          <div className="card dash-card stats-equal-card">
+        <div className="stats-side-stack stats-side-stack--media">
+          <div className="card dash-card stats-equal-card heatmap-card">
+            <div className="card-head">
+              <div className="card-title">Тепловая карта</div>
+              <span className="badge badge-muted">{heatmap.scope_matches || heatmap.matches || 0} матчей</span>
+            </div>
+            {heatmapPoints.length > 0 ? (
+              <div className="match-heatmap-widget">
+                <div className="match-heatmap-map" aria-label="Тепловая карта позиций">
+                  <img className="match-heatmap-bg" src="/decor/dota-map.jpg" alt="" aria-hidden="true" />
+                  <div className="match-heatmap-river" />
+                  {heatmapPoints.map((p: any, idx: number) => {
+                    const x = Math.max(0, Math.min(100, (Number(p.x) / 255) * 100));
+                    const y = Math.max(0, Math.min(100, 100 - (Number(p.y) / 255) * 100));
+                    const intensity = Math.max(0.12, Math.min(1, Number(p.intensity || 0)));
+                    const size = 4 + intensity * 16;
+                    return (
+                      <span
+                        key={`${p.x}-${p.y}-${idx}`}
+                        className="match-heatmap-point"
+                        style={{
+                          left: `${x}%`,
+                          top: `${y}%`,
+                          width: size,
+                          height: size,
+                          opacity: 0.25 + intensity * 0.65,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="match-heatmap-meta">
+                  <span>
+                    {Number(heatmap.events || 0).toLocaleString('ru-RU')} точек · {heatmap.matches || 0}/{heatmap.scope_matches || heatmap.matches || 0} м
+                  </span>
+                  <span>
+                    {heatmap.source === 'role_estimate'
+                      ? 'оценка по роли'
+                      : heatmap.source === 'mixed_lane_pos_role'
+                        ? `lane_pos + оценка (${heatmap.lane_pos_matches || 0}+${heatmap.estimated_matches || 0})`
+                        : 'parsed lane_pos'}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <EmptyState
+                title="Нет данных карты"
+                description={isLinked ? 'Карта строится по матчам выбранного игрока.' : 'Привяжите Steam.'}
+                compact
+              />
+            )}
+          </div>
+
+          <div className={`card dash-card stats-equal-card top-heroes-card ${topHeroesExpanded ? 'expanded' : ''}`}>
+            <div className="card-head">
+              <div className="card-title">Топ героев</div>
+              <button type="button" className="top-heroes-expand-btn" onClick={() => setTopHeroesExpanded((v) => !v)}>
+                {topHeroesExpanded ? 'Свернуть' : `${topHeroes.length} в пуле`}
+              </button>
+            </div>
+            {topHeroes.length > 0 ? (
+              <div className="top-heroes-compact">
+                {topHeroes.slice(0, topHeroesExpanded ? topHeroes.length : 8).map((h: any) => (
+                  <div key={h.hero_id} className="top-heroes-compact-row">
+                    <span className="top-heroes-compact-hero">
+                      <img src={heroIcon(h.hero_id)} alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      <span className="top-heroes-compact-name">{heroName(h.hero_id)}</span>
+                    </span>
+                    <span className="top-heroes-compact-meta">
+                      <span className="top-heroes-compact-games">{h.games} м</span>
+                      {typeof h.pickrate === 'number' && (
+                        <span className="top-heroes-compact-pick">{(h.pickrate * 100).toFixed(0)}%</span>
+                      )}
+                      <span className="top-heroes-compact-wr">{(h.winrate * 100).toFixed(0)}%</span>
+                      <span className="top-heroes-compact-kda">{Number(h.avg_kda).toFixed(1)}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="Героев пока нет" description={isLinked ? 'Подгружаем матчи.' : 'Привяжите Steam.'} compact />
+            )}
+          </div>
+
+          <div className="card dash-card stats-equal-card role-stats-card">
             <div className="card-head">
               <div className="card-title">Игры по ролям</div>
               <span className="text-muted" style={{ fontSize: '0.72rem' }}>средние</span>
@@ -610,210 +857,6 @@ export default function PlayerStats() {
               ))}
             </div>
           </div>
-
-          <div className="card dash-card stats-equal-card">
-            <div className="card-head">
-              <div className="card-title">Топ героев</div>
-              <span className="text-muted" style={{ fontSize: '0.72rem' }}>{topHeroes.length} в пуле</span>
-            </div>
-            {topHeroes.length > 0 ? (
-              <div className="top-heroes-compact">
-                {topHeroes.slice(0, 6).map((h: any) => (
-                  <div key={h.hero_id} className="top-heroes-compact-row">
-                    <span className="top-heroes-compact-hero">
-                      <img src={heroIcon(h.hero_id)} alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                      <span className="top-heroes-compact-name">{heroName(h.hero_id)}</span>
-                    </span>
-                    <span className="top-heroes-compact-meta">
-                      <span className="top-heroes-compact-games">{h.games} м</span>
-                      <span className="top-heroes-compact-wr">{(h.winrate * 100).toFixed(0)}%</span>
-                      <span className="top-heroes-compact-kda">{Number(h.avg_kda).toFixed(1)}</span>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState title="Героев пока нет" description={isLinked ? 'Подгружаем матчи.' : 'Привяжите Steam.'} compact />
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ============ Row 4: Слабые места (слева) | Тепловая карта (справа, узкая) ============ */}
-      <div className="stats-split stats-split--wide-left">
-      <div className="card dash-card weak-card weak-card--in-split">
-        <div className="card-head">
-          <div className="card-title">Слабые места — над чем работать</div>
-          {weakFeaturesSorted.length > 0 && (
-            <div className="weak-pager">
-              <button
-                type="button"
-                className="weak-pager-btn"
-                onClick={() => setActiveFeatureIdx((i) => Math.max(0, i - 1))}
-                disabled={activeFeatureIdx === 0}
-                aria-label="Предыдущая"
-              >
-                <IconChevronLeft size={14} />
-              </button>
-              <span>{activeFeatureIdx + 1} / {weakFeaturesSorted.length}</span>
-              <button
-                type="button"
-                className="weak-pager-btn"
-                onClick={() => setActiveFeatureIdx((i) => Math.min(weakFeaturesSorted.length - 1, i + 1))}
-                disabled={activeFeatureIdx >= weakFeaturesSorted.length - 1}
-                aria-label="Следующая"
-              >
-                <IconChevronRight size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-
-        {activeFeature ? (
-          <div className="weak-circle-layout">
-            {/* Большое кольцо с фитчей */}
-            <div className="weak-circle">
-              {(() => {
-                const score = activeFeature.score ?? 0;
-                const target = activeFeature.target ?? 0;
-                const pct = Math.min(100, (score / 10) * 100);
-                const targetPct = Math.min(100, (target / 10) * 100);
-                const size = 200;
-                const r = (size - 16) / 2;
-                const c = 2 * Math.PI * r;
-                const offset = c - (pct / 100) * c;
-                const targetOffset = c - (targetPct / 100) * c;
-                return (
-                  <svg width={size} height={size}>
-                    <defs>
-                      {/* Градиент инвертирован vs прежнего cyan→purple:
-                          положительные значения теперь идут к красному,
-                          отрицательные — к золотому. Так "выше — алертнее"
-                          считывается на тёмной карточке более прямолинейно
-                          и совпадает с акцентами warning/danger в темe. */}
-                      <linearGradient id="weakRingGrad" x1="0" y1="0" x2="1" y2="1">
-                        <stop offset="0%"   stopColor="#f6c463" />
-                        <stop offset="100%" stopColor="#ff4757" />
-                      </linearGradient>
-                    </defs>
-                    {/* Track */}
-                    <circle cx={size/2} cy={size/2} r={r} stroke="rgba(22, 233, 212, 0.12)" strokeWidth="14" fill="none" />
-                    {/* Target ghost */}
-                    <circle
-                      cx={size/2} cy={size/2} r={r}
-                      stroke="rgba(155, 89, 255, 0.35)"
-                      strokeWidth="3" fill="none"
-                      strokeDasharray={c}
-                      strokeDashoffset={targetOffset}
-                      transform={`rotate(-90 ${size/2} ${size/2})`}
-                      strokeLinecap="round"
-                    />
-                    {/* Score arc */}
-                    <circle
-                      cx={size/2} cy={size/2} r={r}
-                      stroke="url(#weakRingGrad)"
-                      strokeWidth="14"
-                      fill="none"
-                      strokeDasharray={c}
-                      strokeDashoffset={offset}
-                      transform={`rotate(-90 ${size/2} ${size/2})`}
-                      strokeLinecap="round"
-                      style={{ filter: 'drop-shadow(0 0 8px rgba(22, 233, 212, 0.4))' }}
-                    />
-                    <text x={size/2} y={size/2 - 6} textAnchor="middle"
-                      fill="var(--accent-bright)" fontSize="36" fontWeight="800" fontFamily="var(--font-display)">
-                      {score.toFixed(1)}
-                    </text>
-                    <text x={size/2} y={size/2 + 22} textAnchor="middle"
-                      fill="var(--text-muted)" fontSize="11" fontFamily="var(--font-body)">
-                      / 10
-                    </text>
-                  </svg>
-                );
-              })()}
-            </div>
-
-            {/* Подробности */}
-            <div className="weak-circle-details">
-              <h3 className="weak-circle-title">{activeFeature.name}</h3>
-              <p className="weak-circle-desc">{FEATURE_TIPS[activeFeature.key] || 'Игровая категория, влияет на исход матча.'}</p>
-
-              <div className="weak-circle-row">
-                <span className="weak-circle-row-label">Текущий балл</span>
-                <strong>{(activeFeature.score ?? 0).toFixed(1)} / 10</strong>
-              </div>
-              <div className="weak-circle-row">
-                <span className="weak-circle-row-label">Цель</span>
-                <strong style={{ color: 'var(--purple)' }}>{(activeFeature.target ?? 0).toFixed(1)} / 10</strong>
-              </div>
-              <div className="weak-circle-row">
-                <span className="weak-circle-row-label">Разрыв</span>
-                <strong style={{ color: 'var(--warning)' }}>
-                  −{Math.max(0, (activeFeature.target ?? 0) - (activeFeature.score ?? 0)).toFixed(1)}
-                </strong>
-              </div>
-
-              {(activeFeature.components || []).length > 0 && (
-                <div className="weak-circle-components">
-                  <div className="text-muted" style={{ fontSize: '0.78rem', marginBottom: 6 }}>Компоненты</div>
-                  <div className="weak-circle-components-list">
-                    {(activeFeature.components || []).slice(0, 5).map((c: any) => (
-                      <div key={c.key} className="weak-circle-comp-row">
-                        <span className="weak-circle-comp-name">{c.name}</span>
-                        <span className="weak-circle-comp-value">
-                          {typeof c.player_value === 'number' ? c.player_value.toFixed(1) : c.player_value}
-                          {typeof c.target_value === 'number' && <span className="text-muted"> → {c.target_value.toFixed(1)}</span>}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Сетка "Направления" — раньше это был вертикальный длинный
-                список (max-height: 200px со скроллом), который растягивал
-                карточку и приходилось скроллить, чтобы переключиться между
-                направлениями. Теперь — компактные блоки в ряд: всю строку
-                видно сразу, карточка низкая, и соседняя «Тепловая карта»
-                выравнивается по высоте без отдельных правил. */}
-            <div className="weak-list">
-              <div className="text-muted weak-list-caption">Все направления (от худших)</div>
-              <div className="weak-list-grid">
-                {weakFeaturesSorted.map((cat: any, i: number) => (
-                  <button
-                    key={cat.key}
-                    type="button"
-                    className={`weak-list-tile ${i === activeFeatureIdx ? 'active' : ''}`}
-                    onClick={() => setActiveFeatureIdx(i)}
-                  >
-                    <span className="weak-list-tile-rank">{i + 1}</span>
-                    <span className="weak-list-tile-name">{cat.name}</span>
-                    <span className="weak-list-tile-score">{(cat.score ?? 0).toFixed(1)}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <EmptyState title="Недостаточно данных"
-            description={isLinked ? 'Слабые направления появятся после загрузки фитчей.' : 'Привяжите Steam.'} compact />
-        )}
-      </div>
-
-        {/* Тепловая карта — узкая колонка справа. Пока бэк не отдаёт
-            координаты ивентов из replay parser, держим explicit empty
-            state в компактной форме. */}
-        <div className="card dash-card stats-equal-card">
-          <div className="card-head">
-            <div className="card-title">Тепловая карта</div>
-            <span className="badge badge-muted">parsed</span>
-          </div>
-          <EmptyState
-            title="Появится из parsed-матчей"
-            description="Карта построится по координатам ивентов в parsed-матчах. Как только данные подгрузятся — карточка обновится."
-            compact
-          />
         </div>
       </div>
     </div>

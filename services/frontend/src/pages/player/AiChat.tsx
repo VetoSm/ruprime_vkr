@@ -43,6 +43,20 @@ function stripAnswerMeta(raw: string) {
 function OracleContextWidget({ basis }: { basis: any }) {
   if (!basis) return null;
   const weak = Array.isArray(basis.weak_categories) ? basis.weak_categories.slice(0, 4) : [];
+  const radarCats = weak.length ? weak : (Array.isArray(basis.top_gaps) ? basis.top_gaps.slice(0, 4) : []);
+  const radarSize = 132;
+  const center = radarSize / 2;
+  const radius = 48;
+  const points = radarCats.map((c: any, idx: number) => {
+    const score = Math.max(0, Math.min(10, Number(c.score ?? c.player_score ?? 0)));
+    const angle = (-90 + (idx * 360) / Math.max(radarCats.length, 1)) * Math.PI / 180;
+    const r = radius * (score / 10);
+    return `${center + Math.cos(angle) * r},${center + Math.sin(angle) * r}`;
+  }).join(' ');
+  const gridPoints = radarCats.map((_c: any, idx: number) => {
+    const angle = (-90 + (idx * 360) / Math.max(radarCats.length, 1)) * Math.PI / 180;
+    return `${center + Math.cos(angle) * radius},${center + Math.sin(angle) * radius}`;
+  }).join(' ');
   return (
     <div className="oracle-answer-widget">
       <div className="oracle-answer-widget-head">
@@ -54,18 +68,26 @@ function OracleContextWidget({ basis }: { basis: any }) {
         <span>MMR <strong>{basis.mmr ?? '—'}</strong></span>
         <span>Балл <strong>{typeof basis.overall_score === 'number' ? basis.overall_score.toFixed(1) : (basis.overall_score ?? '—')}</strong></span>
       </div>
-      {weak.length > 0 && (
-        <div className="oracle-mini-radar">
-          {weak.map((c: any) => {
-            const score = Math.max(0, Math.min(10, Number(c.score || 0)));
+      {radarCats.length > 0 && (
+        <div className="oracle-radar-wrap">
+          <svg className="oracle-radar-svg" viewBox={`0 0 ${radarSize} ${radarSize}`} aria-hidden>
+            <polygon points={gridPoints} fill="rgba(22,233,212,0.04)" stroke="rgba(22,233,212,0.22)" strokeWidth="1" />
+            <circle cx={center} cy={center} r={radius * 0.5} fill="none" stroke="rgba(160,177,200,0.18)" />
+            <circle cx={center} cy={center} r={radius} fill="none" stroke="rgba(160,177,200,0.22)" />
+            <polygon points={points} fill="rgba(22,233,212,0.22)" stroke="#16e9d4" strokeWidth="3" />
+          </svg>
+          <div className="oracle-mini-radar">
+          {radarCats.map((c: any) => {
+            const score = Math.max(0, Math.min(10, Number(c.score ?? c.player_score ?? 0)));
             return (
               <div key={c.key || c.name} className="oracle-mini-radar-row">
-                <span>{c.name || c.key}</span>
+                <span>{c.name || c.category || c.key}</span>
                 <div><i style={{ width: `${score * 10}%` }} /></div>
                 <strong>{score.toFixed(1)}</strong>
               </div>
             );
           })}
+          </div>
         </div>
       )}
     </div>
@@ -140,7 +162,10 @@ function OracleMessage({ text, contextBasis, showWidget }: { text: string; conte
   });
   flushList();
 
-  const meta = metaRaw?.split('\n').map((x) => x.trim()).filter(Boolean) || [];
+  const meta = metaRaw?.split('\n')
+    .map((x) => x.trim())
+    .filter((x) => Boolean(x) && !/^Причина:\s*AI_CHAT_DAILY_LIMIT/i.test(x))
+    || [];
 
   return (
     <div className="oracle-message">
@@ -171,6 +196,40 @@ function OracleMessage({ text, contextBasis, showWidget }: { text: string; conte
   );
 }
 
+function UpgradePlans({ onPay, loading }: { onPay: () => void; loading: boolean }) {
+  return (
+    <div className="oracle-upgrade-plans">
+      <div className="subscription-plan-card">
+        <div className="subscription-plan-head">
+          <span className="badge badge-muted">Free</span>
+          <strong>0 ₽</strong>
+        </div>
+        <h3>Базовый доступ</h3>
+        <ul>
+          <li>Аналитика по матчам</li>
+          <li>1 запрос к Оракулу в день</li>
+          <li>Поиск тренеров</li>
+        </ul>
+      </div>
+      <div className="subscription-plan-card subscription-plan-card--pro">
+        <div className="subscription-plan-head">
+          <span className="badge badge-accent">Pro</span>
+          <strong>499 ₽</strong>
+        </div>
+        <h3>На 30 дней</h3>
+        <ul>
+          <li>Безлимитный Оракул</li>
+          <li>Полная история подробных разборов</li>
+          <li>Больше контекста по ролям и героям</li>
+        </ul>
+        <button className="btn btn-primary btn-sm" onClick={onPay} disabled={loading}>
+          {loading ? 'Создаём платёж...' : 'Оплатить'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function PlayerAiChat() {
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [input, setInput] = useState('');
@@ -178,6 +237,10 @@ export default function PlayerAiChat() {
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [limitReached, setLimitReached] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentMsg, setPaymentMsg] = useState('');
+  const [paymentErr, setPaymentErr] = useState('');
 
   const makeChatId = () => `chat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const titleFromMessage = (text: string) => {
@@ -201,7 +264,12 @@ export default function PlayerAiChat() {
         }
         const thread = byId.get(id)!;
         if (h.message) thread.messages.push({ type: 'user', text: h.message });
-        if (h.advice_summary) thread.messages.push({ type: 'ai', text: h.advice_full || h.advice_summary });
+        if (h.advice_summary) thread.messages.push({
+          type: 'ai',
+          text: h.advice_full || h.advice_summary,
+          contextBasis: h.context_basis || null,
+          showWidget: Boolean(h.show_context_radar && h.context_basis),
+        });
         thread.createdAt = h.created_at || thread.createdAt;
       });
       const list = Array.from(byId.values()).reverse();
@@ -217,6 +285,37 @@ export default function PlayerAiChat() {
     loadHistory();
   }, []);
 
+  useEffect(() => {
+    if (searchParams.get('payment') !== 'return' || !searchParams.get('payment_id')) return;
+    const paymentId = Number(searchParams.get('payment_id'));
+    const next = new URLSearchParams(searchParams);
+    next.delete('payment');
+    next.delete('payment_id');
+    setSearchParams(next, { replace: true });
+    if (!paymentId) return;
+    coreApi.post('/billing/yookassa/confirm', { payment_id: paymentId })
+      .then((r) => {
+        setPaymentMsg(r.data.message || 'Оплата прошла успешно.');
+        setLimitReached(false);
+        loadHistory();
+      })
+      .catch((err) => setPaymentErr(err?.response?.data?.detail || 'Не удалось подтвердить оплату.'));
+  }, [searchParams, setSearchParams]);
+
+  const requestPayment = async () => {
+    setPaymentMsg('');
+    setPaymentErr('');
+    setPaymentLoading(true);
+    try {
+      const res = await coreApi.post('/billing/yookassa/create-payment', { return_path: '/ai-chat' });
+      window.location.href = res.data.confirmation_url;
+    } catch (err: any) {
+      setPaymentErr(err?.response?.data?.detail || 'Не удалось создать платёж ЮKassa.');
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
   const startNewChat = () => {
     const id = makeChatId();
     setActiveThreadId(id);
@@ -228,10 +327,14 @@ export default function PlayerAiChat() {
     setMessages(thread.messages);
   };
 
+  const isLimitMessage = (msg: ChatEntry) => (
+    msg.type === 'ai' &&
+    /запрос[ыа] на сегодня закончились|безлимитный доступ к Оракулу|AI_CHAT_DAILY_LIMIT/i.test(msg.text)
+  );
+
   const send = async (preset?: string) => {
     const userMsg = preset || input;
     if (!userMsg.trim()) return;
-    const shouldShowWidget = !messages.some((m) => m.type === 'ai' && m.contextBasis);
     const conversationId = activeThreadId || makeChatId();
     if (!activeThreadId) setActiveThreadId(conversationId);
     setMessages((prev) => [...prev, { type: 'user', text: userMsg }]);
@@ -241,7 +344,8 @@ export default function PlayerAiChat() {
     try {
       const res = await coreApi.post('/ai/chat', { message: userMsg, context_mode: 'AUTO', conversation_id: conversationId });
       const meta: string[] = [];
-      if (typeof res.data.requests_remaining_today === 'number') {
+      const rateLimited = res.data.llm_status === 'rate_limited' || res.data.upgrade_required;
+      if (!rateLimited && typeof res.data.requests_remaining_today === 'number') {
         meta.push(`Осталось запросов сегодня: ${res.data.requests_remaining_today}/${res.data.requests_limit_daily}`);
       }
       if (res.data.llm_status && res.data.llm_status !== 'generated') {
@@ -251,17 +355,23 @@ export default function PlayerAiChat() {
           unavailable: 'LLM-сервис недоступен',
           rate_limited: 'Дневной лимит исчерпан',
         };
-        meta.push(statusText[res.data.llm_status] || `Статус LLM: ${res.data.llm_status}`);
+        if (rateLimited) {
+          setLimitReached(true);
+        } else {
+          meta.push(statusText[res.data.llm_status] || `Статус LLM: ${res.data.llm_status}`);
+        }
       }
-      if (res.data.llm_error && res.data.llm_status !== 'generated') {
+      if (!rateLimited && res.data.llm_error && res.data.llm_status !== 'generated') {
         meta.push(`Причина: ${res.data.llm_error}`);
       }
       const metaText = meta.length ? `\n\n---\n${meta.join('\n')}` : '';
       const aiMessage: ChatEntry = {
         type: 'ai',
-        text: `${res.data.advice_full || res.data.advice_summary || 'Нет ответа'}${metaText}`,
+        text: rateLimited
+          ? 'К сожалению, запросы на сегодня закончились. Вы можете купить безлимитный доступ к Оракулу ниже.'
+          : `${res.data.advice_full || res.data.advice_summary || 'Нет ответа'}${metaText}`,
         contextBasis: res.data.context_basis || null,
-        showWidget: shouldShowWidget && Boolean(res.data.context_basis),
+        showWidget: !rateLimited && Boolean(res.data.show_context_radar && res.data.context_basis),
       };
       setMessages((prev) => {
         const next = [...prev, aiMessage];
@@ -302,14 +412,12 @@ export default function PlayerAiChat() {
   };
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Оракул Древних</h1>
-        <p>Разбор по вашим матчам, роли и слабым зонам. Отвечает только по Dota 2.</p>
-      </div>
+    <div className="oracle-page">
+      {paymentMsg && <div className="alert alert-success" style={{ marginBottom: 14 }}>{paymentMsg}</div>}
+      {paymentErr && <div className="alert alert-error" style={{ marginBottom: 14 }}>{paymentErr}</div>}
 
-      <div className="card" style={{ minHeight: 500, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+      <div className="card oracle-card">
+        <div className="oracle-card-head">
           <img src={ORACLE_AVATAR} alt="" className="oracle-message-avatar oracle-message-avatar--lg" />
           <div>
             <div style={{ fontWeight: 800 }}>Оракул Древних</div>
@@ -326,7 +434,10 @@ export default function PlayerAiChat() {
         <div className="oracle-chat-layout">
         <aside className="oracle-chat-sidebar">
           <div className="oracle-chat-sidebar-title">Старые чаты</div>
-          {threads.length > 0 ? threads.map((thread) => (
+          <div className="oracle-free-note">
+            Бесплатно доступен 1 запрос в день. Полная история и безлимитный Оракул — в Pro.
+          </div>
+          {threads.length > 0 ? threads.slice(0, 1).map((thread) => (
             <button
               key={thread.id}
               type="button"
@@ -339,9 +450,15 @@ export default function PlayerAiChat() {
           )) : (
             <div className="text-muted" style={{ fontSize: '0.8rem' }}>Истории пока нет.</div>
           )}
+          {threads.length > 1 && (
+            <Link to="/settings?tab=subscription" className="oracle-upgrade-card">
+              <strong>Полная история</strong>
+              <span>Откройте Pro, чтобы видеть все прошлые диалоги и задавать вопросы без дневного лимита.</span>
+            </Link>
+          )}
         </aside>
         <div className="oracle-chat-main">
-        <div className="chat-container" style={{ flex: 1 }}>
+        <div className="chat-container">
           {messages.length === 0 && (
             <div className="text-center text-muted oracle-empty-state">
               <p>Выберите быстрый разбор или задайте вопрос по конкретной роли, герою или таймингу.</p>
@@ -361,7 +478,14 @@ export default function PlayerAiChat() {
           {messages.map((msg, i) => (
             <div key={i} className={`chat-message ${msg.type}`}>
               {msg.type === 'ai' ? (
-                <OracleMessage text={msg.text} contextBasis={msg.contextBasis} showWidget={msg.showWidget} />
+                <>
+                  <OracleMessage text={msg.text} contextBasis={msg.contextBasis} showWidget={msg.showWidget} />
+                  {isLimitMessage(msg) && (
+                    <div className="oracle-message-upgrade">
+                      <UpgradePlans onPay={requestPayment} loading={paymentLoading} />
+                    </div>
+                  )}
+                </>
               ) : (
                 <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.9rem' }}>{msg.text}</div>
               )}
@@ -374,7 +498,7 @@ export default function PlayerAiChat() {
           )}
         </div>
 
-        <div className="flex gap-10 mt-20">
+        <div className="oracle-chat-form">
           <input
             className="form-input"
             value={input}

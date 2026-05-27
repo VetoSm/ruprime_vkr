@@ -129,6 +129,8 @@ def _can_view_player_stats(profile: PlayerProfile, current_user: CurrentUser, db
     if current_user.role == "PLAYER":
         return profile.core_user_id == current_user.user_id
     if current_user.role == "COACH":
+        if profile.core_user_id == current_user.user_id:
+            return True
         coach = db.query(CoachProfile).filter(
             CoachProfile.core_user_id == current_user.user_id
         ).first()

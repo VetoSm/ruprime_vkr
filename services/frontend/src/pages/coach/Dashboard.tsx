@@ -47,6 +47,7 @@ export default function CoachDashboard() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [pendingReqs, setPendingReqs] = useState<any[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [studentsSummary, setStudentsSummary] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
 
   useEffect(() => {
@@ -56,7 +57,10 @@ export default function CoachDashboard() {
       const items = Array.isArray(r.data) ? r.data : [];
       setPendingReqs(items.filter((i: any) => ['NEW', 'MATCHING', 'WAITING_CONFIRMATION'].includes(i.status)));
     }).catch(() => {});
-    coreApi.get('/coach/students-overview').then((r) => setStudents(r.data?.students || [])).catch(() => {});
+    coreApi.get('/coach/students-overview').then((r) => {
+      setStudents(r.data?.students || []);
+      setStudentsSummary(r.data?.summary || null);
+    }).catch(() => {});
   }, []);
 
   // Reviews for the current coach — need coach_id
@@ -118,18 +122,14 @@ export default function CoachDashboard() {
   }, [sessions, hourlyRate]);
 
   const activeStudents = students.filter((s) => (s.sessions_completed || 0) > 0 || s.next_planned_at).length;
-  const avgRating = useMemo(() => {
-    if (reviews.length === 0) return null;
-    return reviews.reduce((s, r) => s + (Number(r.rating) || 0), 0) / reviews.length;
-  }, [reviews]);
-
   const topStudents = useMemo(() => {
     return [...students]
-      .map((s) => ({
-        ...s,
-        mmrDelta: (s.analysis_summary?.estimated_mmr || 0) - 4000, // proxy
-      }))
-      .sort((a, b) => (b.mmrDelta) - (a.mmrDelta))
+      .sort((a, b) => {
+        const aw = typeof a.analysis_summary?.winrate === 'number' ? a.analysis_summary.winrate : -1;
+        const bw = typeof b.analysis_summary?.winrate === 'number' ? b.analysis_summary.winrate : -1;
+        if (bw !== aw) return bw - aw;
+        return (b.sessions_completed || 0) - (a.sessions_completed || 0);
+      })
       .slice(0, 3);
   }, [students]);
 
@@ -203,15 +203,18 @@ export default function CoachDashboard() {
         <div className="stat-tile stat-tile--rose">
           <div className="stat-tile-icon"><IconStarOutline /></div>
           <div className="stat-tile-body">
-            <div className="stat-tile-label">РЕЙТИНГ</div>
+            <div className="stat-tile-label">WR УЧЕНИКОВ</div>
             <div className="stat-tile-value-row">
               <span className="stat-tile-value">
-                {avgRating != null ? avgRating.toFixed(1) : '—'}
-                {avgRating != null && <span style={{ color: '#f6c463', marginLeft: 6, fontSize: '1.1rem' }}><IconStar size={18} /></span>}
+                {typeof studentsSummary?.avg_student_winrate === 'number'
+                  ? `${(studentsSummary.avg_student_winrate * 100).toFixed(0)}%`
+                  : '—'}
               </span>
             </div>
             <div className="stat-tile-delta-context">
-              {reviews.length > 0 ? `${reviews.length} отзывов` : 'отзывов пока нет'}
+              {studentsSummary?.students_with_game_stats
+                ? `${studentsSummary.students_with_game_stats} учеников · ${Number(studentsSummary.student_games_analyzed || 0).toLocaleString('ru-RU')} матчей`
+                : 'нет игровых данных учеников'}
             </div>
           </div>
         </div>
@@ -249,7 +252,7 @@ export default function CoachDashboard() {
         {/* Лидеры месяца */}
         <div className="card dash-card coach-card-leaders">
           <div className="card-head">
-            <div className="card-title">Лидер ученики этого месяца</div>
+            <div className="card-title">Ученики по игровым данным</div>
           </div>
           {topStudents.length > 0 ? (
             <div className="leaders-list">
@@ -262,7 +265,11 @@ export default function CoachDashboard() {
                     <div className="leader-rank-label">{s.actual_rank_tier || 'Без ранга'}</div>
                   </div>
                   <span className="leader-mmr">
-                    {s.mmrDelta > 0 ? `+${Math.round(s.mmrDelta / 100) * 100} MMR` : '—'}
+                    {typeof s.analysis_summary?.winrate === 'number'
+                      ? `${(s.analysis_summary.winrate * 100).toFixed(0)}% WR`
+                      : s.analysis_summary?.estimated_mmr
+                        ? `${Math.round(s.analysis_summary.estimated_mmr)} MMR`
+                        : '—'}
                   </span>
                 </div>
               ))}

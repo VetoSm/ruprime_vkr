@@ -63,39 +63,15 @@ function coachInitials(name: string): string {
   return (a + b).toUpperCase();
 }
 
-/* Детерминированный фолбэк, если у тренера ещё нет ни одной сессии и
-   отзывов в БД (карточка не должна выглядеть пустой при первом запуске).
-   Бэк теперь возвращает реальные `sessions_completed`, `avg_rating`,
-   `reviews_count` и `students_winrate_delta_pct` — фолбэк используется
-   только когда ими пользоваться нельзя. Сидим от coach.id, чтобы числа
-   не прыгали между рендерами. */
-function fakeRating(id: number): { rating: number; reviews: number; sessions: number; studentsWr: number } {
-  const r = (Math.sin(id * 9301 + 49297) * 0.5 + 0.5);
-  return {
-    rating: Number((4.3 + r * 0.7).toFixed(1)),                 // 4.3 — 5.0
-    reviews: Math.round(40 + r * 380),                          // 40 — 420
-    sessions: Math.round(80 + r * 350),                         // 80 — 430
-    studentsWr: Math.round(58 + r * 18),                        // 58 — 76%
-  };
-}
-
-/* Возвращает финальный набор stat'ов для карточки тренера: используем
-   реальные значения с бэка, фолбэк включаем только когда настоящего
-   значения нет (0 сессий/нет отзывов). */
-function coachStats(c: any): { rating: number; reviews: number; sessions: number; studentsWr: number; descriptor: string } {
-  const fake = fakeRating(c.id);
-  const sessions = typeof c.sessions_completed === 'number' && c.sessions_completed > 0
-    ? c.sessions_completed
-    : fake.sessions;
-  const reviews = typeof c.reviews_count === 'number' && c.reviews_count > 0
-    ? c.reviews_count
-    : fake.reviews;
+function coachStats(c: any): { rating: number | null; reviews: number; sessions: number; studentsWr: number | null; descriptor: string } {
+  const sessions = typeof c.sessions_completed === 'number' ? c.sessions_completed : 0;
+  const reviews = typeof c.reviews_count === 'number' ? c.reviews_count : 0;
   const rating = typeof c.avg_rating === 'number' && c.avg_rating > 0
     ? Number(c.avg_rating.toFixed(1))
-    : fake.rating;
+    : null;
   const studentsWr = typeof c.students_winrate_delta_pct === 'number'
     ? Number(c.students_winrate_delta_pct.toFixed(1))
-    : (fake.studentsWr - 58); // fakeRating даёт «абсолют», тут нужна дельта
+    : null;
   // Короткое описание из `about` тренера: первая строка либо две первых
   // фразы. Обрезаем длинные эссе, чтобы не ломать раскладку.
   let descriptor = '';
@@ -180,10 +156,8 @@ export default function PlayerCoaches() {
       if (sortBy === 'price-asc') return (a.hourly_rate || 999999) - (b.hourly_rate || 999999);
       if (sortBy === 'price-desc') return (b.hourly_rate || 0) - (a.hourly_rate || 0);
       if (sortBy === 'mmr') return ((b.mmr_estimate || b.auto_mmr_estimate || 0) - (a.mmr_estimate || a.auto_mmr_estimate || 0));
-      // default — по реальному рейтингу с фолбэком на детерминированный
-      // и небольшой бонус за verified.
-      const ra = coachStats(a).rating + (a.is_verified ? 0.1 : 0);
-      const rb = coachStats(b).rating + (b.is_verified ? 0.1 : 0);
+      const ra = (coachStats(a).rating ?? 0) + (a.is_verified ? 0.1 : 0);
+      const rb = (coachStats(b).rating ?? 0) + (b.is_verified ? 0.1 : 0);
       return rb - ra;
     });
 
@@ -307,7 +281,9 @@ export default function PlayerCoaches() {
             const heroes = (c.hero_pool?.length ? c.hero_pool : c.auto_hero_pool) || [];
             const rank = c.rank_tier || c.auto_rank_tier;
             const stats = coachStats(c);
-            const wrDeltaText = stats.studentsWr > 0
+            const wrDeltaText = stats.studentsWr == null
+              ? '—'
+              : stats.studentsWr > 0
               ? `+${stats.studentsWr.toFixed(1)}%`
               : (stats.studentsWr < 0 ? `${stats.studentsWr.toFixed(1)}%` : '—');
             return (
@@ -328,7 +304,7 @@ export default function PlayerCoaches() {
                   <div className="coach-card-title">
                     <div className="coach-card-name-row">
                       <h3 className="coach-name">{name}</h3>
-                      {stats.rating >= 4.85 && <span className="coach-badge-top">Топ-1%</span>}
+                      {stats.rating != null && stats.rating >= 4.85 && stats.reviews >= 10 && <span className="coach-badge-top">Топ-1%</span>}
                     </div>
                     {rank && (
                       <div className="coach-rank">
@@ -365,27 +341,24 @@ export default function PlayerCoaches() {
                   {heroes.length === 0 && <span className="text-muted" style={{ fontSize: '0.78rem' }}>пул не указан</span>}
                 </div>
 
-                {/* Стата inline — теперь привязана к реальным данным:
-                    sessions_completed/avg_rating с /coaches (фолбэк только
-                    когда у тренера ещё нет ни одной сессии/отзыва).
-                    "WR учеников" — настоящий рост винрейта после тренировок
-                    (students_winrate_delta_pct), форматированный со знаком. */}
                 <div className="coach-stats-inline">
                   <div className="coach-stat">
                     <span className="coach-stat-label">Сессий</span>
-                    <span className="coach-stat-value">{stats.sessions}</span>
+                    <span className="coach-stat-value">{stats.sessions || '—'}</span>
                   </div>
-                  <div className="coach-stat" title={stats.reviews > 0 ? `${stats.reviews} отзывов` : ''}>
+                  <div className="coach-stat" title={stats.reviews > 0 ? `${stats.reviews} отзывов` : 'Отзывов пока нет'}>
                     <span className="coach-stat-label">Рейтинг</span>
                     <span className="coach-stat-value">
-                      {stats.rating} <IconStar size={12} color="#f6c463" />
+                      {stats.rating != null ? (
+                        <>{stats.rating} <IconStar size={12} color="#f6c463" /></>
+                      ) : 'Новый'}
                     </span>
                   </div>
                   <div className="coach-stat" title="Средний прирост WR учеников после тренировок">
                     <span className="coach-stat-label">Прирост WR</span>
                     <span
                       className="coach-stat-value"
-                      style={{ color: stats.studentsWr >= 0 ? 'var(--accent)' : 'var(--danger)' }}
+                      style={{ color: stats.studentsWr == null ? 'var(--text-muted)' : (stats.studentsWr >= 0 ? 'var(--accent)' : 'var(--danger)') }}
                     >
                       {wrDeltaText}
                     </span>
@@ -479,7 +452,7 @@ export default function PlayerCoaches() {
                     ? `${applyCoach.hourly_rate.toLocaleString('ru-RU')} ₽/час`
                     : 'Цена договорная'}
                   {' · '}
-                  Рейтинг {coachStats(applyCoach).rating}
+                  {coachStats(applyCoach).rating != null ? `Рейтинг ${coachStats(applyCoach).rating}` : 'Рейтинг появится после отзывов'}
                 </div>
               </div>
             </div>

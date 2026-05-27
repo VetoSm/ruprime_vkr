@@ -12,9 +12,198 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.database import engine
-from app.models import MlKaggleBaseline, MlPlayerAnalysis
+from app.models import MlKaggleBaseline, MlPlayerAnalysis, PlayerMatchDetail
 
 logger = logging.getLogger(__name__)
+
+
+def _build_position_heatmap(db: Session | None, account_id: int, df: pd.DataFrame | None, limit_matches: int = 200) -> dict:
+    """Aggregate OpenDota lane_pos and fall back to role-based zones.
+
+    STRATZ/basic parsed rows often contain rich scoreboard metrics but no map
+    coordinates. In that case we still draw a conservative positional heatmap
+    from role + side so the card is useful instead of blank.
+    """
+    if db is None or df is None or df.empty or "match_id" not in df.columns:
+        return {"points": [], "matches": 0, "events": 0, "source": "none"}
+
+    df_window = df.head(limit_matches)
+    scope_matches = int(len(df_window))
+
+    match_ids: list[int] = []
+    for value in df_window["match_id"].dropna().tolist():
+        try:
+            match_ids.append(int(value))
+        except Exception:
+            pass
+    if not match_ids:
+        return {"points": [], "matches": 0, "events": 0, "source": "none"}
+
+    rows = db.query(PlayerMatchDetail).filter(
+        PlayerMatchDetail.match_id.in_(match_ids),
+        PlayerMatchDetail.source == "opendota",
+        PlayerMatchDetail.raw_json.isnot(None),
+    ).all()
+
+    buckets: dict[tuple[int, int], int] = {}
+    matches_with_lane_pos: set[int] = set()
+    matches_with_points = 0
+    for row in rows:
+        raw = row.raw_json or {}
+        player = None
+        for candidate in raw.get("players") or []:
+            try:
+                if int(candidate.get("account_id") or 0) == int(account_id):
+                    player = candidate
+                    break
+            except Exception:
+                continue
+        if not player:
+            continue
+        lane_pos = player.get("lane_pos") or {}
+        if not isinstance(lane_pos, dict):
+            continue
+        added = 0
+        for x_raw, ys in lane_pos.items():
+            if not isinstance(ys, dict):
+                continue
+            try:
+                x = int(float(x_raw))
+            except Exception:
+                continue
+            for y_raw, count_raw in ys.items():
+                try:
+                    y = int(float(y_raw))
+                    count = int(float(count_raw or 0))
+                except Exception:
+                    continue
+                if count <= 0:
+                    continue
+                buckets[(x, y)] = buckets.get((x, y), 0) + count
+                added += count
+        if added:
+            try:
+                matches_with_lane_pos.add(int(row.match_id))
+            except Exception:
+                pass
+            matches_with_points += 1
+
+    def _match_id_int(value) -> int | None:
+        try:
+            if pd.isna(value):
+                return None
+            return int(value)
+        except Exception:
+            return None
+
+    fallback_df = df_window
+    if matches_with_lane_pos and "match_id" in df_window.columns:
+        lane_pos_ids = matches_with_lane_pos
+        fallback_df = df_window[
+            ~df_window["match_id"].apply(lambda value: (_match_id_int(value) in lane_pos_ids) if _match_id_int(value) is not None else False)
+        ]
+    fallback = _estimated_role_heatmap(fallback_df)
+
+    if fallback.get("points"):
+        for point in fallback["points"]:
+            try:
+                x = int(point.get("x"))
+                y = int(point.get("y"))
+                value = int(point.get("value") or 0)
+            except Exception:
+                continue
+            if value > 0:
+                buckets[(x, y)] = buckets.get((x, y), 0) + value
+
+    total_matches = matches_with_points + int(fallback.get("matches") or 0)
+    if not buckets:
+        fallback = _estimated_role_heatmap(df_window)
+        if fallback["points"]:
+            fallback["scope_matches"] = scope_matches
+            return fallback
+        return {
+            "points": [],
+            "matches": matches_with_points,
+            "scope_matches": scope_matches,
+            "events": 0,
+            "source": "opendota_lane_pos",
+            "lane_pos_matches": matches_with_points,
+            "estimated_matches": 0,
+        }
+
+    max_value = max(buckets.values())
+    points = [
+        {"x": x, "y": y, "value": value, "intensity": round(value / max_value, 4)}
+        for (x, y), value in buckets.items()
+    ]
+    points.sort(key=lambda p: p["value"], reverse=True)
+    return {
+        "points": points[:900],
+        "matches": total_matches,
+        "scope_matches": scope_matches,
+        "events": int(sum(buckets.values())),
+        "source": (
+            "mixed_lane_pos_role"
+            if fallback.get("points") and matches_with_points
+            else ("role_estimate" if fallback.get("points") else "opendota_lane_pos")
+        ),
+        "lane_pos_matches": matches_with_points,
+        "estimated_matches": int(fallback.get("matches") or 0),
+        "max_value": int(max_value),
+    }
+
+
+def _estimated_role_heatmap(df: pd.DataFrame) -> dict:
+    role_anchors = {
+        1: [(76, 82, 10), (100, 110, 8), (132, 124, 5), (58, 52, 3)],
+        2: [(128, 128, 10), (116, 140, 5), (140, 116, 5), (154, 154, 3)],
+        3: [(178, 174, 10), (158, 150, 8), (132, 132, 4), (198, 206, 3)],
+        4: [(158, 150, 8), (128, 128, 7), (102, 118, 5), (180, 86, 4)],
+        5: [(82, 84, 8), (102, 116, 6), (58, 52, 5), (118, 144, 4)],
+    }
+    dire_mirror = lambda x, y: (255 - x, 255 - y)
+    buckets: dict[tuple[int, int], int] = {}
+    rows_used = 0
+    for _, row in df.iterrows():
+        role = 0
+        for role_key in ("lane_role_effective", "lane_role", "role"):
+            try:
+                value = row.get(role_key)
+                if pd.notna(value):
+                    role = int(value)
+                    break
+            except Exception:
+                continue
+        anchors = role_anchors.get(role)
+        if not anchors:
+            continue
+        try:
+            slot = int(row.get("player_slot")) if pd.notna(row.get("player_slot")) else 0
+        except Exception:
+            slot = 0
+        is_dire = slot >= 128
+        for x, y, weight in anchors:
+            px, py = dire_mirror(x, y) if is_dire else (x, y)
+            buckets[(px, py)] = buckets.get((px, py), 0) + weight
+        rows_used += 1
+    if not buckets:
+        return {"points": [], "matches": 0, "events": 0, "source": "role_estimate"}
+    max_value = max(buckets.values())
+    points = [
+        {"x": x, "y": y, "value": value, "intensity": round(value / max_value, 4)}
+        for (x, y), value in buckets.items()
+    ]
+    points.sort(key=lambda p: p["value"], reverse=True)
+    return {
+        "points": points,
+        "matches": int(rows_used),
+        "scope_matches": int(len(df)),
+        "lane_pos_matches": 0,
+        "estimated_matches": int(rows_used),
+        "events": int(sum(buckets.values())),
+        "source": "role_estimate",
+        "max_value": int(max_value),
+    }
 
 # 8 MMR bands by medal (instead of 4 wide bands)
 MMR_BANDS = [
@@ -75,6 +264,10 @@ def compute_baselines(db: Session) -> int:
     """
 
     df = pd.read_sql(query, engine)
+    source_counts = {}
+    if "analytics_source" in df.columns:
+        source_counts = {str(k): int(v) for k, v in df["analytics_source"].fillna("unknown").value_counts().items()}
+
     if df.empty:
         logger.warning("No data for baselines computation")
         return 0
@@ -974,6 +1167,21 @@ def analyze_player_from_account(
     * Matches without a radiant_win signal are excluded from winrate instead
       of being silently counted as losses.
     """
+    account_id_int = int(account_id)
+    analytics_query = f"""
+    SELECT
+        match_id, hero_id, role AS lane_role, game_mode, lobby_type,
+        kills, deaths, assists,
+        gold_per_min, xp_per_min,
+        last_hits, denies,
+        hero_damage, tower_damage,
+        duration, player_slot, radiant_win, start_time, NULL::integer AS average_rank,
+        obs_placed, sen_placed,
+        source AS analytics_source
+    FROM player_match_analytics
+    WHERE account_id = {account_id_int}
+    ORDER BY start_time DESC NULLS LAST
+    """
     query = f"""
     SELECT
         match_id, hero_id, lane_role, game_mode, lobby_type,
@@ -982,13 +1190,19 @@ def analyze_player_from_account(
         last_hits, denies,
         hero_damage, tower_damage,
         duration, player_slot, radiant_win, start_time, average_rank,
-        obs_placed, sen_placed
+        obs_placed, sen_placed,
+        'player_matches' AS analytics_source
     FROM player_matches
-    WHERE account_id = {account_id}
+    WHERE account_id = {account_id_int}
     ORDER BY start_time DESC NULLS LAST
     """
 
-    df_all = pd.read_sql(query, engine)
+    try:
+        df_all = pd.read_sql(analytics_query, engine)
+    except Exception:
+        df_all = pd.DataFrame()
+    if df_all.empty:
+        df_all = pd.read_sql(query, engine)
 
     if df_all.empty:
         analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
@@ -1000,6 +1214,9 @@ def analyze_player_from_account(
     df_role_base, role_filters_applied = apply_stats_filters(df_all, role_base_filters)
     sample_quality = _sample_quality(df)
     freshness = _data_freshness(df)
+    source_counts = {}
+    if "analytics_source" in df.columns:
+        source_counts = {str(k): int(v) for k, v in df["analytics_source"].fillna("unknown").value_counts().items()}
 
     # Ranked is our preferred analytical baseline. If the user is on the
     # default ('ranked') and we don't have enough ranked data, fall back
@@ -1139,6 +1356,7 @@ def analyze_player_from_account(
             "metric_counts": metric_counts,
             "sample_quality": sample_quality,
             "data_freshness": freshness,
+            "enrichment_sources": source_counts,
             "last_match_at": sample_quality.get("latest_match_at"),
         }
         return {
@@ -1180,6 +1398,7 @@ def analyze_player_from_account(
         "metric_counts": metric_counts,
         "sample_quality": sample_quality,
         "data_freshness": freshness,
+        "enrichment_sources": source_counts,
         "last_match_at": sample_quality.get("latest_match_at"),
     }
 
@@ -1259,6 +1478,7 @@ def analyze_player_from_account(
         "hero_damage_per_min_over_time": _series("hero_damage_per_min"),
         "tower_damage_over_time":   _series("tower_damage"),
     }
+    trends["position_heatmap"] = _build_position_heatmap(db, account_id_int, df_sorted)
     recent_rows = df.sort_values("start_time", ascending=False, na_position="last").head(20)
     trends["recent_matches"] = [
         {
@@ -1294,17 +1514,27 @@ def analyze_player_from_account(
         "role_assignment": "exact lane_role when available, otherwise inferred from player hero history, global hero role, player role history, or slot fallback",
     }
 
-    # Top heroes
-    hero_stats = pd.DataFrame(columns=["hero_id", "games", "winrate", "avg_kda"])
+    # Top heroes for the current filtered slice. Keep the full aggregated list
+    # so the frontend can expand from the compact top rows to the complete pool.
+    hero_stats = pd.DataFrame(columns=["hero_id", "games", "winrate", "avg_kda", "pickrate"])
     if not df.empty and "hero_id" in df.columns:
+        hero_base = df.dropna(subset=["hero_id"])
         hero_stats = df.dropna(subset=["hero_id"]).groupby("hero_id").agg(
             games=("match_id", "count"),
             winrate=("win", "mean"),
             avg_kda=("kda", "mean"),
-        ).reset_index().sort_values("games", ascending=False).head(10)
+        ).reset_index()
+        total_hero_games = int(hero_base["hero_id"].count())
+        hero_stats["pickrate"] = hero_stats["games"] / max(total_hero_games, 1)
+        hero_stats = hero_stats.sort_values(
+            ["games", "winrate", "avg_kda"],
+            ascending=[False, False, False],
+            na_position="last",
+        )
     heroes_data = {
         "top_heroes": [
             {"hero_id": int(r["hero_id"]), "games": int(r["games"]),
+             "pickrate": _safe_round(r["pickrate"], 3),
              "winrate": _safe_round(r["winrate"], 3),
              "avg_kda": _safe_round(r["avg_kda"], 2)}
             for _, r in hero_stats.iterrows()

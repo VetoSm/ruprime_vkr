@@ -67,11 +67,17 @@ export default function Login() {
         )}
         {error && <div className="alert alert-error">{error}</div>}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} autoComplete="on">
           <div className="form-group">
-            <label>EMAIL</label>
+            <label htmlFor="login-email">EMAIL</label>
             <input
+              id="login-email"
+              name="email"
               type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              spellCheck={false}
               className="form-input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -83,7 +89,10 @@ export default function Login() {
             <label>ПАРОЛЬ</label>
             <div className="input-with-icon">
               <input
+                id="login-password"
+                name="password"
                 type={showPwd ? 'text' : 'password'}
+                autoComplete="current-password"
                 className="form-input"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

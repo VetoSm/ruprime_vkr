@@ -8,14 +8,15 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser, log_action
 from app.config import settings
+from app.billing_utils import is_pro_active
 from app.ml_client import ml_headers
 from app.models import PlayerProfile, AiAdviceHistory, TrainingRequest, TrainingSession, SessionStatus
 from app.schemas import AiChatRequest, AiChatResponse, AiHistoryEntry, MessageResponse
 
 router = APIRouter(prefix="/ai", tags=["ai-chat"])
 
-DEFAULT_AI_STATS_PARAMS = {"mode": "ranked", "period": "50"}
-AI_CHAT_DAILY_LIMIT = max(1, int(os.getenv("AI_CHAT_DAILY_LIMIT", "20")))
+DEFAULT_AI_STATS_PARAMS = {"mode": "all", "period": "50"}
+AI_CHAT_DAILY_LIMIT = max(1, int(os.getenv("AI_CHAT_DAILY_LIMIT", "1")))
 
 
 def _conversation_title(message: str | None) -> str:
@@ -37,7 +38,7 @@ def _today_usage(profile_id: int | None, db: Session) -> int:
 
 
 def _limit_response(context: dict, used_today: int) -> AiChatResponse:
-    summary = "Дневной лимит ИИ-коуча исчерпан."
+    summary = "К сожалению, бесплатные запросы к Оракулу на сегодня закончились."
     summary_data = context.get("summary", {}) if context else {}
     filters = context.get("filters_applied") or summary_data.get("filters_applied") or {}
     scope = filters.get("label") or summary_data.get("stats_scope_label") or "текущая выборка"
@@ -45,24 +46,27 @@ def _limit_response(context: dict, used_today: int) -> AiChatResponse:
     wr_text = f"{winrate:.1%}" if isinstance(winrate, (int, float)) else "нет данных"
     full = (
         f"{summary}\n\n"
-        f"Сегодня доступно {AI_CHAT_DAILY_LIMIT} запросов, использовано: {used_today}.\n\n"
-        "Краткая статистика без генерации:\n"
+        f"В бесплатном тарифе доступен {AI_CHAT_DAILY_LIMIT} запрос в день, использовано: {used_today}.\n\n"
+        "Краткая статистика остаётся доступна без генерации:\n"
         f"- Выборка: {scope}\n"
         f"- Матчей: {summary_data.get('games_analyzed', 0)}\n"
         f"- Винрейт: {wr_text}\n"
         f"- MMR: {summary_data.get('estimated_mmr', 'нет данных')}\n"
-        f"- Общий балл навыков: {context.get('overall_score', 'нет данных') if context else 'нет данных'}\n"
+        f"- Общий балл навыков: {context.get('overall_score', 'нет данных') if context else 'нет данных'}\n\n"
+        "Вы можете купить Pro за 499 ₽: безлимитные запросы к Оракулу, полная история и расширенный контекст разборов."
     )
     return AiChatResponse(
         advice_summary=summary,
         advice_full=full,
         context_basis=_context_basis(context),
-        show_context_radar=used_today == 0,
+        show_context_radar=True,
         llm_status="rate_limited",
         llm_error="AI_CHAT_DAILY_LIMIT exceeded",
         requests_used_today=used_today,
         requests_limit_daily=AI_CHAT_DAILY_LIMIT,
         requests_remaining_today=0,
+        subscription_active=False,
+        upgrade_required=True,
     )
 
 
@@ -104,6 +108,11 @@ def _context_basis(context: dict) -> dict:
         "overall_score": context.get("overall_score"),
         "current_rank": context.get("current_rank"),
         "target_rank": context.get("target_rank"),
+        "recommended_role": context.get("recommended_role"),
+        "enrichment_sources": summary.get("enrichment_sources") or context.get("enrichment_sources"),
+        "stratz_quality": context.get("stratz_quality"),
+        "top_heroes": (context.get("heroes") or {}).get("top_heroes", [])[:5],
+        "role_stats": (context.get("roles") or {}).get("role_stats", [])[:5],
         "top_gaps": gaps[:5],
         "weak_categories": sorted(categories, key=lambda c: c.get("score", 0))[:4],
     }
@@ -179,6 +188,10 @@ async def ai_chat(
                 ml_data = resp.json()
                 context = {
                     "summary": ml_data.get("summary", {}),
+                    "trends": ml_data.get("trends", {}),
+                    "roles": ml_data.get("roles", {}),
+                    "heroes": ml_data.get("heroes", {}),
+                    "features": ml_data.get("features", {}),
                     "weaknesses": ml_data.get("weaknesses_ranked", []),
                     "strengths": ml_data.get("strengths_ranked", []),
                     "comparisons": ml_data.get("comparisons", {}),
@@ -213,13 +226,21 @@ async def ai_chat(
                 context["target_rank"] = feat_data.get("target_rank")
                 context["current_band"] = feat_data.get("current_band")
                 context["target_band"] = feat_data.get("target_band")
+                context["recommended_role"] = feat_data.get("baseline_role")
+                context["enrichment_sources"] = feat_data.get("enrichment_sources")
+                context["stratz_quality"] = {
+                    "sources": feat_data.get("enrichment_sources"),
+                    "vision_data": feat_data.get("vision_data"),
+                    "sample_quality": feat_data.get("sample_quality"),
+                }
         except Exception:
             pass
 
     context["training"] = _training_context(profile, db)
 
+    subscription_active = is_pro_active(db, current_user.user_id)
     used_today = _today_usage(profile.id if profile else None, db)
-    if used_today >= AI_CHAT_DAILY_LIMIT:
+    if not subscription_active and used_today >= AI_CHAT_DAILY_LIMIT:
         return _limit_response(context, used_today)
 
     conversation_id = (body.conversation_id or "").strip() or f"chat_{uuid.uuid4().hex[:12]}"
@@ -262,9 +283,14 @@ async def ai_chat(
         llm_status = "unavailable"
         llm_error = "LLM service request failed"
 
+    context_basis = _context_basis(context)
+    show_context_radar = bool(context_basis and (context_basis.get("weak_categories") or context_basis.get("top_gaps")))
+
     # Save to history
     history_context = {
         **(context or {}),
+        "context_basis": context_basis,
+        "show_context_radar": show_context_radar,
         "conversation_meta": {
             "conversation_id": conversation_id,
             "conversation_title": conversation_title,
@@ -288,14 +314,16 @@ async def ai_chat(
         advice_summary=advice_summary,
         advice_full=advice_full,
         conversation_id=conversation_id,
-        context_basis=_context_basis(context),
-        show_context_radar=used_today == 0,
+        context_basis=context_basis,
+        show_context_radar=show_context_radar,
         llm_request_id=llm_request_id,
         llm_status=llm_status,
         llm_error=llm_error,
         requests_used_today=used_today + 1,
-        requests_limit_daily=AI_CHAT_DAILY_LIMIT,
-        requests_remaining_today=max(AI_CHAT_DAILY_LIMIT - used_today - 1, 0),
+        requests_limit_daily=None if subscription_active else AI_CHAT_DAILY_LIMIT,
+        requests_remaining_today=None if subscription_active else max(AI_CHAT_DAILY_LIMIT - used_today - 1, 0),
+        subscription_active=subscription_active,
+        upgrade_required=False,
     )
 
 
@@ -311,9 +339,10 @@ def ai_history(
     if not profile:
         return []
 
+    subscription_active = is_pro_active(db, current_user.user_id)
     entries = db.query(AiAdviceHistory).filter(
         AiAdviceHistory.player_profile_id == profile.id,
-    ).order_by(AiAdviceHistory.created_at.desc()).limit(50).all()
+    ).order_by(AiAdviceHistory.created_at.desc()).limit(50 if subscription_active else 1).all()
 
     return [
         AiHistoryEntry(
@@ -321,6 +350,8 @@ def ai_history(
             message=e.message,
             advice_summary=e.advice_summary,
             advice_full=e.advice_full,
+            context_basis=(e.prompt_context or {}).get("context_basis"),
+            show_context_radar=bool((e.prompt_context or {}).get("show_context_radar")),
             conversation_id=((e.prompt_context or {}).get("conversation_meta") or {}).get("conversation_id") or f"legacy_{e.id}",
             conversation_title=((e.prompt_context or {}).get("conversation_meta") or {}).get("conversation_title") or _conversation_title(e.message),
             created_at=e.created_at,

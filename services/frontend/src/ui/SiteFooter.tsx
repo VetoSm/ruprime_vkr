@@ -7,6 +7,7 @@ export default function SiteFooter() {
         <div className="site-footer-brand">
           <strong>RuPrime</strong>
           <span>Dota 2 coaching platform</span>
+          <span>Самозанятый Зигора Григорий Игоревич · ИНН 230910452370</span>
         </div>
         <nav className="site-footer-links" aria-label="Информационные ссылки">
           <Link to="/coach-landing">Для тренеров</Link>

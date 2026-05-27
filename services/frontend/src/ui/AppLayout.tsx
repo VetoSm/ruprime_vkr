@@ -12,6 +12,8 @@ import {
 import { BrandLogo } from './Primitives';
 import { rankTierToName, rankMedalIcon } from '../api/heroes';
 import ConsentGate from './ConsentGate';
+import SiteFooter from './SiteFooter';
+import TechStatusPanel from './TechStatusPanel';
 
 type NavItem = { to: string; label: string; icon: (p: any) => JSX.Element };
 
@@ -139,6 +141,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   const nav = user?.role === 'ADMIN' ? ADMIN_NAV : user?.role === 'COACH' ? COACH_NAV : PLAYER_NAV;
   const showAiFab = user?.role === 'PLAYER' || user?.role === 'COACH';
+  const breadcrumb = location.pathname === '/stats' && user?.role === 'COACH'
+    ? 'Мой разбор'
+    : getBreadcrumb(location.pathname);
   const isPreview = (() => {
     try { return !!localStorage.getItem('__ruprime_preview'); } catch { return false; }
   })();
@@ -190,6 +195,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             ))}
           </nav>
 
+          <TechStatusPanel collapsed={collapsed} role={user?.role} />
+
           <button
             className="app-sidebar-toggle"
             onClick={() => setCollapsed(!collapsed)}
@@ -218,7 +225,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <div className="app-breadcrumb" aria-label="Хлебные крошки">
                 <IconHome size={14} />
                 <span className="app-breadcrumb-sep">/</span>
-                <span className="app-breadcrumb-current">{getBreadcrumb(location.pathname)}</span>
+                <span className="app-breadcrumb-current">{breadcrumb}</span>
               </div>
             </div>
 
@@ -296,6 +303,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <main className="app-content">
             {children}
           </main>
+          <SiteFooter />
         </div>
 
         {/* Oracle FAB + mini-chat — FAB теперь круглая аватарка Оракула */}

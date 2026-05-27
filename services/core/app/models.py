@@ -144,6 +144,40 @@ class AiAdviceHistory(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class UserSubscription(Base):
+    __tablename__ = "user_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    core_user_id = Column(Integer, ForeignKey("core_users.id", ondelete="CASCADE"), unique=True, index=True)
+    plan = Column(String(30), nullable=False, default="free", index=True)
+    status = Column(String(30), nullable=False, default="inactive", index=True)
+    current_period_start = Column(DateTime(timezone=True), nullable=True)
+    current_period_end = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    core_user_id = Column(Integer, ForeignKey("core_users.id", ondelete="CASCADE"), index=True)
+    provider = Column(String(30), nullable=False, default="yookassa", index=True)
+    provider_payment_id = Column(String(120), nullable=True, unique=True, index=True)
+    idempotence_key = Column(String(120), nullable=False, unique=True, index=True)
+    amount = Column(Float, nullable=False, default=499.0)
+    currency = Column(String(3), nullable=False, default="RUB")
+    status = Column(String(40), nullable=False, default="created", index=True)
+    description = Column(Text, nullable=True)
+    return_path = Column(Text, nullable=True)
+    confirmation_url = Column(Text, nullable=True)
+    provider_payload = Column(JSON, nullable=True)
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class CoreActionLog(Base):
     __tablename__ = "core_action_logs"
 

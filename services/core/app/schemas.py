@@ -199,6 +199,8 @@ class AiChatResponse(BaseModel):
     requests_used_today: Optional[int] = None
     requests_limit_daily: Optional[int] = None
     requests_remaining_today: Optional[int] = None
+    subscription_active: bool = False
+    upgrade_required: bool = False
 
 
 class AiHistoryEntry(BaseModel):
@@ -206,12 +208,45 @@ class AiHistoryEntry(BaseModel):
     message: Optional[str] = None
     advice_summary: Optional[str] = None
     advice_full: Optional[str] = None
+    context_basis: Optional[Any] = None
+    show_context_radar: bool = False
     conversation_id: Optional[str] = None
     conversation_title: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+# ---- Billing ----
+class SubscriptionResponse(BaseModel):
+    plan: str = "free"
+    status: str = "inactive"
+    active: bool = False
+    current_period_end: Optional[datetime] = None
+    requests_limit_daily: Optional[int] = None
+
+
+class CreatePaymentRequest(BaseModel):
+    return_path: Optional[str] = None
+
+
+class CreatePaymentResponse(BaseModel):
+    payment_id: int
+    provider_payment_id: Optional[str] = None
+    confirmation_url: str
+    status: str
+
+
+class ConfirmPaymentRequest(BaseModel):
+    payment_id: int
+
+
+class ConfirmPaymentResponse(BaseModel):
+    payment_id: int
+    status: str
+    subscription: SubscriptionResponse
+    message: str
 
 
 # ---- Admin ----

@@ -140,17 +140,35 @@ def compute_detailed_features(
     # Get player account data (lifetime totals)
     acc = db.query(PlayerAccount).filter(PlayerAccount.account_id == account_id).first() if db else None
 
-    # Get player matches for recent stats
+    # Get player matches for recent stats. Prefer normalized analytics rows
+    # because STRATZ enrichment writes richer per-match fields there.
+    account_id_int = int(account_id)
+    analytics_query = f"""
+    SELECT match_id, hero_id, kills, deaths, assists, gold_per_min, xp_per_min,
+           last_hits, denies, hero_damage, tower_damage, hero_healing,
+           duration, player_slot, radiant_win, role AS lane_role, NULL::integer AS average_rank,
+           TRUE AS is_detailed, start_time, game_mode, lobby_type, obs_placed, sen_placed,
+           source AS analytics_source
+    FROM player_match_analytics
+    WHERE account_id = {account_id_int}
+    ORDER BY start_time DESC NULLS LAST
+    """
     match_query = f"""
     SELECT match_id, hero_id, kills, deaths, assists, gold_per_min, xp_per_min,
            last_hits, denies, hero_damage, tower_damage, hero_healing,
            duration, player_slot, radiant_win, lane_role, average_rank,
-           is_detailed, start_time, game_mode, lobby_type, obs_placed, sen_placed
+           is_detailed, start_time, game_mode, lobby_type, obs_placed, sen_placed,
+           'player_matches' AS analytics_source
     FROM player_matches
-    WHERE account_id = {account_id}
+    WHERE account_id = {account_id_int}
     ORDER BY start_time DESC NULLS LAST
     """
-    df_all = pd.read_sql(match_query, engine)
+    try:
+        df_all = pd.read_sql(analytics_query, engine)
+    except Exception:
+        df_all = pd.DataFrame()
+    if df_all.empty:
+        df_all = pd.read_sql(match_query, engine)
     normalized_filters = normalize_stats_filters(**(filters or {}))
     df, filters_applied = apply_stats_filters(df_all, normalized_filters)
 
@@ -184,6 +202,9 @@ def compute_detailed_features(
 
     sample_quality = _sample_quality(df)
     freshness = _data_freshness(df)
+    source_counts = {}
+    if "analytics_source" in df.columns:
+        source_counts = {str(k): int(v) for k, v in df["analytics_source"].fillna("unknown").value_counts().items()}
     baseline_role = baseline_role or filters_applied.get("auto_role") or normalized_filters.get("role")
 
     if df.empty and not acc:
@@ -200,6 +221,7 @@ def compute_detailed_features(
             "parsed_games_n": int(parsed_games_n),
             "filters_applied": filters_applied,
             "data_freshness": freshness,
+            "enrichment_sources": source_counts,
             "last_match_at": sample_quality.get("latest_match_at"),
             "sample_quality": sample_quality,
         }
@@ -445,6 +467,7 @@ def compute_detailed_features(
         "rank_source": rank_source,
         "baseline_role": baseline_role,
         "data_freshness": freshness,
+        "enrichment_sources": source_counts,
         "last_match_at": sample_quality.get("latest_match_at"),
         "sample_quality": sample_quality,
         "rank_tier": int(effective_rank_tier) if effective_rank_tier else None,

@@ -30,7 +30,8 @@ from sqlalchemy.orm import Session
 from app.models import PlayerMatchDetail
 from app.parse_queue import upgrade_to_hot
 from app.rate_budget import opendota_budget
-from app.sources import MatchDetailDTO, OpenDotaAdapter, SourceAdapter
+from app.sources import MatchDetailDTO, OpenDotaAdapter, SourceAdapter, StratzAdapter
+from app.stratz_client import STRATZ_ENABLED
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,10 @@ class MatchDetailService:
     def __init__(self, adapters: Optional[list[SourceAdapter]] = None):
         # Order matters — first to return parsed data wins. Stratz, when
         # configured, should go in front of OpenDota.
-        self.adapters: list[SourceAdapter] = adapters or [OpenDotaAdapter()]
+        if adapters is not None:
+            self.adapters = adapters
+        else:
+            self.adapters = ([StratzAdapter()] if STRATZ_ENABLED else []) + [OpenDotaAdapter()]
 
     # ---------- public API ----------
 
@@ -76,23 +80,15 @@ class MatchDetailService:
                 db.commit()
             return self._from_row(cached)
 
-        # Interactive paths must respect the same token bucket the parse
-        # worker uses, otherwise a page load can spike past the rate
-        # limit and earn the whole app a 429.
-        if not opendota_budget.take(timeout=8.0):
-            # Cannot afford a live fetch right now — fall back to whatever
-            # we have cached (even if stale) and let the worker catch up.
-            if cached:
-                if not cached.is_parsed:
-                    upgrade_to_hot(db, match_id)
-                    db.commit()
-                return self._from_row(cached)
-            return None
-
         # Try sources in priority order; first to give us parsed wins.
         best_dto: Optional[MatchDetailDTO] = self._from_row(cached) if cached else None
 
         for adapter in self.adapters:
+            # Interactive OpenDota paths must respect the same token bucket
+            # the parse worker uses. STRATZ has its own persistent limiter in
+            # the adapter/client, so do not block it on the OpenDota budget.
+            if isinstance(adapter, OpenDotaAdapter) and not opendota_budget.take(timeout=8.0):
+                continue
             try:
                 dto = adapter.fetch_match(match_id)
             except Exception as exc:  # noqa: BLE001 — never let one source break others
@@ -216,8 +212,8 @@ class MatchDetailService:
         if adapter is None:
             return None
         # Adapters expose ``_player_dto``-style helpers via fetch_match; we
-        # construct a DTO directly from raw_json by re-using OpenDota
-        # internals where possible. For now only opendota is cached.
+        # construct a DTO directly from raw_json by re-using source-specific
+        # normalizers where possible.
         if row.source == "opendota":
             from app.sources.opendota import _player_dto, _avg_rank
             raw = row.raw_json
@@ -237,6 +233,27 @@ class MatchDetailService:
                 avg_rank_tier=row.avg_rank_tier or _avg_rank(players_raw),
                 first_blood_time=raw.get("first_blood_time"),
                 players=[_player_dto(p) for p in players_raw if p.get("hero_id")],
+                raw=raw,
+            )
+        if row.source == "stratz":
+            from app.sources.stratz import _player_dto, _pick
+            raw = row.raw_json
+            players_raw = raw.get("players") or []
+            return MatchDetailDTO(
+                match_id=row.match_id,
+                source=row.source,
+                is_parsed=bool(row.is_parsed),
+                parser_version=row.parser_version,
+                start_time=row.start_time,
+                duration=row.duration,
+                game_mode=row.game_mode,
+                lobby_type=row.lobby_type,
+                radiant_win=row.radiant_win,
+                radiant_score=_pick(raw, "radiantScore", "radiant_score"),
+                dire_score=_pick(raw, "direScore", "dire_score"),
+                avg_rank_tier=row.avg_rank_tier,
+                first_blood_time=_pick(raw, "firstBloodTime", "first_blood_time"),
+                players=[_player_dto(p) for p in players_raw if isinstance(p, dict) and _pick(p, "heroId", "hero_id")],
                 raw=raw,
             )
         return None

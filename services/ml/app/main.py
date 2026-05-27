@@ -12,6 +12,7 @@ from app.models import (  # noqa: F401
     MlConstantHero, MlConstantItem, MlConstantAbility,
     MlKaggleBaseline, MlPlayerAnalysis,
     PlayerAccount, PlayerMatch, PlayerMatchDetail,
+    StratzApiUsage, StratzMatchEnrichment, PlayerMatchAnalytics,
 )
 from app.routers.admin import router as admin_router
 from app.routers.analysis import router as analysis_router
@@ -101,6 +102,19 @@ def startup():
             "CREATE INDEX IF NOT EXISTS ix_player_match_details_queue "
             "ON player_match_details (parse_state, priority, next_check_at)"
         ))
+        # STRATZ enrichment + normalized analytics snapshots.
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_stratz_enrich_account_match "
+            "ON stratz_match_enrichments (account_id, match_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_stratz_enrich_queue "
+            "ON stratz_match_enrichments (state, priority, next_check_at)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_player_match_analytics_account_match "
+            "ON player_match_analytics (account_id, match_id)"
+        ))
 
     # Mount images if available
     images_path = os.path.join(os.getenv("KAGGLE_DATA_PATH", "/data/archive-2"), "Images")
@@ -119,6 +133,11 @@ def startup():
         from app.parse_worker import start_parse_worker
         start_parse_worker()
 
+    auto_stratz = os.getenv("STRATZ_ENRICHMENT_ENABLED", "true").lower()
+    if auto_stratz in ("true", "1", "yes"):
+        from app.stratz_enrichment import start_stratz_worker
+        start_stratz_worker()
+
     # Periodic background refresh of linked Steam accounts (24h by default).
     from app.auto_refresh import start as _start_auto_refresh
     _start_auto_refresh()
@@ -128,6 +147,7 @@ def startup():
 def health():
     from app.match_collector import get_collector_status
     from app.parse_worker import get_worker_status
+    from app.stratz_enrichment import get_worker_status as get_stratz_worker_status
     status = get_collector_status()
     worker = get_worker_status()
     return {
@@ -141,4 +161,5 @@ def health():
             "matches_requested_total": worker.get("matches_requested_total"),
             "budget_available": worker.get("budget_available"),
         },
+        "stratz_enrichment": get_stratz_worker_status(),
     }

@@ -14,6 +14,11 @@ from app.feature_engine import analyze_player
 from app.opendota_client import fetch_full_player_data, steam_id_to_account_id
 from app.parse_queue import enqueue_for_account, progress_for_account
 from app.player_sync_manager import schedule_deep_sync, get_sync_status
+from app.analytics_snapshots import rebuild_player_match_analytics
+from app.stratz_enrichment import (
+    enqueue_for_account as enqueue_stratz_for_account,
+    progress_for_account as stratz_progress_for_account,
+)
 
 router = APIRouter(prefix="/ml", tags=["ml-analysis"])
 
@@ -54,6 +59,9 @@ class PlayerAccountResponse(BaseModel):
     warning: Optional[str] = None
     parse_requested: int = 0
     parse_message: Optional[str] = None
+    stratz_enriched: Optional[int] = None
+    stratz_pending: Optional[int] = None
+    stratz_daily_remaining: Optional[int] = None
 
 
 def _normalize_mmr_estimate(raw_mmr) -> Optional[int]:
@@ -281,6 +289,9 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
 
         if cache_has_data:
             sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=False)
+            enqueue_stratz_for_account(db, account_id)
+            rebuild_player_match_analytics(db, account_id)
+            db.commit()
             cached_response = get_player_account(account_id, db)
             cached_response.parse_message = (
                 f"Найдены сохранённые данные ({cached_matches_count} матчей). "
@@ -415,6 +426,8 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
     # requests at the right pace (token bucket) and recheck with backoff,
     # so this endpoint stays fast and we don't spawn ad-hoc threads.
     enqueue_stats = enqueue_for_account(db, account_id)
+    stratz_stats = enqueue_stratz_for_account(db, account_id)
+    snapshot_stats = rebuild_player_match_analytics(db, account_id)
     db.commit()
     parse_requested = enqueue_stats.get("warm", 0) + enqueue_stats.get("cold", 0)
     parse_message = (
@@ -423,6 +436,9 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
         f"{enqueue_stats.get('cold', 0)} в фоне). "
         "Полная статистика подтянется автоматически в течение 30-60 минут."
     ) if parse_requested else None
+    if stratz_stats.get("enabled") and stratz_stats.get("queued"):
+        stratz_msg = f"STRATZ-обогащение запланировано для {stratz_stats.get('queued')} матчей."
+        parse_message = f"{parse_message}\n{stratz_msg}" if parse_message else stratz_msg
 
     sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=True)
     sync_msg = (
@@ -465,6 +481,8 @@ def link_steam_account(body: LinkSteamRequest, db: Session = Depends(get_db)):
         warning=data.get("warning") or _closed_stats_warning(len(matches), acc.win, acc.lose),
         parse_requested=parse_requested,
         parse_message=parse_message,
+        stratz_enriched=snapshot_stats.get("stratz_rows"),
+        stratz_pending=stratz_stats.get("queued") if stratz_stats.get("enabled") else None,
     )
 
 
@@ -500,6 +518,8 @@ def refresh_player_data(
         _replace_account_matches(db, account_id, data.get("matches") or [])
         db.commit()
         enqueue_for_account(db, account_id)
+        enqueue_stratz_for_account(db, account_id)
+        rebuild_player_match_analytics(db, account_id)
         db.commit()
 
     sync_job = schedule_deep_sync(account_id, steam_id=steam_id, force=True)
@@ -516,9 +536,11 @@ def refresh_player_data(
 
 
 @router.get("/player-sync-status/{account_id}")
-def player_sync_status(account_id: int):
+def player_sync_status(account_id: int, db: Session = Depends(get_db)):
     """Статус фоновой догрузки матчей для игрока."""
-    return get_sync_status(account_id)
+    status = get_sync_status(account_id)
+    status["stratz"] = stratz_progress_for_account(db, account_id)
+    return status
 
 
 @router.get("/player-account/{account_id}", response_model=PlayerAccountResponse)
@@ -559,6 +581,7 @@ def get_player_account(account_id: int, db: Session = Depends(get_db)):
     totals = _build_totals_payload(acc)
     mmr_estimate = _estimate_mmr_from_rank_tier(acc.rank_tier)
     warning = _closed_stats_warning(matches_count, acc.win, acc.lose)
+    stratz = stratz_progress_for_account(db, acc.account_id)
 
     parse_message = None
     if _should_background_refresh(acc):
@@ -591,6 +614,9 @@ def get_player_account(account_id: int, db: Session = Depends(get_db)):
         heroes_top=heroes_top,
         warning=warning,
         parse_message=parse_message,
+        stratz_enriched=stratz.get("stratz_enriched"),
+        stratz_pending=stratz.get("stratz_pending"),
+        stratz_daily_remaining=(stratz.get("quota") or {}).get("day_remaining"),
     )
 
 
@@ -716,6 +742,16 @@ def parse_progress_for_account(account_id: int, db: Session = Depends(get_db)):
     from app.parse_worker import get_worker_status
 
     progress = progress_for_account(db, account_id)
+    stratz = stratz_progress_for_account(db, account_id)
+    progress.update({
+        "stratz_enabled": stratz.get("enabled"),
+        "stratz_enriched": stratz.get("stratz_enriched"),
+        "stratz_pending": stratz.get("stratz_pending"),
+        "stratz_failed": stratz.get("stratz_failed"),
+        "stratz_not_enqueued": stratz.get("stratz_not_enqueued"),
+        "stratz_completeness_pct": stratz.get("stratz_completeness_pct"),
+        "stratz_daily_remaining": (stratz.get("quota") or {}).get("day_remaining"),
+    })
     progress["worker"] = get_worker_status()
     return progress
 

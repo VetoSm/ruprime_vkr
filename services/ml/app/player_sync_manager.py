@@ -126,6 +126,8 @@ def _worker_loop():
                     "message": "Фоновая синхронизация завершена",
                     "fetched_matches": result.get("fetched_matches", 0),
                     "parse_requested": result.get("parse_requested", 0),
+                    "stratz_queued": result.get("stratz_queued", 0),
+                    "analytics_rows": result.get("analytics_rows", 0),
                     "planned_fetch_matches": DEEP_SYNC_MAX_MATCHES,
                     "planned_parse_matches": RECENT_PARSE_MATCHES,
                     "detailed_matches_fetched": result.get("detailed_matches_fetched", 0),
@@ -169,7 +171,11 @@ def _run_sync_job(account_id: int, steam_id: str | None) -> dict:
         # We still synchronously cache *other players'* basic info from
         # detailed matches so MM and coach matchmaking have fresh data.
         from app.parse_queue import enqueue_for_account
+        from app.stratz_enrichment import enqueue_for_account as enqueue_stratz_for_account
+        from app.analytics_snapshots import rebuild_player_match_analytics
         enqueue_stats = enqueue_for_account(db, account_id)
+        stratz_stats = enqueue_stratz_for_account(db, account_id)
+        snapshot_stats = rebuild_player_match_analytics(db, account_id)
 
         detailed_ids = _recent_incomplete_match_ids(matches, RECENT_PARSE_MATCHES)
         detailed_matches_fetched, players_cached = _cache_other_players_from_detailed_matches(db, detailed_ids)
@@ -178,6 +184,8 @@ def _run_sync_job(account_id: int, steam_id: str | None) -> dict:
         return {
             "fetched_matches": len(matches),
             "parse_requested": enqueue_stats.get("warm", 0) + enqueue_stats.get("cold", 0),
+            "stratz_queued": stratz_stats.get("queued", 0),
+            "analytics_rows": snapshot_stats.get("rows", 0),
             "parse_candidates": len(detailed_ids),
             "detailed_matches_fetched": detailed_matches_fetched,
             "players_cached": players_cached,

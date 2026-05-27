@@ -290,6 +290,85 @@ class PlayerMatchDetail(Base):
     parse_state = Column(String(20), default="queued", index=True, nullable=False)
 
 
+class StratzApiUsage(Base):
+    """Persistent STRATZ quota counters.
+
+    STRATZ limits include short and long windows. Keeping counters in
+    Postgres prevents a container restart from accidentally resetting the
+    hourly/daily budget.
+    """
+    __tablename__ = "stratz_api_usage"
+
+    window_key = Column(String(80), primary_key=True, index=True)
+    window_name = Column(String(20), nullable=False, index=True)
+    window_start = Column(DateTime(timezone=True), nullable=False, index=True)
+    used = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class StratzMatchEnrichment(Base):
+    """Per-account STRATZ enrichment queue for the latest analysis window."""
+    __tablename__ = "stratz_match_enrichments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(BigInteger, nullable=False, index=True)
+    match_id = Column(BigInteger, nullable=False, index=True)
+    state = Column(String(20), nullable=False, default="queued", index=True)
+    priority = Column(Integer, nullable=False, default=3, index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    fetched_at = Column(DateTime(timezone=True), nullable=True)
+    next_check_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PlayerMatchAnalytics(Base):
+    """Normalized per-account match metrics used by stats, Oracle and widgets.
+
+    Rows are derived from the best available source: STRATZ detail first,
+    then OpenDota detail, then the sparse player_matches row.
+    """
+    __tablename__ = "player_match_analytics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(BigInteger, nullable=False, index=True)
+    match_id = Column(BigInteger, nullable=False, index=True)
+    source = Column(String(20), nullable=False, default="player_matches", index=True)
+    hero_id = Column(Integer, nullable=True, index=True)
+    role = Column(Integer, nullable=True, index=True)
+    role_confidence = Column(Float, nullable=True)
+    start_time = Column(Integer, nullable=True, index=True)
+    duration = Column(Integer, nullable=True)
+    game_mode = Column(Integer, nullable=True)
+    lobby_type = Column(Integer, nullable=True, index=True)
+    radiant_win = Column(Boolean, nullable=True)
+    player_slot = Column(Integer, nullable=True)
+    win = Column(Boolean, nullable=True)
+    kills = Column(Float, nullable=True)
+    deaths = Column(Float, nullable=True)
+    assists = Column(Float, nullable=True)
+    kda = Column(Float, nullable=True)
+    gold_per_min = Column(Float, nullable=True)
+    xp_per_min = Column(Float, nullable=True)
+    last_hits = Column(Float, nullable=True)
+    denies = Column(Float, nullable=True)
+    hero_damage = Column(Float, nullable=True)
+    tower_damage = Column(Float, nullable=True)
+    hero_healing = Column(Float, nullable=True)
+    net_worth = Column(Float, nullable=True)
+    level = Column(Integer, nullable=True)
+    obs_placed = Column(Float, nullable=True)
+    sen_placed = Column(Float, nullable=True)
+    camps_stacked = Column(Float, nullable=True)
+    rune_pickups = Column(Float, nullable=True)
+    teamfight_participation = Column(Float, nullable=True)
+    actions_per_min = Column(Float, nullable=True)
+    stuns = Column(Float, nullable=True)
+    extra = Column(JSON, nullable=True)
+    computed_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class MlPlayerAnalysis(Base):
     __tablename__ = "ml_player_analyses"
 

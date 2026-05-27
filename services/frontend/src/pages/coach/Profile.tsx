@@ -24,6 +24,7 @@ export default function CoachProfile() {
   const [profile, setProfile] = useState<any>(null);
   const [steamData, setSteamData] = useState<any>(null);
   const [students, setStudents] = useState<any[]>([]);
+  const [studentsSummary, setStudentsSummary] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
 
   // Form fields
@@ -60,7 +61,10 @@ export default function CoachProfile() {
     }).catch(() => {});
 
     coreApi.get('/player/steam-data').then((r) => setSteamData(r.data)).catch(() => {});
-    coreApi.get('/coach/students-overview').then((r) => setStudents(r.data?.students || [])).catch(() => {});
+    coreApi.get('/coach/students-overview').then((r) => {
+      setStudents(r.data?.students || []);
+      setStudentsSummary(r.data?.summary || null);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -92,7 +96,6 @@ export default function CoachProfile() {
 
   const avgRating = reviews.length > 0 ? reviews.reduce((s, r) => s + (Number(r.rating) || 0), 0) / reviews.length : null;
   const sessionsCount = students.reduce((acc, s) => acc + (s.sessions_total || 0), 0);
-  const studentsActiveCount = students.filter((s) => (s.sessions_completed || 0) > 0).length;
 
   const filteredHeroOptions = heroSearch
     ? heroOptions.filter((h: any) => (h.localized_name || h.name).toLowerCase().includes(heroSearch.toLowerCase()))
@@ -145,8 +148,12 @@ export default function CoachProfile() {
               </span>
             </div>
             <div className="coach-public-stat">
-              <span className="coach-public-stat-label">Учеников</span>
-              <span className="coach-public-stat-value">{studentsActiveCount}</span>
+              <span className="coach-public-stat-label">WR учеников</span>
+              <span className="coach-public-stat-value">
+                {typeof studentsSummary?.avg_student_winrate === 'number'
+                  ? `${(studentsSummary.avg_student_winrate * 100).toFixed(0)}%`
+                  : '—'}
+              </span>
             </div>
             <div className="coach-public-stat">
               <span className="coach-public-stat-label">Ставка</span>

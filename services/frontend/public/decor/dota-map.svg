@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="512" x2="512" y2="0">
+      <stop offset="0" stop-color="#183728"/>
+      <stop offset="0.48" stop-color="#0b2034"/>
+      <stop offset="1" stop-color="#3a1821"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <path d="M-40 448C116 366 192 294 266 214S404 82 552 14" fill="none" stroke="#2ac7d5" stroke-opacity=".20" stroke-width="58" filter="url(#soft)"/>
+  <path d="M-36 438C120 360 188 292 258 218S398 94 548 24" fill="none" stroke="#071729" stroke-width="30"/>
+  <g fill="none" stroke="#dfe8f8" stroke-opacity=".10" stroke-width="3">
+    <path d="M36 330h118v118H36z"/>
+    <path d="M358 64h118v118H358z"/>
+    <path d="M92 386L418 110"/>
+    <path d="M72 78h126v126H72z"/>
+    <path d="M314 308h126v126H314z"/>
+  </g>
+  <g fill="#72e6be" fill-opacity=".18">
+    <circle cx="78" cy="430" r="42"/>
+    <circle cx="138" cy="344" r="26"/>
+    <circle cx="178" cy="404" r="20"/>
+  </g>
+  <g fill="#ff6678" fill-opacity=".16">
+    <circle cx="438" cy="82" r="42"/>
+    <circle cx="364" cy="154" r="24"/>
+    <circle cx="428" cy="206" r="20"/>
+  </g>
+  <g stroke="#f6c463" stroke-opacity=".18" stroke-width="4" fill="none">
+    <path d="M96 96l320 320"/>
+    <path d="M74 266h80M360 246h80M244 74v82M268 360v82"/>
+  </g>
+</svg>

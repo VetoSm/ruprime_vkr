@@ -5,10 +5,12 @@ import { InfoTooltip } from '../../ui/GameComponents';
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<any>(null);
+  const [billing, setBilling] = useState<any>(null);
   const [pendingCoaches, setPendingCoaches] = useState<number | null>(null);
 
   useEffect(() => {
     coreApi.get('/admin/stats').then((r) => setStats(r.data)).catch(() => {});
+    coreApi.get('/billing/technical-summary').then((r) => setBilling(r.data)).catch(() => {});
     coreApi.get('/admin/coach-applications', { params: { status: 'PENDING' } })
       .then((r) => setPendingCoaches((r.data?.items || []).length))
       .catch(() => setPendingCoaches(null));
@@ -80,6 +82,65 @@ export default function AdminDashboard() {
         <div className="stat-card">
           <div className="stat-card-label">Завершено <InfoTooltip text="Сессии со статусом COMPLETED." /></div>
           <div className="stat-card-value text-accent">{stats?.completed_sessions || 0}</div>
+        </div>
+      </div>
+
+      <div className="card dash-card" style={{ marginTop: 20 }}>
+        <div className="card-head">
+          <div className="card-title">Оплаты и подписки</div>
+          <span className="badge badge-accent">ЮKassa</span>
+        </div>
+        <div className="grid-4 mb-20">
+          <div className="stat-card">
+            <div className="stat-card-label">Успешных оплат</div>
+            <div className="stat-card-value">{billing?.succeeded_payments || 0}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Сумма</div>
+            <div className="stat-card-value">{Number(billing?.succeeded_amount_rub || 0).toLocaleString('ru-RU')} ₽</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Активных Pro</div>
+            <div className="stat-card-value text-accent">{billing?.active_subscriptions || 0}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Провайдер</div>
+            <div className="stat-card-value" style={{ fontSize: '1.2rem' }}>{billing?.provider || '—'}</div>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Пользователь</th>
+                <th>Steam persona</th>
+                <th>Сумма</th>
+                <th>Статус</th>
+                <th>Дата оплаты</th>
+                <th>Подписка до</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(billing?.payments || []).map((p: any) => (
+                <tr key={p.id}>
+                  <td>
+                    {p.login || p.email || `core #${p.core_user_id}`}
+                    {p.auth_user_id && <div className="text-muted" style={{ fontSize: '0.72rem' }}>auth #{p.auth_user_id}</div>}
+                  </td>
+                  <td>{p.steam_persona || '—'}</td>
+                  <td>{Number(p.amount || 0).toLocaleString('ru-RU')} {p.currency || 'RUB'}</td>
+                  <td><span className={`badge ${p.status === 'succeeded' ? 'badge-accent' : 'badge-muted'}`}>{p.status}</span></td>
+                  <td>{p.created_at ? new Date(p.created_at).toLocaleString('ru-RU') : '—'}</td>
+                  <td>{p.subscription_until ? new Date(p.subscription_until).toLocaleDateString('ru-RU') : '—'}</td>
+                </tr>
+              ))}
+              {(!billing?.payments || billing.payments.length === 0) && (
+                <tr>
+                  <td colSpan={6} className="text-muted">Оплат пока нет.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

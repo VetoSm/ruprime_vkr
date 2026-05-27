@@ -5,12 +5,11 @@ import { useAuth } from '../../store/AuthContext';
 import { loadHeroes, heroIcon, heroName, roleName } from '../../api/heroes';
 import { RankBadge, RoleBadge, InfoTooltip } from '../../ui/GameComponents';
 import SkillRing from '../../ui/SkillRing';
-import DotaPrivacyBanner from '../../ui/DotaPrivacyBanner';
 import ParseProgressBadge from '../../ui/ParseProgressBadge';
 import { EmptyState } from '../../ui/Primitives';
 import { Dropdown } from '../../ui/Dropdown';
 import {
-  IconChevronRight, IconChevronUp, IconChevronDown, IconCalendar, IconTrendUp,
+  IconChevronRight, IconCalendar, IconTrendUp,
 } from '../../ui/Icons';
 import {
   IconCoinsOutline, IconBookOpenOutline, IconSwordsOutline, IconStarOutline,
@@ -187,7 +186,6 @@ export default function PlayerDashboard() {
   const [detailedFeatures, setDetailedFeatures] = useState<any>(null);
   const [steamData, setSteamData] = useState<any>(null);
   const [playerProfile, setPlayerProfile] = useState<any>(null);
-  const [syncStatus, setSyncStatus] = useState<any>(null);
   const [retried, setRetried] = useState(false);
   const [pendingSteamChecked, setPendingSteamChecked] = useState(false);
 
@@ -197,17 +195,6 @@ export default function PlayerDashboard() {
   const [selectedAnalysisRole, setSelectedAnalysisRole] = useState('');
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [chartMetric, setChartMetric] = useState<'gpm' | 'xpm' | 'kda' | 'winrate'>('gpm');
-  // Свёрнутый ли баннер «Загружаем данные Dota». Состояние храним в
-  // localStorage, чтобы при обновлении страницы пользователь не
-  // получал баннер обратно развёрнутым каждый раз.
-  const [syncCollapsed, setSyncCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem('sync_banner_collapsed') === '1'; }
-    catch { return false; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('sync_banner_collapsed', syncCollapsed ? '1' : '0'); }
-    catch {}
-  }, [syncCollapsed]);
 
   // Боковые блоки
   const [aiHistory, setAiHistory] = useState<any[]>([]);
@@ -232,23 +219,6 @@ export default function PlayerDashboard() {
       setUpcomingSession(planned[0] || null);
     }).catch(() => {});
   }, []);
-
-  // Polling sync-status пока идёт догрузка матчей
-  useEffect(() => {
-    if (!steamData?.linked) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const r = await coreApi.get('/player/sync-status');
-        if (cancelled) return;
-        setSyncStatus(r.data);
-        if (r.data?.status && r.data.status !== 'queued' && r.data.status !== 'running') return;
-      } catch { return; }
-      if (!cancelled) window.setTimeout(tick, 4000);
-    };
-    tick();
-    return () => { cancelled = true; };
-  }, [steamData?.linked]);
 
   // Stats overview (по периоду)
   useEffect(() => {
@@ -490,53 +460,6 @@ export default function PlayerDashboard() {
       {!isLinked && (
         <div className="alert alert-error mb-20">
           Steam не привязан. <Link to="/settings">Привяжите аккаунт</Link> для получения статистики.
-        </div>
-      )}
-
-      <DotaPrivacyBanner
-        steamData={steamData}
-        onRefreshed={(data) => data && setSteamData((prev: any) => ({ ...(prev || {}), ...data, linked: true }))}
-      />
-
-      {isLinked && syncStatus?.scheduled && (syncStatus.status === 'queued' || syncStatus.status === 'running') && (
-        <div
-          className={`alert sync-alert mb-20 ${syncCollapsed ? 'sync-alert--collapsed' : ''}`}
-          style={{ background: 'var(--accent-bg)', border: '1px solid var(--accent)', color: 'var(--text-primary)' }}
-        >
-          <div className="sync-alert-head">
-            <strong>Загружаем данные Dota.</strong>
-            <button
-              type="button"
-              className="sync-alert-toggle"
-              onClick={() => setSyncCollapsed((v) => !v)}
-              aria-label={syncCollapsed ? 'Развернуть' : 'Свернуть'}
-              title={syncCollapsed ? 'Показать прогресс' : 'Свернуть'}
-            >
-              {syncCollapsed ? <IconChevronDown size={16} /> : <IconChevronUp size={16} />}
-            </button>
-          </div>
-          {!syncCollapsed && (
-            <div className="sync-alert-body">
-              {syncStatus.message || 'Догружаем матчи и детальные события в фоне.'}
-              {typeof syncStatus.fetched_matches === 'number' && (
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                  Загружено матчей: {syncStatus.fetched_matches.toLocaleString('ru-RU')}
-                  {typeof syncStatus.planned_fetch_matches === 'number'
-                    ? ` из ${syncStatus.planned_fetch_matches.toLocaleString('ru-RU')} запланированных`
-                    : ''}
-                  {syncStatus.status === 'running' ? ' · выполняется' : ''}
-                </div>
-              )}
-              {typeof syncStatus.parse_requested === 'number' && (
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                  На детальный разбор запланировано: {syncStatus.parse_requested.toLocaleString('ru-RU')}
-                  {typeof syncStatus.planned_parse_matches === 'number'
-                    ? ` / ${syncStatus.planned_parse_matches.toLocaleString('ru-RU')}`
-                    : ''}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 

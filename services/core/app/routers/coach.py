@@ -225,19 +225,8 @@ def list_coaches(
         if role and role not in effective_roles:
             continue
         rating_agg = rating_by_coach.get(c.id, {})
-        # Students' winrate delta: real measurement requires before/after WR
-        # per student, which we don't track historically yet. Until that
-        # pipeline exists, derive a stable, plausibly-ranged value from the
-        # coach's own review rating + completed sessions so the catalog can
-        # surface "+X% WR after training" without flickering between renders.
         sessions_done = sessions_by_coach.get(c.id, 0)
         avg_r = rating_agg.get("avg_rating")
-        wr_delta: Optional[float] = None
-        if sessions_done > 0 and avg_r is not None:
-            # Map rating 4.0–5.0 -> +3..+12% WR; mute when sessions thin.
-            base = max(0.0, (float(avg_r) - 4.0) * 9.0 + 3.0)
-            confidence = min(1.0, sessions_done / 20.0)
-            wr_delta = round(base * confidence, 1)
         enriched.append({
             "id": c.id,
             "core_user_id": c.core_user_id,
@@ -258,7 +247,9 @@ def list_coaches(
             "sessions_completed": sessions_done,
             "avg_rating": avg_r,
             "reviews_count": rating_agg.get("reviews_count", 0),
-            "students_winrate_delta_pct": wr_delta,
+            # We do not invent before/after WR. The coach dashboard exposes
+            # real current student winrate from ML summaries instead.
+            "students_winrate_delta_pct": None,
         })
     return enriched
 
@@ -392,20 +383,28 @@ async def coach_students_overview(
             continue
 
         analysis_summary = None
-        # Try to pull a lightweight ML analysis summary when we already have
-        # an ml_analysis_id cached. This reuses the same pipeline as the
-        # player's own dashboard, so numbers match.
-        if profile.ml_analysis_id:
-            try:
-                async with httpx.AsyncClient(timeout=6.0) as client:
+        try:
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                if profile.dota_account_id:
+                    resp = await client.get(
+                        f"{settings.ML_SERVICE_URL}/ml/analyze-player/{profile.dota_account_id}",
+                        params={"player_profile_id": profile.id, "mode": "all", "period": "50"},
+                        headers=ml_headers(),
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json() or {}
+                        analysis_summary = data.get("summary")
+                        if data.get("ml_analysis_id") and not profile.ml_analysis_id:
+                            profile.ml_analysis_id = data["ml_analysis_id"]
+                elif profile.ml_analysis_id:
                     resp = await client.get(
                         f"{settings.ML_SERVICE_URL}/ml/player-analysis/{profile.ml_analysis_id}",
                         headers=ml_headers(),
                     )
-                if resp.status_code == 200:
-                    analysis_summary = (resp.json() or {}).get("summary")
-            except httpx.RequestError as exc:
-                logger.warning("Failed to fetch analysis for %s: %s", profile.id, exc)
+                    if resp.status_code == 200:
+                        analysis_summary = (resp.json() or {}).get("summary")
+        except httpx.RequestError as exc:
+            logger.warning("Failed to fetch analysis for %s: %s", profile.id, exc)
 
         students.append({
             "player_profile_id": profile.id,
@@ -420,6 +419,23 @@ async def coach_students_overview(
             "analysis_summary": analysis_summary,
         })
 
+    db.commit()
+
+    winrates = [
+        float((s.get("analysis_summary") or {}).get("winrate"))
+        for s in students
+        if isinstance((s.get("analysis_summary") or {}).get("winrate"), (int, float))
+    ]
+    mmrs = [
+        int((s.get("analysis_summary") or {}).get("estimated_mmr"))
+        for s in students
+        if isinstance((s.get("analysis_summary") or {}).get("estimated_mmr"), (int, float))
+    ]
+    games = [
+        int((s.get("analysis_summary") or {}).get("games_analyzed") or 0)
+        for s in students
+    ]
+
     # Stable order: upcoming sessions first, then by completed count desc.
     students.sort(key=lambda s: (
         s["next_planned_at"] is None,
@@ -427,4 +443,14 @@ async def coach_students_overview(
         -s["sessions_completed"],
     ))
 
-    return {"coach_profile_id": coach_profile.id, "students": students}
+    return {
+        "coach_profile_id": coach_profile.id,
+        "students": students,
+        "summary": {
+            "students_total": len(students),
+            "students_with_game_stats": len(winrates),
+            "avg_student_winrate": round(sum(winrates) / len(winrates), 3) if winrates else None,
+            "avg_student_mmr": round(sum(mmrs) / len(mmrs)) if mmrs else None,
+            "student_games_analyzed": sum(games),
+        },
+    }

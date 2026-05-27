@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 
-export const PRIVACY_VERSION = '2026-04-24';
+export const PRIVACY_VERSION = '2026-05-26';
 
 export default function Privacy() {
   return (
@@ -15,7 +15,7 @@ export default function Privacy() {
 
         <h2 style={{ fontSize: '1.1rem', marginTop: 18 }}>1. Кто обрабатывает данные</h2>
         <p className="text-muted">
-          Оператор — проект RuPrime (<a href="https://ru-prime.ru">ru-prime.ru</a>). Контакт для вопросов по данным: <a href="mailto:support@ru-prime.ru">support@ru-prime.ru</a>.
+          Оператор — самозанятый Зигора Григорий Игоревич, ИНН 230910452370, проект RuPrime (<a href="https://ru-prime.ru">ru-prime.ru</a>). Контакт для вопросов по данным: <a href="mailto:support@ru-prime.ru">support@ru-prime.ru</a>.
         </p>
 
         <h2 style={{ fontSize: '1.1rem', marginTop: 18 }}>2. Какие данные мы собираем</h2>
@@ -39,11 +39,12 @@ export default function Privacy() {
         </ul>
 
         <p className="text-muted" style={{ marginTop: 10 }}>
-          <strong>2.3. Данные из OpenDota API</strong> (только при активной опции «Expose Public Match Data» в клиенте Dota 2):
+          <strong>2.3. Данные из OpenDota API и STRATZ API</strong> (только при активной опции «Expose Public Match Data» в клиенте Dota 2):
         </p>
         <ul className="text-muted" style={{ paddingLeft: 22, lineHeight: 1.8 }}>
           <li>Dota account_id, ранг и оценка MMR;</li>
-          <li>статистика матчей (герой, позиция, GPM/XPM/KDA, длительность, результат);</li>
+          <li>статистика матчей (герой, позиция/роль, GPM/XPM/KDA, длительность, результат);</li>
+          <li>обогащённые игровые события последних матчей: предметы, тайминги, варды, участие в драках, экономика по ходу матча и похожие игровые метрики, если внешний источник их отдаёт;</li>
           <li>агрегаты (lifetime-игры, средние показатели, процент побед).</li>
         </ul>
 
@@ -54,7 +55,7 @@ export default function Privacy() {
         <h2 style={{ fontSize: '1.1rem', marginTop: 18 }}>3. Зачем мы это собираем</h2>
         <ul className="text-muted" style={{ paddingLeft: 22, lineHeight: 1.8 }}>
           <li>Аутентификация и защита аккаунта (логин, пароль, сессии, IP/UA).</li>
-          <li>Построение персональной аналитики игры и вычисление оценки навыков.</li>
+          <li>Построение персональной аналитики игры, STRATZ/OpenDota-обогащения матчей и вычисление оценки навыков.</li>
           <li>Подбор тренеров под профиль пользователя.</li>
           <li>Отображение тренерам ник и ранг учеников, с которыми назначены сессии.</li>
           <li>Улучшение алгоритмов и отладка — обезличенно, без передачи третьим лицам.</li>
@@ -68,7 +69,7 @@ export default function Privacy() {
           4.2. Часть данных о вашей игре (ник Steam, ранг, оценка навыков, выбранные цели) видна тренерам, с которыми у вас назначены или завершены сессии — это часть сервиса подбора.
         </p>
         <p className="text-muted">
-          4.3. Запросы к внешним API (Valve Steam Web API, OpenDota) выполняет наш серверный бэкенд. Они могут видеть ваш SteamID64 и account_id как параметры запроса; действуют их собственные политики конфиденциальности: <a href="https://store.steampowered.com/privacy_agreement/" target="_blank" rel="noreferrer">Steam</a>, <a href="https://www.opendota.com/privacy" target="_blank" rel="noreferrer">OpenDota</a>.
+          4.3. Запросы к внешним API (Valve Steam Web API, OpenDota, STRATZ) выполняет наш серверный бэкенд. Они могут видеть ваш SteamID64, Dota account_id или match_id как параметры запроса; действуют их собственные политики конфиденциальности: <a href="https://store.steampowered.com/privacy_agreement/" target="_blank" rel="noreferrer">Steam</a>, <a href="https://www.opendota.com/privacy" target="_blank" rel="noreferrer">OpenDota</a>, <a href="https://stratz.com/privacy" target="_blank" rel="noreferrer">STRATZ</a>.
         </p>
 
         <h2 style={{ fontSize: '1.1rem', marginTop: 18 }}>5. Как долго мы храним данные</h2>

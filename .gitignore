@@ -8,10 +8,10 @@ __pycache__/
 .DS_Store
 .pytest_cache/
 *.sql
-notebooks/.ipynb_checkpoints/
-notebooks/features_comparison.png
-# Large dataset exports + private review docs that don't belong in the repo.
-notebooks/data/
+# Local research notebooks — never commit to GitHub
+notebooks/
+# Deploy/demo helpers — local only, not for public repo
+scripts/
 .jupyter_cfg/
 docs/Рецензия*
 docs/amark05.pdf
